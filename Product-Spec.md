@@ -1,6 +1,6 @@
 # 产品需求规范：Clone Studio（暂定名）
 
-> 版本 v1.2 · 2026-09-19 · 内核：Hypit 0.2.6（本地副本 `hypit-main/`）· 技术调研见 `Hypit-Research.md`
+> 版本 v1.4 · 2026-09-19 · 内核：Hypit 0.2.6（本地副本 `hypit-main/`）· 技术调研见 `Hypit-Research.md`
 
 ## 0. AI 使用说明
 
@@ -63,6 +63,7 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 | SCOPE-010 | 设置页：环境体检、生成服务凭据（TokenDance 为主，HypiHub 可选）、限额、并发 | P0 | |
 | SCOPE-011 | 花费台账：每条成片与每个 Agent 任务的花费记录 | P0 | 嵌在成片/任务详情里，不做独立报表页 |
 | SCOPE-012 | 对话式精修：和 Agent 对话改某条成片的 SVML 并重出 | P1 | 二期；v1 只留"打回意见"这种单向输入 |
+| SCOPE-015 | 生视频通道切换：TokenDance、MiniMax H3 云端直连、MiniMax H3 本地 ComfyUI、即梦会员 CLI（Seedance）四个通道可选；模板验货时可换通道重出复刻片对比版本，选定为模板默认，变体沿用，单条可换通道重出 | 机制 + TokenDance + MiniMax 云端为 P0；ComfyUI 与即梦 CLI 为 P1 | 不做并排多模型同出；见 REQ-012 |
 | SCOPE-014 | Codex 订阅生图 Provider：自写一个 Hypit Provider 包，经本机 Codex CLI 的 `$imagegen`（gpt-image-2）用订阅额度出图，替代按量付费的生图接口 | P1 | 见 REQ-011 |
 | SCOPE-013 | Agent 模型切换：设置页维护"模型档案"，默认本机 Claude Code 订阅，可切到 DeepSeek / 豆包 / Gemini / ChatGPT 等经 Anthropic 兼容端点接入的模型 | P0 | 只认 API key，不认这几家的聊天订阅；见 REQ-010 |
 
@@ -74,7 +75,8 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 | OUT-002 | 部署到服务器、远程访问、Electron 打包 | v1 只跑 localhost |
 | OUT-003 | 网页内时间轴/SVML 可视化编辑器 | Hypit Studio 写接口限 localhost 同源，重写一层 UI 工期过大 |
 | OUT-004 | 客户门户、成片分享链接、审片批注 | 客户只拿成片文件 |
-| OUT-005 | TokenDance、HypiHub 之外的生成 Provider（HiAPI / Pollo / Monid）配置界面 | 用户已订阅 TokenDance；HypiHub 作可选补充 |
+| OUT-005 | HiAPI / Pollo / Monid 等未列入 REQ-011、REQ-012 的生成 Provider 配置界面 | 用户实际在用的通道已覆盖 |
+| OUT-008 | 同一镜头多模型同时出片并排对比、逐镜头选优 | 用户明确只要能切换；对比靠验货页的复刻片版本切换 |
 | OUT-006 | 自动发布到抖音/TikTok/YouTube 等平台 | 与复刻出片无关 |
 | OUT-007 | 独立的花费统计报表、导出账单 | 台账够用，报表是运营需求 |
 
@@ -461,6 +463,48 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 - [ ] AC-032: Given Codex 正常退出但未产出图片, when Provider 检查产物, then 该请求判失败并带 JSONL 末段原文，不产生空图。
 - [ ] AC-033: Given Codex 未登录, when 打开设置页, then 体检该项未通过并提示执行 `codex login`，Provider 开关不可启用。
 
+### REQ-012: 生视频通道切换
+
+**优先级：** 机制、TokenDance、MiniMax 云端为 P0；ComfyUI 本地、即梦 CLI 为 P1　**关联任务：** TASK-002、TASK-003、TASK-004　**关联流程：** FLOW-002、FLOW-003
+
+**用途：** 用户手上有多条生视频的路，成本和效果各不相同，要能按模板选定、按单条更换，并在验货时比出哪条路适合这个模板。
+
+**通道：**
+
+| 通道 | 模型 | 接法 | 计费 | 优先级 |
+|---|---|---|---|---|
+| TokenDance | Seedance 2.0/2.5、MiniMax H3 | Hypit 自带 Provider | 按量 | P0 |
+| MiniMax 云端直连 | MiniMax H3 | 自写 Provider，调 MiniMax 官方视频生成 API（提交任务 → 轮询 → 取文件），key 走 env 注入 | 按量 | P0 |
+| MiniMax 本地 ComfyUI | MiniMax H3 | 自写 Provider，调本机 ComfyUI HTTP 接口提交工作流、轮询、取产物 | 零价，记次数、步数与耗时 | P1，依据 `docs-inbox/minimax-h3-comfyui.md` |
+| 即梦会员 CLI | Seedance | 自写 Provider，一请求 spawn 一次 CLI，同 REQ-011 的做法 | 消耗即梦积分，美元计价为 $0，台账记次数与积分消耗 | P1，依据 `docs-inbox/即梦CLI-dreamina使用文档.md`，CLI 名为 `dreamina` |
+
+**行为：**
+- 设置页"生视频通道"分区：每个通道一行，启用开关、凭据或地址、"测试"按钮、已验证时间；可设全局默认通道。
+- 模板有"默认生视频通道"，新模板取全局默认。③验货 的"重出复刻片"可选通道，产生新的复刻片版本；版本切换控件上标出该版本所用通道与花费，用已有的并排播放器逐版与原片比。点"通过验货"时把当前版本的通道存为模板默认。
+- ④变体 提交区显示并可改本批次通道，默认取模板默认。单条成片的"重试出片"可换通道。
+- 换通道的两种情形：同一模型换通道（如 MiniMax H3 在 TokenDance、云端直连、本地之间换）只改后端生成的 runtime `bindings`，不动 SVML、不烧 Agent；跨模型换通道（Seedance ↔ MiniMax H3）需要改 SVML 的生视频节点，由后端 resume 该条的 Agent 会话执行一次"改用某模型"的短任务，check 通过后再过花钱闸门。界面在用户选择跨模型通道时明说"需要 Agent 改稿，约数分钟"。
+
+**规则：**
+- MUST 每次 build 记录所用通道与模型；台账、成片卡片、版本切换控件可见。
+- MUST 估价闸门按所选通道计价；零价通道照常走闸门但估价为 $0，仍记次数。
+- MUST 通道未启用或未验证时不可选，并给出原因。
+- MUST 自写 Provider 放 `clone-studio/providers/`，不动 `hypit-main/`；各自带不发真实请求的生命周期测试。
+- MUST 本地 ComfyUI 通道并发固定 1（全机一把 GPU 锁），且与本地 WhisperX 转写互斥排队。
+- MUST 本地 ComfyUI 的超时按片长算：`max(30 分钟, 请求秒数 × 6 分钟)`，上限 120 分钟，可配（实测 RTX 5060 Ti、20 步：6.6 秒段约 23 分钟，9.4 秒段 41-44 分钟，10.1 秒段约 47 分钟）。超时后只停止轮询并标"超时待查"，不得重新提交；界面提供"继续等待"与"取消本地任务"。
+- MUST 本地 ComfyUI 提交前把工作流图落盘；没拿到 prompt_id 时不重发，按指纹（提示词、seed、filename_prefix、全部 LoadImage 文件名）到 `/queue` 与 `/history` 找回，命中多条则报错交人；ComfyUI 重启导致历史丢失时明确提示"本地服务断开，需要重新生成"，由用户决定。取消时 `POST /queue` 删除与 `POST /interrupt` 两个都调。
+- MUST 本地 ComfyUI 的输入校验：仅 768p（短边 768、长边对齐 32、面积 ≤ 768×1344），不支持 2K；时长 4-15 秒，帧数按 24fps 吸附到 17k+5；提示词 ≤ 7000 字符，超了拒绝不截断；R2V 接 1-9 张参考图，FL2VA 恰好首尾两张。下载后必须验真（可被 ffprobe 读取、时长与帧格相符）。
+- MUST 即梦通道按文档走异步：提交得 `submit_id` → `query_result` 轮询 `gen_status` → `--download_dir` 取片；参数在提交前本地严格校验；`AigcComplianceConfirmationRequired` 判为"需先在网页端授权该模型"并原样提示，不重试；`ExceedConcurrencyLimit` / `ret=1310` 判为限流，退避重试；解析输出取第一个 `{` 到最后一个 `}`。登录只能由用户手动完成设备码确认，应用不代登；体检用 `dreamina user_credit` 显示账号、会员等级与剩余积分；Seedance 2.5 仅 VIP 可选。
+- MUST 把当前已启用通道及各自支持的模型与限制（时长、分辨率、是否接受真人脸参考、是否带声音）写进 Agent 系统提示。
+- MUST 即梦 CLI 与 ComfyUI 两个通道只按 `docs-inbox/` 里的使用文档实现；文档标注【未验证】的能力（真人照片参考、15 秒段、Turbo 提速）在界面与 Agent 系统提示里同样标"未验证"，不当作已支持。
+- MUST 删除路径：通道凭据可清除；停用通道不影响历史记录的显示。
+
+**验收标准：**
+- [ ] AC-034: Given TokenDance 与 MiniMax 云端均已验证, when 在 ③验货 选 MiniMax 云端重出复刻片, then 产生新版本，版本控件显示其通道与花费，未启动任何 Agent 任务（同为 MiniMax H3 时）。
+- [ ] AC-035: Given 模板 SVML 用的是 MiniMax H3, when 重出时选 Seedance 通道, then 界面提示需要 Agent 改稿，确认后 resume 原会话改节点、check 通过、过闸门后出片。
+- [ ] AC-036: Given 验货通过时当前版本通道为 X, when 进入 ④变体, then 批次通道默认是 X，可改。
+- [ ] AC-037: Given 某通道未验证, when 打开任一通道下拉, then 该项置灰并显示原因。
+- [ ] AC-038: Given 一条成片先后用两个通道各出过一次, when 查看花费明细, then 两次 build 分别列出通道、模型、估价与实际。
+
 ### AI 能力规格
 
 | AI 功能 | 能力类型 | 质量条 | 触发方式 | 不确定时 | 服务降级 |
@@ -485,13 +529,14 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 | 实体 | 描述 | 关键字段 |
 |---|---|---|
 | Client | 客户 | id, name, created_at |
-| Template | 一条参考视频及其复刻模板 | id, client_id, name, language, source_kind(file/url), source_url, workspace_path, status(importing/cloning/awaiting_review/approved/failed), note |
+| Template | 一条参考视频及其复刻模板 | id, client_id, name, language, default_video_channel, source_kind(file/url), source_url, workspace_path, status(importing/cloning/awaiting_review/approved/failed), note |
 | Production | 一条要出的片：复刻片或变体 | id, template_id, kind(replica/variant), batch_id, brief, name, status, run_path, version |
 | Batch | 一次批量提交 | id, template_id, note, target_language, budget_usd, spent_usd |
 | AgentJob | 一次 Agent 会话 | id, owner(template/production), session_id, status, started_at, ended_at, cost_usd, cost_is_estimate, stop_reason, profile_name, model_id（后两项为快照，不随档案删除而变） |
 | ModelProfile | Agent 模型档案 | id, name, kind(subscription/anthropic/compatible), base_url, token(加密存配置文件，不入库明文), model_id, fast_model_id, supports_vision, supports_web_search, price_in, price_out, verified_at, is_default, builtin |
 | AgentMessage | Agent 流式消息 | id, job_id, seq, role, type, payload |
-| Build | 一次 hypit build | id, production_id, hypit_build_id, estimate_usd, actual_usd, status, error_code, error_message, output_path |
+| VideoChannel | 生视频通道配置 | id, kind(tokendance/minimax_cloud/minimax_comfyui/jimeng_cli), enabled, config(地址等，凭据存 secrets.json), verified_at, is_default |
+| Build | 一次 hypit build | id, production_id, video_channel, video_model, hypit_build_id, estimate_usd, actual_usd, status, error_code, error_message, output_path |
 | Asset | 变体条目素材 | id, production_id, file_path, source_url, replaced_by_user |
 | Settings | 单例配置 | 见 REQ-008 |
 
@@ -526,6 +571,9 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 | DEP-012 | LiteLLM 代理（用户自起） | 把 Gemini / OpenAI 转成 Anthropic Messages 格式 | No | 本应用不内置；经代理时 WebSearch 工具不可用 |
 | DEP-005 | TokenDance API key（`https://tokendance.space`，用户已订阅） | Seedance 视频、Seedream 生图、MiniMax H3 视频 | 出片必需 | 不含配音 TTS 与 GPT Image；Seedance 2.0/2.5 拒绝含真人脸的参考图/视频 |
 | DEP-013 | HypiHub（`https://hypit.ai`） | 补 TokenDance 没有的能力：TTS、GPT Image 等 | No | 无需找 key 页面：`hypit auth login hypihub.default` 走浏览器 OAuth 授权；也可 `--from <key 文件>` 导入静态 key |
+| DEP-015 | MiniMax 官方视频生成 API + 用户已开通的 API key | REQ-012 云端直连通道 | No | 开发前联网核对当前接口与 H3 模型名 |
+| DEP-016 | 本机 ComfyUI（已安装，含 MiniMax H3 工作流） | REQ-012 本地通道 | No | P1，接口以用户另一项目出的使用文档为准 |
+| DEP-017 | 即梦 / Dreamina 会员 + 命令行工具 | REQ-012 即梦通道 | No | P1，CLI 名称与用法待用户提供 |
 | DEP-014 | 本机 Codex CLI ≥0.128（本机 0.153.4）+ ChatGPT 订阅登录 | REQ-011 订阅生图 | No | P1；无需 API key |
 | DEP-006 | ffmpeg + ffprobe | 媒体处理与编码 | Yes | |
 | DEP-007 | uv | Hypit 的 Python 服务环境 | Yes | |

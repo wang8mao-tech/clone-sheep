@@ -3,7 +3,7 @@
 > 本文件记录项目的开发阶段划分、当前进度和剩余工作。
 > 新 session 启动时应首先阅读此文件，了解项目状态后再继续开发。
 >
-> 依据：Product-Spec.md v1.2、Design-Brief.md v1.0、设计稿 https://claude.ai/artifact/7DWGBWDbka6Wm71vV6TBbH（7 屏，UI 以设计稿为准）、Hypit-Research.md、用户提供的《Codex 生图配置说明》（不随仓库分发，要点已写入 Spec REQ-011）。
+> 依据：Product-Spec.md v1.4、Design-Brief.md v1.0、设计稿 https://claude.ai/artifact/7DWGBWDbka6Wm71vV6TBbH（7 屏，UI 以设计稿为准）、Hypit-Research.md、用户提供的《Codex 生图配置说明》（不随仓库分发，要点已写入 Spec REQ-011）。
 > 代码目录：`clone-studio/`（pnpm workspace：`server/`、`web/`、`providers/`）。`hypit-main/` 只读，不得修改。
 
 ## 总体架构
@@ -13,7 +13,7 @@
 - `providers/codex-image/`：项目自有的 Hypit Provider 包，经 `--package-root` 挂给 hypit。
 - 数据根目录（默认 `%LOCALAPPDATA%\CloneStudio`）：`app.db`、`secrets.json`、`clients/<id>/templates/<id>/`（每个模板一个 Hypit 工程目录，变体在其 `productions/<id>/`）。
 
-功能依赖：骨架与库 → hypit 调用层与体检 → 归档 → 导入 → Agent 运行器 → 复刻与估价闸门 → 出片与验货 → 变体与素材审核 → 成片库与台账 → 模型档案 → Codex 生图 → 可靠性收尾。Agent 运行器与花钱闸门是最大风险，排在前半段。
+功能依赖：骨架与库 → hypit 调用层与体检 → 归档 → 导入 → Agent 运行器 → 复刻与估价闸门 → 出片与验货 → 变体与素材审核 → 成片库与台账 → 模型档案 → Codex 生图 → 生视频通道 → 可靠性收尾。Agent 运行器与花钱闸门是最大风险，排在前半段。
 
 ---
 
@@ -270,7 +270,34 @@
 
 ---
 
-## Phase 12: 可靠性收尾与端到端验收
+## Phase 12: 生视频通道切换（REQ-012）
+
+**交付内容**：
+- 创建 `video_channels` 表；`templates` 加 `default_video_channel`，`builds` 加 `video_channel`、`video_model`（migration）
+- 实现通道注册表与 runtime profile 生成：按所选通道写 endpoints 与 `bindings`；同模型换通道只改 bindings
+- 实现跨模型换通道：resume 该条 Agent 会话执行"改用某模型"短任务 → check → 过闸门
+- 联网核对 MiniMax 官方视频生成 API 后，写 `minimax-cloud` Provider（提交、轮询、取文件、pricing、错误原文保留、不发真实请求的生命周期测试）
+- 设置页"生视频通道"分区；③验货 重出复刻片、④变体 提交区、成片重试出片的通道下拉；版本控件与花费明细显示通道
+- 按 `docs-inbox/minimax-h3-comfyui.md` 写 `minimax-comfyui` Provider：上传 → 提交 → 轮询 → 取视频 → 验真；R2V 与 FL2VA 两种工作流图；GPU 锁并发 1、与 WhisperX 互斥；超时按片长算且超时不重提；工作流落盘与指纹找回；重启丢历史的明确提示；取消双接口；假 fetch 回放的生命周期测试含三条失败路径
+- 按 `docs-inbox/即梦CLI-dreamina使用文档.md` 写 `jimeng-cli` Provider：`dreamina` 提交 → `query_result` 轮询 → 下载；提交前本地校验时长/分辨率/比例；授权与限流两类错误分别处理；体检读 `user_credit`；台账记积分消耗
+- 文档标【未验证】的能力在界面与 Agent 系统提示里标"未验证"
+- 把已启用通道及其模型限制写进 Agent 系统提示
+
+**关键文件**：
+- `clone-studio/server/src/video/channels.ts` — 通道注册表、可用性与限制描述
+- `clone-studio/server/src/routes/video-channels.ts`
+- `clone-studio/server/src/hypit/workspace.ts` — 修改：按通道生成 bindings
+- `clone-studio/server/src/services/switch-model.ts` — 跨模型换通道的 Agent 短任务
+- `clone-studio/providers/minimax-cloud/src/provider.ts`、`providers/minimax-cloud/src/activation.ts`
+- `clone-studio/providers/minimax-comfyui/src/provider.ts`、`clone-studio/providers/jimeng-cli/src/provider.ts` — 依据 docs-inbox/ 两份文档
+- `clone-studio/web/src/pages/settings/VideoChannels.tsx`、`web/src/components/ChannelSelect.tsx`
+
+**验收标准**：
+- AC-034 至 AC-038 通过；四个通道的 Provider 生命周期测试全部通过；本地 ComfyUI 与即梦两个通道各用真实环境出过至少一段视频，或在报告里写明因何未能实测
+
+---
+
+## Phase 13: 可靠性收尾与端到端验收
 
 **交付内容**：
 - 崩溃恢复全链路复测：杀后端、断电式重启后任务标"中断"可继续，无孤儿子进程
@@ -325,6 +352,7 @@
 | `builds` | Phase 1 | 每次出片的估价、实际、hypit build-id、错误 |
 | `assets` | Phase 1 | 变体素材、来源 URL、是否用户替换 |
 | `hypit_calls` | Phase 2 | 每次 hypit 调用的命令、退出码、JSON 输出 |
+| `video_channels` | Phase 12 | 生视频通道配置（凭据存 secrets.json） |
 | `model_profiles` | Phase 10 | Agent 模型档案（token 存 secrets.json，不入库） |
 
 ## 已知风险

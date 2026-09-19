@@ -1,0 +1,29 @@
+# 第三方内核：自行 clone https://github.com/hypit-ai/hypit 到 hypit-main/
+hypit-main/
+README.zh-CN.md
+
+# 本机私有：权限白名单含本机路径；进化队列含其它项目的对话原文
+.claude/settings.local.json
+.claude/evolution/signals.jsonl
+.claude/evolution/proposals.md
+
+# 密钥与运行数据，永不入库
+secrets.json
+*.key
+*.pem
+.env
+.env.*
+!.env.example
+api_keys.json
+**/.codex/
+app.db
+app.db-*
+
+# 构建与依赖
+node_modules/
+dist/
+.hypit/
+.venv/
+*.log
+.DS_Store
+Thumbs.db

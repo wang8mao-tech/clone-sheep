@@ -1,0 +1,71 @@
+import "@testing-library/jest-dom/vitest";
+import { afterEach, vi } from "vitest";
+import { cleanup } from "@testing-library/react";
+
+/**
+ * jsdom 的补丁层。
+ *
+ * jsdom 30 实测缺这几样：HTMLDialogElement.showModal / EventSource /
+ * matchMedia / scrollIntoView。下面是补丁，不是真实现——**补丁覆盖到的行为
+ * 不算被测过**：弹窗真正的模态性、焦点陷阱、Esc 关闭都由浏览器负责，
+ * 这里只能验"该开的时候开了、该拿到的回调拿到了"。真模态行为要靠真机看。
+ */
+
+// ── <dialog>：jsdom 不实现 showModal/close，只好自己维护 open 属性 ──
+if (typeof HTMLDialogElement !== "undefined" && !HTMLDialogElement.prototype.showModal) {
+  HTMLDialogElement.prototype.showModal = function showModal(this: HTMLDialogElement): void {
+    this.open = true;
+  };
+  HTMLDialogElement.prototype.show = function show(this: HTMLDialogElement): void {
+    this.open = true;
+  };
+  HTMLDialogElement.prototype.close = function close(this: HTMLDialogElement, returnValue?: string): void {
+    this.open = false;
+    if (returnValue !== undefined) this.returnValue = returnValue;
+    this.dispatchEvent(new Event("close"));
+  };
+}
+
+// ── matchMedia：DesktopOnlyGate 拿它判视口。默认回 false＝视口够宽，
+//    组件测试才不会被那道闸门挡在外面 ──
+if (typeof window.matchMedia !== "function") {
+  window.matchMedia = (query: string): MediaQueryList =>
+    ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    }) as unknown as MediaQueryList;
+}
+
+// ── EventSource：useSse 会 new 一个。这里只给个不连接的空壳，
+//    SSE 的真实行为（断线重连、补发）不在组件测试的射程内 ──
+if (typeof globalThis.EventSource === "undefined") {
+  class FakeEventSource extends EventTarget {
+    static readonly CONNECTING = 0;
+    static readonly OPEN = 1;
+    static readonly CLOSED = 2;
+    readonly readyState = 0;
+    onmessage: ((e: MessageEvent) => void) | null = null;
+    onerror: ((e: Event) => void) | null = null;
+    onopen: ((e: Event) => void) | null = null;
+    constructor(readonly url: string) {
+      super();
+    }
+    close(): void {}
+  }
+  globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+}
+
+if (typeof Element.prototype.scrollIntoView !== "function") {
+  Element.prototype.scrollIntoView = function scrollIntoView(): void {};
+}
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});

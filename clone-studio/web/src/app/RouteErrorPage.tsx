@@ -7,11 +7,13 @@ import { Button } from "../components/ui/Button.js";
  * 挂在根路由的 errorElement 上时它会顶掉整个 <Shell/>（react-router 的机制如此），
  * 所以这里要把侧栏没了这件事说清楚，并给一条回得去的路，而不是只甩一个 404。
  */
-export function RouteErrorPage() {
+export function RouteErrorPage({ notFound: forceNotFound = false }: { notFound?: boolean } = {}) {
   const error = useRouteError();
   const navigate = useNavigate();
 
-  const notFound = isRouteErrorResponse(error) && error.status === 404;
+  // 通配路由用的是普通渲染而不是错误边界，useRouteError 在那里恒为 undefined，
+  // 不显式告诉它"这是找不到"的话，地址打错会说成"页面出错了"
+  const notFound = forceNotFound || (isRouteErrorResponse(error) && error.status === 404);
   const detail = isRouteErrorResponse(error)
     ? `${error.status} ${error.statusText}`
     : error instanceof Error

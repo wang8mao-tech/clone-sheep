@@ -10,10 +10,7 @@ export function HealthBanner({ failures }: { failures: readonly CheckResult[] })
   if (failures.length === 0) return null;
   const first = failures[0];
   return (
-    <div
-      role="status"
-      className="flex shrink-0 items-center gap-2 border-b border-warning/40 bg-warning/10 px-6 py-2"
-    >
+    <div role="status" className="flex shrink-0 items-center gap-2 border-b border-warning/40 bg-warning/10 px-6 py-2">
       <TriangleAlert aria-hidden className="size-4 shrink-0 text-warning" />
       <span className="flex-1 text-[13px] text-warning">
         {failures.length} 项环境体检未通过：{first ? `${first.name} ${first.detail}` : ""}，导入与出片暂不可用

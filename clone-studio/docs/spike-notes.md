@@ -113,12 +113,14 @@ preflight = { ok, capabilityCount, diagnosticCount, diagnostics }
   "ok": false,
   "capabilityCount": 3,
   "diagnosticCount": 1,
-  "diagnostics": [{
-    "severity": "error",
-    "code": "MANAGED_PROGRAM_DOWN",
-    "message": "hyperframes.local is not usable: Render browser is unavailable at ...chrome-headless-shell.exe: ENOENT... Prepare the selected Runtime with hypit runtime up --runtime <profile>, or correct its chromePath.",
-    "subject": "hyperframes.local"
-  }]
+  "diagnostics": [
+    {
+      "severity": "error",
+      "code": "MANAGED_PROGRAM_DOWN",
+      "message": "hyperframes.local is not usable: Render browser is unavailable at ...chrome-headless-shell.exe: ENOENT... Prepare the selected Runtime with hypit runtime up --runtime <profile>, or correct its chromePath.",
+      "subject": "hyperframes.local"
+    }
+  ]
 }
 ```
 
@@ -203,12 +205,12 @@ preflight = { ok, capabilityCount, diagnosticCount, diagnostics }
 Phase 0 的验收要"最小 Run 产出一个可播放 mp4"。本机三次尝试，本地渲染路径两次失败、
 形态还不一样：
 
-| 尝试 | 载体 | 结果 |
-|---|---|---|
-| 1 | `spike-one-part.svrun`（900 帧，`export-part-1.video`） | 渲染 900 帧全部完成，编码后校验失败：`Rendered visual frame rate differs from its document` |
-| 1b | 同上，原样重跑一次 | **同一错误逐字复现**（build `bld_20260920T013427044Z_62A6539AA7`），说明是确定性失败，不是偶发 |
-| 2 | `render.svrun`（4112 帧，example 自带、未经修改） | 跑到 3489/4112 帧时 CLI 崩：`Bad escaped character in JSON at position 144439` |
-| 3 | `get` 导出已有 Output | 成功，见上 |
+| 尝试 | 载体                                                    | 结果                                                                                           |
+| ---- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| 1    | `spike-one-part.svrun`（900 帧，`export-part-1.video`） | 渲染 900 帧全部完成，编码后校验失败：`Rendered visual frame rate differs from its document`    |
+| 1b   | 同上，原样重跑一次                                      | **同一错误逐字复现**（build `bld_20260920T013427044Z_62A6539AA7`），说明是确定性失败，不是偶发 |
+| 2    | `render.svrun`（4112 帧，example 自带、未经修改）       | 跑到 3489/4112 帧时 CLI 崩：`Bad escaped character in JSON at position 144439`                 |
+| 3    | `get` 导出已有 Output                                   | 成功，见上                                                                                     |
 
 排查到的事实：
 
@@ -278,12 +280,12 @@ SDK 版本 `@anthropic-ai/claude-agent-sdk@0.3.278`，模型 `claude-haiku-4-5`�
 
 每组的 `result` 消息都带真实数值，类型 `number`：
 
-| 组 | total_cost_usd | num_turns |
-|---|---|---|
-| A 继承本机设置 | 0.0193273 | 2 |
-| B SDK 隔离 + default 模式 | 0.014272 | 2 |
-| C 隔离 + 禁 Bash | 0.0479008 | 1 |
-| D resume C 会话 | 0.0518467 | 1 |
+| 组                        | total_cost_usd | num_turns |
+| ------------------------- | -------------- | --------- |
+| A 继承本机设置            | 0.0193273      | 2         |
+| B SDK 隔离 + default 模式 | 0.014272       | 2         |
+| C 隔离 + 禁 Bash          | 0.0479008      | 1         |
+| D resume C 会话           | 0.0518467      | 1         |
 
 `modelUsage` 同时给出按模型分组的用量，键为 `["claude-haiku-4-5-20251001", "claude-haiku-4-5"]`。SDK 类型定义对该字段的说明：
 
@@ -297,12 +299,12 @@ D 组花费 0.0518 > C 组 0.0479，与"resume 续上转录里保存的累计值
 
 这是本次验证最重要的发现。五组对照的实测结果：
 
-| 组 | 配置 | canUseTool 被调用 | Bash 是否执行 |
-|---|---|---|---|
-| A | 默认（继承 `~/.claude` 设置与 hooks） | 否 | **执行了** |
-| B | `settingSources: []` + `permissionMode: 'default'` | 否 | **执行了** |
-| C | B + `disallowedTools: ["Bash"]` | 否 | **仍然执行了** |
-| E | B + `disallowedTools: ["Bash", "Task"]` | 否 | 未执行 ✅ |
+| 组  | 配置                                               | canUseTool 被调用 | Bash 是否执行  |
+| --- | -------------------------------------------------- | ----------------- | -------------- |
+| A   | 默认（继承 `~/.claude` 设置与 hooks）              | 否                | **执行了**     |
+| B   | `settingSources: []` + `permissionMode: 'default'` | 否                | **执行了**     |
+| C   | B + `disallowedTools: ["Bash"]`                    | 否                | **仍然执行了** |
+| E   | B + `disallowedTools: ["Bash", "Task"]`            | 否                | 未执行 ✅      |
 
 三条事实：
 
@@ -389,4 +391,3 @@ thread_id 确实取自 JSONL 首条事件：`{"type":"thread.started","thread_id
 1. **不是 `gpt-image-2`（未验证）。** Codex 走的是内置 `image_gen` 工具，而非 CLI fallback。`~/.codex/skills/.system/imagegen/SKILL.md` 写明：内置工具模式是默认且不需要 `OPENAI_API_KEY`；`gpt-image-2` 是 **CLI fallback 的默认模型**。本次输出里没有任何字段暴露内置路径实际用的模型，所以 Spec REQ-011 "由提示词里的 `$imagegen`（底层 gpt-image-2）出图"中的括号部分应标【未验证】。
 2. **每次生图有固定 token 开销。** 本次 `input_tokens: 87692`（其中 71,296 命中缓存），因为 Codex 会先读一遍 `imagegen/SKILL.md` 再干活。一图一进程的做法下，这个开销每张图都要付一次。不影响"美元计价 $0"，但影响单张耗时。
 3. **内置模式的保存路径不可指定。** SKILL.md 明确："Do not describe or rely on a destination-path argument on the built-in `image_gen` tool. If a specific location is needed, generate first and then move or copy the selected output." 实测 Codex 正是先生成到 `$CODEX_HOME/generated_images/` 再用一条 PowerShell 命令复制到 `./images/`。这意味着 **Provider 的 `--sandbox workspace-write` 不能收紧到禁止执行命令**，否则拿不到图。
-

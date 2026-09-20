@@ -43,9 +43,7 @@ export function ClientPage() {
     return (
       <div className="flex flex-1 items-center justify-center p-6">
         <div className="flex flex-col items-center gap-4 text-center">
-          <p className="text-[13px] text-text-secondary">
-            {gone ? "这个客户已经不存在了。" : "读不到这个客户。"}
-          </p>
+          <p className="text-[13px] text-text-secondary">{gone ? "这个客户已经不存在了。" : "读不到这个客户。"}</p>
           {gone ? null : (
             <>
               <pre className="max-h-40 w-[420px] overflow-auto rounded-md border border-border bg-surface p-3 text-left font-mono text-caption whitespace-pre-wrap text-text-secondary">
@@ -143,64 +141,67 @@ export function ClientPage() {
                   />
                 </li>
               ) : (
-              <TaskRow
-                key={tpl.id}
-                href={`/clients/${clientId}/templates/${tpl.id}`}
-                openLabel={`打开模板 ${tpl.name}`}
-                lead={
-                  <div className="flex items-center gap-3">
-                    <TemplateDot status={tpl.status} />
-                    {/* 参考视频缩略帧：Phase 4 抽帧后才有内容，现在只占位 */}
-                    <span
-                      title={tpl.hasSource ? "参考视频已导入，缩略帧在证据准备后生成" : "还没有参考视频"}
-                      className="flex h-6 w-8 shrink-0 items-center justify-center rounded-sm border border-border bg-bg"
-                    >
-                      <Film
-                        aria-hidden
-                        className={`size-3 ${tpl.hasSource ? "text-text-secondary" : "text-text-tertiary/50"}`}
-                      />
-                    </span>
-                  </div>
-                }
-                title={<span className="text-text">{tpl.name}</span>}
-                columns={[
-                  { label: "成片", width: "4rem", numeric: true, content: tpl.stats.outputs },
-                  {
-                    label: "累计花费",
-                    width: "6rem",
-                    numeric: true,
-                    content: (
-                      // REQ-009 MUST：两类花费一律标"估"，不看 costIsEstimate 分支。
-                      // Q-003 已定死 build 后也拿不到实际金额，不存在"不是估算"的花费
-                      <span className="inline-flex items-center justify-end gap-1">
-                        {formatUsd(tpl.stats.totalCostUsd)}
-                        <Badge tone="warning" title="花费均为估算，以 Provider 侧为准">
-                          估
-                        </Badge>
+                <TaskRow
+                  key={tpl.id}
+                  href={`/clients/${clientId}/templates/${tpl.id}`}
+                  openLabel={`打开模板 ${tpl.name}`}
+                  lead={
+                    <div className="flex items-center gap-3">
+                      <TemplateDot status={tpl.status} />
+                      {/* 参考视频缩略帧：Phase 4 抽帧后才有内容，现在只占位 */}
+                      <span
+                        title={tpl.hasSource ? "参考视频已导入，缩略帧在证据准备后生成" : "还没有参考视频"}
+                        className="flex h-6 w-8 shrink-0 items-center justify-center rounded-sm border border-border bg-bg"
+                      >
+                        <Film
+                          aria-hidden
+                          className={`size-3 ${tpl.hasSource ? "text-text-secondary" : "text-text-tertiary/50"}`}
+                        />
                       </span>
-                    ),
-                  },
-                  {
-                    label: "最近活动",
-                    width: "6rem",
-                    numeric: true,
-                    content: formatActivityTime(tpl.stats.lastActivityAt),
-                  },
-                ]}
-                actions={
-                  <RowMenu
-                    label={`${tpl.name} 的操作`}
-                    items={[
-                      { label: "重命名", onSelect: () => beginEdit({ kind: "template", id: tpl.id, name: tpl.name }) },
-                      {
-                        label: "删除",
-                        tone: "danger",
-                        onSelect: () => void actions.askDelete("template", tpl.id, tpl.name),
-                      },
-                    ]}
-                  />
-                }
-              />
+                    </div>
+                  }
+                  title={<span className="text-text">{tpl.name}</span>}
+                  columns={[
+                    { label: "成片", width: "4rem", numeric: true, content: tpl.stats.outputs },
+                    {
+                      label: "累计花费",
+                      width: "6rem",
+                      numeric: true,
+                      content: (
+                        // REQ-009 MUST：两类花费一律标"估"，不看 costIsEstimate 分支。
+                        // Q-003 已定死 build 后也拿不到实际金额，不存在"不是估算"的花费
+                        <span className="inline-flex items-center justify-end gap-1">
+                          {formatUsd(tpl.stats.totalCostUsd)}
+                          <Badge tone="warning" title="花费均为估算，以 Provider 侧为准">
+                            估
+                          </Badge>
+                        </span>
+                      ),
+                    },
+                    {
+                      label: "最近活动",
+                      width: "6rem",
+                      numeric: true,
+                      content: formatActivityTime(tpl.stats.lastActivityAt),
+                    },
+                  ]}
+                  actions={
+                    <RowMenu
+                      label={`${tpl.name} 的操作`}
+                      items={[
+                        {
+                          label: "重命名",
+                          onSelect: () => beginEdit({ kind: "template", id: tpl.id, name: tpl.name }),
+                        },
+                        {
+                          label: "删除",
+                          tone: "danger",
+                          onSelect: () => void actions.askDelete("template", tpl.id, tpl.name),
+                        },
+                      ]}
+                    />
+                  }
+                />
               ),
             )}
           </ul>

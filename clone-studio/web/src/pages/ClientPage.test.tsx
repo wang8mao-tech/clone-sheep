@@ -56,7 +56,9 @@ describe("首页空状态（SCREEN-002）", () => {
     stubFetch(
       base({
         "POST /api/clients": { status: 201, body: { id: "new-client-id", name: "计生协会", createdAt: "x" } },
-        "/api/clients/new-client-id": { body: { client: { id: "new-client-id", name: "计生协会", createdAt: "x" }, templates: [] } },
+        "/api/clients/new-client-id": {
+          body: { client: { id: "new-client-id", name: "计生协会", createdAt: "x" }, templates: [] },
+        },
       }),
     );
     renderApp("/");
@@ -151,7 +153,10 @@ describe("客户页：模板紧凑行列表（CMP-002）", () => {
   it("客户不存在时说清楚，而不是空白", async () => {
     stubFetch(
       base({
-        [`/api/clients/${CLIENT_ID}`]: { status: 404, body: { error: { code: "CLIENT_NOT_FOUND", message: "客户不存在" } } },
+        [`/api/clients/${CLIENT_ID}`]: {
+          status: 404,
+          body: { error: { code: "CLIENT_NOT_FOUND", message: "客户不存在" } },
+        },
       }),
     );
     renderApp(`/clients/${CLIENT_ID}`);
@@ -298,9 +303,7 @@ describe("客户页：行尾菜单与删除", () => {
 
   /** Design-Brief 8.2：全部操作可键盘到达。行是链接，回车必须能进去 */
   it("键盘聚焦到行按回车能进模板页", async () => {
-    stubFetch(
-      withOne({ [`/api/templates/${TPL_A}`]: { body: { ...template(TPL_A, "足球榜单"), client } } }),
-    );
+    stubFetch(withOne({ [`/api/templates/${TPL_A}`]: { body: { ...template(TPL_A, "足球榜单"), client } } }));
     renderApp(`/clients/${CLIENT_ID}`);
 
     const row = await screen.findByRole("link", { name: "打开模板 足球榜单" });

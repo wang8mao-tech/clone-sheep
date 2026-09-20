@@ -25,10 +25,7 @@ async function main(): Promise<void> {
 
   const stale = markStaleRunningAsInterrupted();
   if (stale.jobs || stale.productions || stale.builds) {
-    app.log.warn(
-      { stale },
-      "上次退出时有未完成的任务，已标为中断",
-    );
+    app.log.warn({ stale }, "上次退出时有未完成的任务，已标为中断");
   }
 
   await app.register(systemRoutes);

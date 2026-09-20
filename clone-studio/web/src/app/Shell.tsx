@@ -43,11 +43,7 @@ export function Shell() {
   });
 
   // 后端整个不响应时，侧栏那条红条说的是同一件事，别让客户树再喊一遍
-  const sidebarError = health.isError
-    ? "后端未响应"
-    : clients.isError
-      ? (clients.error as Error).message
-      : undefined;
+  const sidebarError = health.isError ? "后端未响应" : clients.isError ? clients.error.message : undefined;
 
   return (
     <DesktopOnlyGate>

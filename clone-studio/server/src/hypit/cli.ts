@@ -130,7 +130,12 @@ export async function runHypit<T = unknown>(
   });
 
   if (timedOut) {
-    throw new HypitError("TIMEOUT", `hypit ${args.join(" ")} 超过 ${Math.round(timeoutMs / 1000)}s 未返回`, undefined, stderr);
+    throw new HypitError(
+      "TIMEOUT",
+      `hypit ${args.join(" ")} 超过 ${Math.round(timeoutMs / 1000)}s 未返回`,
+      undefined,
+      stderr,
+    );
   }
 
   if (!parsed.ok) {

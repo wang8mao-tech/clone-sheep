@@ -29,17 +29,16 @@ if (typeof HTMLDialogElement !== "undefined" && !HTMLDialogElement.prototype.sho
 // ── matchMedia：DesktopOnlyGate 拿它判视口。默认回 false＝视口够宽，
 //    组件测试才不会被那道闸门挡在外面 ──
 if (typeof window.matchMedia !== "function") {
-  window.matchMedia = (query: string): MediaQueryList =>
-    ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      addListener: () => {},
-      removeListener: () => {},
-      dispatchEvent: () => false,
-    }) as unknown as MediaQueryList;
+  window.matchMedia = (query: string): MediaQueryList => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  });
 }
 
 // ── EventSource：useSse 会 new 一个。这里只给个不连接的空壳，

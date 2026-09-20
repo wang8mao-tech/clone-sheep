@@ -155,7 +155,9 @@ function productionIdsOf(templateIds: readonly string[]): string[] {
   if (templateIds.length === 0) return [];
   const marks = templateIds.map(() => "?").join(", ");
   return (
-    db().prepare(`SELECT id FROM productions WHERE template_id IN (${marks})`).all(...templateIds) as Array<{
+    db()
+      .prepare(`SELECT id FROM productions WHERE template_id IN (${marks})`)
+      .all(...templateIds) as Array<{
       id: string;
     }>
   ).map((r) => r.id);

@@ -247,8 +247,7 @@ async function checkTokenDance(): Promise<CheckResult> {
   // 只"配置了"不等于"能用"：AC-023 要求 key 错时出片按钮保持禁用，
   // 所以这一项要看验证时间，没验证过一律算未过。
   const row = db().prepare("SELECT tokendance_verified_at AS at FROM settings WHERE id = 1").get() as
-    | { at: string | null }
-    | undefined;
+    { at: string | null } | undefined;
   const verifiedAt = row?.at ?? null;
   const ok = configured && verifiedAt !== null;
   return {

@@ -10,11 +10,7 @@ import { config, paths } from "../config.js";
  * - 接口只回打码值，明文只在 spawn 子进程时作为环境变量注入
  */
 export type SecretKey =
-  | "tokendance.apiKey"
-  | "hypihub.token"
-  | "minimax.apiKey"
-  | "jimeng.token"
-  | `modelProfile.${string}.token`;
+  "tokendance.apiKey" | "hypihub.token" | "minimax.apiKey" | "jimeng.token" | `modelProfile.${string}.token`;
 
 type Store = Partial<Record<string, string>>;
 
@@ -22,7 +18,7 @@ function read(): Store {
   if (!existsSync(paths.secrets)) return {};
   try {
     const parsed: unknown = JSON.parse(readFileSync(paths.secrets, "utf8"));
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Store) : {};
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
   } catch {
     // 文件坏了不能让整个后端起不来；当作空，界面会显示"未配置"
     return {};

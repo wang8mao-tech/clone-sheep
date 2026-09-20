@@ -16,10 +16,6 @@ const SPEC: Record<TemplateStatus, { dot: string; label: string }> = {
   failed: { dot: "bg-danger", label: "失败" },
 };
 
-export function templateStatusLabel(status: TemplateStatus): string {
-  return SPEC[status].label;
-}
-
 export function TemplateDot({ status, ringed = false }: { status: TemplateStatus; ringed?: boolean }) {
   return (
     <>

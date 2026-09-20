@@ -36,9 +36,7 @@ export function TemplatePlaceholderPage() {
             <h1 className="text-heading-lg">{template.data?.name ?? "　"}</h1>
           </div>
           <div className="rounded-md border border-dashed border-border p-6">
-            <p className="text-[13px] text-text-secondary">
-              模板页在 Task 3.4 接通：页头、五步步骤条与各步工作区。
-            </p>
+            <p className="text-[13px] text-text-secondary">模板页在 Task 3.4 接通：页头、五步步骤条与各步工作区。</p>
           </div>
         </>
       )}

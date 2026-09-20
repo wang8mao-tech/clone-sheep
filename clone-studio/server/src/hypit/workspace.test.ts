@@ -48,7 +48,13 @@ describe("buildRuntimeProfile", () => {
   });
 
   it("渲染并发原样落进 hyperframes 配置", () => {
-    const p = buildRuntimeProfile({ tokendance: false, hypihub: false, whisperx: false, renderWorkers: 8, renderConcurrency: 2 });
+    const p = buildRuntimeProfile({
+      tokendance: false,
+      hypihub: false,
+      whisperx: false,
+      renderWorkers: 8,
+      renderConcurrency: 2,
+    });
     expect(p.endpoints["hyperframes.local"]?.config).toMatchObject({ workers: 8, defaultConcurrency: 2 });
   });
 

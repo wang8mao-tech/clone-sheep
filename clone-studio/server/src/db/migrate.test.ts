@@ -89,9 +89,7 @@ describe("migrate", () => {
       `INSERT INTO agent_jobs (id, owner_kind, owner_id, status, created_at)
        VALUES ('j1', 'production', 'p1', 'running', ?)`,
     ).run(now);
-    d.prepare(
-      `INSERT INTO builds (id, production_id, status, created_at) VALUES ('b1', 'p1', 'running', ?)`,
-    ).run(now);
+    d.prepare(`INSERT INTO builds (id, production_id, status, created_at) VALUES ('b1', 'p1', 'running', ?)`).run(now);
     // 已完成的不该被动
     d.prepare(
       `INSERT INTO agent_jobs (id, owner_kind, owner_id, status, created_at)
@@ -101,17 +99,17 @@ describe("migrate", () => {
     const changed = m.markStaleRunningAsInterrupted();
     expect(changed).toEqual({ jobs: 1, productions: 1, builds: 1 });
 
-    expect((d.prepare("SELECT status, stop_reason FROM agent_jobs WHERE id='j1'").get() as never)).toMatchObject({
+    expect(d.prepare("SELECT status, stop_reason FROM agent_jobs WHERE id='j1'").get() as never).toMatchObject({
       status: "interrupted",
       stop_reason: "backend_restart",
     });
-    expect((d.prepare("SELECT status FROM agent_jobs WHERE id='j2'").get() as never)).toMatchObject({
+    expect(d.prepare("SELECT status FROM agent_jobs WHERE id='j2'").get() as never).toMatchObject({
       status: "done",
     });
-    expect((d.prepare("SELECT status FROM productions WHERE id='p1'").get() as never)).toMatchObject({
+    expect(d.prepare("SELECT status FROM productions WHERE id='p1'").get() as never).toMatchObject({
       status: "interrupted",
     });
-    expect((d.prepare("SELECT status, error_code FROM builds WHERE id='b1'").get() as never)).toMatchObject({
+    expect(d.prepare("SELECT status, error_code FROM builds WHERE id='b1'").get() as never).toMatchObject({
       status: "failed",
       error_code: "BACKEND_RESTART",
     });
@@ -131,12 +129,8 @@ describe("migrate", () => {
       `INSERT INTO productions (id, template_id, kind, status, created_at, updated_at)
        VALUES ('p1', 't1', 'variant', 'done', ?, ?)`,
     ).run(now, now);
-    d.prepare(
-      `INSERT INTO builds (id, production_id, status, created_at) VALUES ('b1', 'p1', 'done', ?)`,
-    ).run(now);
-    d.prepare(
-      `INSERT INTO assets (id, production_id, created_at) VALUES ('a1', 'p1', ?)`,
-    ).run(now);
+    d.prepare(`INSERT INTO builds (id, production_id, status, created_at) VALUES ('b1', 'p1', 'done', ?)`).run(now);
+    d.prepare(`INSERT INTO assets (id, production_id, created_at) VALUES ('a1', 'p1', ?)`).run(now);
     d.prepare(
       `INSERT INTO agent_jobs (id, owner_kind, owner_id, status, created_at)
        VALUES ('j1', 'production', 'p1', 'done', ?)`,

@@ -69,8 +69,7 @@ export function useArchiveActions(onCreated?: (clientId: string) => void) {
   });
 
   const createTemplate = useMutation({
-    mutationFn: ({ clientId, name }: { clientId: string; name: string }) =>
-      archiveApi.createTemplate(clientId, name),
+    mutationFn: ({ clientId, name }: { clientId: string; name: string }) => archiveApi.createTemplate(clientId, name),
     onSuccess: () => {
       closeEditor();
       invalidate();

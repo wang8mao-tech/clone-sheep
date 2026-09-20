@@ -107,7 +107,7 @@ describe("AC-001 删除客户级联", () => {
 
 describe("删除模板", () => {
   it("只删自己，同客户的兄弟模板与其成片不受影响", async () => {
-    const { archive, deletion, db, client, first, second } = await seedClientWithTwoTemplates();
+    const { archive, deletion, db, first, second } = await seedClientWithTwoTemplates();
     const firstDir = first.workspace_path as string;
     const secondDir = second.workspace_path as string;
 
@@ -145,9 +145,7 @@ describe("删除前中止关联任务（AC-002 的可验部分）", () => {
     d.prepare(
       `INSERT INTO agent_jobs (id, owner_kind, owner_id, status, created_at) VALUES ('j1', 'template', ?, 'running', ?)`,
     ).run(template.id, now);
-    d.prepare(
-      `INSERT INTO builds (id, production_id, status, created_at) VALUES ('b1', 'p1', 'running', ?)`,
-    ).run(now);
+    d.prepare(`INSERT INTO builds (id, production_id, status, created_at) VALUES ('b1', 'p1', 'running', ?)`).run(now);
 
     expect(deletion.templateImpact(template.id).runningTasks).toBe(2);
     expect(deletion.clientImpact(client.id).runningTasks).toBe(2);

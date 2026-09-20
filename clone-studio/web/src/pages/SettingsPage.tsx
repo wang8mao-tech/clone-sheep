@@ -9,7 +9,12 @@ import { HealthRow } from "../components/HealthRow.js";
 import { api, TIMEOUT_MS, ApiError } from "../lib/api.js";
 import type { HealthSummary, Settings, VerifyResult } from "../lib/types.js";
 
-function Section({ id, title, action, children }: {
+function Section({
+  id,
+  title,
+  action,
+  children,
+}: {
   id: string;
   title: string;
   action?: React.ReactNode;
@@ -116,9 +121,8 @@ export function SettingsPage() {
       } else {
         // 验证失败要显示服务端返回的原因原文（AC-023）
         const reason =
-          [result.status ? `HTTP ${result.status}` : null, result.detail, result.error]
-            .filter(Boolean)
-            .join("\n") || "未给出原因";
+          [result.status ? `HTTP ${result.status}` : null, result.detail, result.error].filter(Boolean).join("\n") ||
+          "未给出原因";
         toast.push("danger", "TokenDance key 验证失败", reason);
       }
       void qc.invalidateQueries({ queryKey: ["health", "checks"] });
@@ -201,7 +205,9 @@ export function SettingsPage() {
                     placeholder={s?.credentials.tokendance ?? "未配置"}
                     value={tokenDraft}
                     onChange={(e) => setTokenDraft(e.target.value)}
-                    hint={s?.credentials.tokendance ? `已保存：${s.credentials.tokendance}` : "只存在本机，界面只回打码值"}
+                    hint={
+                      s?.credentials.tokendance ? `已保存：${s.credentials.tokendance}` : "只存在本机，界面只回打码值"
+                    }
                   />
                 </div>
                 <Button
@@ -223,11 +229,7 @@ export function SettingsPage() {
                   验证
                 </Button>
                 {s?.credentials.tokendance ? (
-                  <Button
-                    variant="ghost"
-                    onClick={() => saveSecret.mutate(null)}
-                    loading={saveSecret.isPending}
-                  >
+                  <Button variant="ghost" onClick={() => saveSecret.mutate(null)} loading={saveSecret.isPending}>
                     清除
                   </Button>
                 ) : null}

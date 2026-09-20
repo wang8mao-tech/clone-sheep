@@ -13,7 +13,13 @@ export interface SseFrame {
  */
 export function useSse(topics: readonly string[], onEvent: (event: string, frame: SseFrame) => void): void {
   const handler = useRef(onEvent);
-  handler.current = onEvent;
+
+  // 在 effect 里同步而不是直接在 render 里写 ref：render 期间改 ref 在并发渲染
+  // 下不安全（渲染可能被丢弃或重放），react-hooks/refs 就是拦这个的。
+  // 单独一个 effect、不带依赖数组，每次渲染后都把最新的回调放进去
+  useEffect(() => {
+    handler.current = onEvent;
+  });
 
   const key = topics.join(",");
 

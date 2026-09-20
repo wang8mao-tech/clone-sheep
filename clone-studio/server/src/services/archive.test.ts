@@ -126,9 +126,7 @@ describe("建模板即建工程目录", () => {
 
   it("TokenDance 验证过之后建的模板才写它的 endpoint", async () => {
     const archive = await freshArchive();
-    archive.db()
-      .prepare("UPDATE settings SET tokendance_verified_at = ? WHERE id = 1")
-      .run(new Date().toISOString());
+    archive.db().prepare("UPDATE settings SET tokendance_verified_at = ? WHERE id = 1").run(new Date().toISOString());
 
     const client = archive.createClient("星途 MCN");
     const template = archive.createTemplate(client.id, "足球榜");

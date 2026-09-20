@@ -53,9 +53,7 @@ describe("inlineNameError", () => {
   });
 
   it("400 NAME_TOO_LONG 同样就地", () => {
-    expect(inlineNameError(new ApiError("客户名最长 40 字", 400, undefined, "NAME_TOO_LONG"))).toBe(
-      "客户名最长 40 字",
-    );
+    expect(inlineNameError(new ApiError("客户名最长 40 字", 400, undefined, "NAME_TOO_LONG"))).toBe("客户名最长 40 字");
   });
 
   it("DIRECTORY_BUSY 不是名称问题，必须落到 toast 而不是贴在输入框下", () => {

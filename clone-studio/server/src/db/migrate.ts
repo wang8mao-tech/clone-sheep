@@ -28,7 +28,10 @@ export function migrate(): void {
   d.exec(readFileSync(schemaPath(), "utf8"));
 
   const applied = new Set(
-    d.prepare("SELECT version FROM schema_migrations").all().map((r) => (r as { version: number }).version),
+    d
+      .prepare("SELECT version FROM schema_migrations")
+      .all()
+      .map((r) => (r as { version: number }).version),
   );
   const record = d.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)");
   for (const step of STEPS) {

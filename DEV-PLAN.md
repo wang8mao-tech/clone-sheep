@@ -3,7 +3,10 @@
 > 本文件记录项目的开发阶段划分、当前进度和剩余工作。
 > 新 session 启动时应首先阅读此文件，了解项目状态后再继续开发。
 >
-> 依据：Product-Spec.md v1.4、Design-Brief.md v1.0、设计稿 https://claude.ai/artifact/7DWGBWDbka6Wm71vV6TBbH（7 屏，UI 以设计稿为准）、Hypit-Research.md、用户提供的《Codex 生图配置说明》（不随仓库分发，要点已写入 Spec REQ-011）。
+> **当前进度（2026-09-20）**：Phase 0 ✅（带一项已知阻塞）· Phase 1 ✅ · Phase 2 ✅（带三项遗留）· Phase 3 待开。
+> 分支 `feat/clone-studio`。Phase 6 开工前必须先解「本机渲染不通」，见「已知风险」。
+>
+> 依据：Product-Spec.md v1.5、Design-Brief.md v1.0、设计稿 https://claude.ai/artifact/7DWGBWDbka6Wm71vV6TBbH（7 屏，UI 以设计稿为准）、Hypit-Research.md、用户提供的《Codex 生图配置说明》（不随仓库分发，要点已写入 Spec REQ-011）。
 > 代码目录：`clone-studio/`（pnpm workspace：`server/`、`web/`、`providers/`）。`hypit-main/` 只读，不得修改。
 
 ## 总体架构
@@ -32,8 +35,9 @@
 - `clone-studio/scripts/spike-hypit.ps1` — hypit 全链路命令序列
 
 **验收标准**：
-- `node hypit-main/bin/hypit.mjs doctor --json` 有输出；最小 Run 产出一个可播放 mp4
-- spike-notes.md 对 Q-003、ASM-002、Codex 出图三项各有"成立 / 不成立 + 证据"
+- `node hypit-main/bin/hypit.mjs doctor --json` 有输出 ✅
+- spike-notes.md 对 Q-003、ASM-002、Codex 出图三项各有"成立 / 不成立 + 证据" ✅
+- 可播放 mp4 ⚠️ **只做到一半**：`get` 导出已有 Build Output 得到可播放 mp4（10.03s、h264 720×1280、30/1，ffprobe 通过），`check → plan → pricing → build → get` 的真实 JSON 形状全部记录在案；但**本机新渲染跑不通**，见「已知风险」。这一项的完整达成推迟到该阻塞解掉之后
 
 ---
 
@@ -69,8 +73,12 @@
 - 实现 hypit 子进程封装：`node <hypit-main>/bin/hypit.mjs … --json --workspace <dir>`，解析 `format` 化 JSON 与 `hypit.cli-error@1`，stderr 逐行回调，子进程登记表随后端退出清理，每次调用落 `hypit_calls` 表
 - 实现密钥存储：`secrets.json` 仅当前用户可读，接口只回打码值
 - 实现模板工程目录生成器：最小 `package.json` + `hypit.runtime.json`（`credential-store-env`；按已验证的服务写 TokenDance / HypiHub / 本地 media、hyperframes、whisperx endpoints 与 workers）
-- 实现体检：Node、hypit 依赖、ffmpeg/ffprobe、uv、Chromium、WhisperX、Claude Code 登录、TokenDance key；每项给现状与修复命令；"一键准备"调 `hypit programs prepare` 并推进度
-- 实现设置页（设计稿"设置"画板）：体检、TokenDance key 验证（`hypit doctor --endpoint tokendance.default`）、HypiHub 浏览器授权连接、限额与熔断、并发、路径；改完即存
+- 实现体检 8 项：Node、hypit 依赖、ffmpeg/ffprobe、uv、Chrome Headless Shell、Claude Code 登录、TokenDance key、Codex CLI；每项给"是什么、现状、怎么修"，修复命令可复制
+- 命令探测必须先用 `where` / `which` 解析成真实路径再 spawn。Windows 上 npm 全局命令是 `.cmd` 垫片，`shell: false` 直接 spawn 命令名会得到"不在 PATH"的假阴性；`.cmd` 垫片自 Node 20 起（CVE-2024-27980）必须经 `cmd.exe` 启动，因此这条路只允许跑写死的参数，不得喂用户输入
+- Chrome Headless Shell 装在 `~/.cache/hyperframes/chrome`，不在 `hypit-main/` 内
+- 实现设置页（设计稿"设置"画板）：体检、TokenDance key 验证、HypiHub 浏览器授权连接、限额与熔断、并发、路径；改完即存
+- TokenDance key 验证不能用 `hypit doctor --endpoint tokendance.default`（实测对故意写错的 key 也返回 `ok: true`；doctor 只校验 Profile 形态，`auth status` 也只报凭据在不在，hypit 没有校验远端凭据的命令）。改为向生成接口发一个**结构合法但模型名故意不存在**的请求：网关顺序是体解析 → 鉴权 → 模型校验，坏 key 得 401 原文，好 key 卡在模型校验、不建任务不花钱。模型目录接口 `/gateway/v1/models` 是公开的，不带 key 也回 200，验不了
+- 体检里的 TokenDance 一项看"验证过没有"而不是"配置了没有"：AC-023 要求 key 错时出片按钮保持禁用，只看配置与否挡不住。`settings` 增 `tokendance_verified_at` / `hypihub_verified_at` 列，key 一改即清空
 - 任一 P0 体检未过时主区顶部出现琥珀横幅
 
 **关键文件**：
@@ -84,7 +92,12 @@
 **验收标准**：
 - AC-022、AC-023 通过
 - 把 ffmpeg 移出 PATH 后重新检测，对应行变红且出现横幅；恢复后变绿
-- 生成的工程目录能被 `hypit doctor --workspace <dir> --json` 识别
+- 生成的工程目录能被 `hypit doctor --workspace <dir> --json` 识别。注意：不带 `--runtime` 时 `profileSource` 为 `none`（hypit 不会自动选中目录里的 profile），要验 profile 本身立不立得住须显式带 `--runtime <dir>/hypit.runtime.json`
+
+**本阶段遗留（未实现，不影响 Phase 3-5，须在用到前补上）**：
+- 「一键准备」按钮（调 `hypit programs prepare` 并推进度）未实现。当前 Chrome Headless Shell 一项只给提示命令，靠首次出片时 hypit 自己下载。补在 **Phase 6 开工前**，那时才真的需要它就绪
+- WhisperX 服务连通性检测未实现。目前只查了 uv 在不在；服务通不通由 `doctor --runtime` 的 `MANAGED_PROGRAM_DOWN` 诊断暴露。补在 **Phase 4**（证据准备真正用到转写时）
+- HypiHub 浏览器授权连接未实现，补在 **Phase 6**
 
 ---
 
@@ -130,8 +143,10 @@
 
 **交付内容**：
 - 实现运行器：Agent SDK `query()`，cwd = 工程目录，预置 `.claude/skills/hypit`（从 `hypit-main/skills/hypit` 复制），完整工具集，系统提示注入"出片由宿主负责"与当前可用生成能力清单
-- 实现 `canUseTool` 两条硬拦截：任何 `hypit build` / `hypit result` 写操作；写入路径不在工程目录前缀内
-- 实现熔断：45 分钟墙钟、$5 等价花费（按 Phase 0 结论取 SDK 值或档案单价折算）、同命令连续失败 5 次、10 分钟无消息；订阅限流进"等待额度"并到点自动 resume
+- 实现硬拦截。**主手段是 `disallowedTools`，且任何禁用清单必须把 `Task` 一并禁掉**——Phase 0 实测只禁 `Bash` 时模型会派 Task 子 Agent 绕开、命令照样执行。`canUseTool` 只作补充：默认 `sandbox.autoAllowBashIfSandboxed` 为 true，沙箱内 Bash 自动放行，它根本不会被调用。拦截目标仍是两条：任何 `hypit build` / `hypit result` 写操作；写入路径不在工程目录前缀内
+- 会话必须传 `settingSources: []`。不传会连用户本机 `~/.claude` 的权限规则与 hooks 一起继承，行为不可复现（Phase 0 实测消息流里出现 `system:hook_started`）
+- 拦截记录由宿主自己写，不读 SDK 的 `permission_denials`——用 `disallowedTools` 隐藏工具时该字段恒为空数组
+- 实现熔断：45 分钟墙钟、$5 等价花费、同命令连续失败 5 次、10 分钟无消息；订阅限流进"等待额度"并到点自动 resume。花费熔断用 SDK 原生的 `maxBudgetUsd` 选项 + `error_max_budget_usd` 结果子类型，不自己累加；读 `total_cost_usd` 只取最新一条 `result` 消息，resume 的会话会续上转录里保存的累计值（Phase 0 实测 0.0518 > 0.0479）
 - 实现调度器：Agent 并发上限（默认 2）、排队、取消、中止、继续（resume）、重跑（清 Agent 产物）
 - 消息全量落 `agent_messages`，SSE 推送，刷新后补发历史
 - 实现右侧抽屉：顶栏（状态、模型、用时、花费 / 上限、中止）、待办清单、markdown 逐字流式、工具调用折叠行、长输出折叠、错误红竖线、拦截琥珀竖线、结束卡
@@ -149,6 +164,7 @@
 **验收标准**：
 - AC-007、AC-008、AC-009、AC-010、AC-002 通过
 - `guard.ts` 有单元测试覆盖：`hypit build`、`node …/hypit.mjs build`、PowerShell 与 bash 两种写法、越界写路径
+- 有一条测试钉住"禁用清单必须含 `Task`"：只禁 `Bash` 的配置必须被判为不合法
 
 ---
 
@@ -157,7 +173,10 @@
 **交付内容**：
 - 导入完成后自动启动复刻任务；完成判据：`reference.svrun` 存在、`hypit check --json` 通过、`ANALYSIS.md` 与 `TIMELINE.md` 存在
 - 实现 ②复刻 页面：分析摘要、时间线（点时间码联动参考播放器）、校验结果三个折叠区，随文件产生逐个出现
-- 实现花钱闸门：`plan --json` + `pricing --json` → 估价与请求明细；单条限额与批次限额判定；拿不到估价一律按超限；plan 有未解析请求则失败并指明缺哪种能力
+- 实现花钱闸门。**估价由 Clone Studio 自己算，hypit 给不出数**：Phase 0 实测 `pricing.kind` 只有 `page`（一个价格页 URL）与 `local`（零价）两种，无任何结构化费率，官方文档明言 "Hypit itself calculates no total"。做法：自维护一张"能力/模型 → 单价"费率表（设置页可编辑），用 `plan --json` 的 `needs[].summary.fields`（宽高、`startFrame`/`endFrameExclusive`、帧率、采样率）与 `providerRequestCount` 计算；闸门界面同时展示 `providers[].pricing.url` 价格页链接供人工核对费率表是否过期
+- 单条限额与批次限额判定；估价拿不到（plan 失败、Provider 无价目、费率表缺该能力单价）一律按超限处理；plan 有未解析请求则失败并指明缺哪种能力
+- **build 的实际花费拿不到**：Result 只有不含金额的 `receipt: { id, url? }`，全仓库无任何金额字段。生成侧花费一律按"请求数 × 自维护单价"记账并标"估"，界面不出现"实际账单"字样；有 `receipt.url` 时给链接让人去 Provider 侧查真账单
+- 判 build 成败看 `result.outcome` / `result.state`，**不能看 `work.state`**：Phase 0 实测失败的 build 也是 `work.state: "done"` 配 `result.outcome: "failed"`。`failure` 是一整段人类可读文本而非结构化错误码，界面原样展示
 - 实现出片执行器：`build --follow --json` + `activity --watch --jsonl` 取结构化进度，渲染并发上限（默认 1），`get` 导出到 `output/`，key 只注入 hypit 子进程环境
 - 实现估价 / 限额卡 CMP-006、出片进度 CMP-007、台账写入（`builds`、AgentJob 花费）
 
@@ -170,7 +189,8 @@
 
 **验收标准**：
 - 一条真实参考视频走到复刻完成，三个区块与估价卡出现
-- AC-017、AC-018 的判定逻辑由 `gate.ts` 单元测试覆盖；AC-020 用 Phase 0 的无生成模型 Run 实测通过
+- AC-017、AC-018 的判定逻辑由 `gate.ts` 单元测试覆盖
+- AC-020（出片得到可播放 mp4）**被"本机渲染不通"阻塞**，见「已知风险」。开工前先解，否则整条出片链路无法验收
 
 ---
 
@@ -357,8 +377,10 @@
 
 ## 已知风险
 
-- 订阅登录下 SDK 花费字段与限流行为未知 → Phase 0 验证二先行；不成立则 $ 熔断退化为时间与卡死检测，并回写 Spec。
-- `hypit pricing` 对 TokenDance 的估价可用性未知 → Phase 0 验证一；拿不到则全部人工确认。
+- **本机渲染不通 → 阻塞 Phase 6，Phase 1-5 不受影响。** `hyperframes.local` 在本机两种失败形态：900 帧目标在编码后校验失败 `Rendered visual frame rate differs from its document`（同一错误逐字复现两次，确定性失败）；4112 帧目标跑到 3489 帧时 CLI 自身崩在 `Bad escaped character in JSON`。已排除 ffmpeg（原样复现编码命令三组，输出均为干净的 `30/1`）与 run 文件改动（保留的是本来就合法的 target）。下一步：抓编码产物本身 ffprobe、查子进程输出被本机 ANSI 代码页解码的问题。证据见 `clone-studio/docs/spike-notes.md`「本机渲染不通」。
+- **本机内存/显存是共享资源。** 渲染 workers 默认 4 对这台机器偏高：Phase 0 实测 8 workers 触发 SQLite out of memory、2 workers 渲染进程 ACCESS_VIOLATION、1 worker 才稳。并发默认值要按实际余量定，不照搬默认；本机同时在跑生视频测试时不要启动渲染。
+- ~~订阅登录下 SDK 花费字段与限流行为未知~~ **Phase 0 已解**：`total_cost_usd` 五组实跑均返回真实数值，$ 熔断成立且改用 SDK 原生 `maxBudgetUsd`。同轮发现 `canUseTool` 拦不住花钱动作，拦截机制已改（见 Phase 5）。
+- ~~`hypit pricing` 对 TokenDance 的估价可用性未知~~ **Phase 0 已解且为否**：估价与实际花费都拿不到，改为自维护费率表并全部标"估"（见 Phase 6）。
 - TokenDance 无 TTS，Seedance 拒绝真人脸参考 → 复刻系统提示里写明可用能力；缺能力时 plan 失败并指明。
 - tsx 冷启动使每次 hypit 调用多数秒 → 证据流水线串行可接受；出片前的 check / plan / pricing 合并展示一次等待。
 - 非 Claude 模型跑 hypit skill 成功率低 → Phase 10 只保证接得上与拦得住，不保证质量。
@@ -370,4 +392,5 @@
 - Commit message 用 feat、fix、refactor、chore 前缀
 - 包管理器：pnpm
 - 不修改 `hypit-main/`；UI 以设计稿为准，其次 Design-Brief
-- 项目根目录当前不是 git 仓库：Phase 1 开工时在 `clone-studio/` 内 `git init`，`.gitignore` 排除数据根目录与 `secrets.json`
+- 仓库就是项目根目录（分支 `feat/clone-studio`），`clone-studio/` 是其中一个子目录，**不要在它里面再 `git init`**。根 `.gitignore` 与 `clone-studio/.gitignore` 共同排除数据根目录、`secrets.json`、`app.db` 与构建产物
+- 测试文件不进构建产物：`server/tsconfig.json` 的 `exclude` 含 `src/**/*.test.ts`，否则 `dist/` 里会多出一份 `*.test.js` 被 vitest 重复执行

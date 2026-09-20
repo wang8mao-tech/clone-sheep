@@ -1,6 +1,6 @@
 # 产品需求规范：Clone Studio（暂定名）
 
-> 版本 v1.5 · 2026-09-20 · 内核：Hypit 0.2.6（本地副本 `hypit-main/`）· 技术调研见 `Hypit-Research.md`
+> 版本 v1.6 · 2026-09-20 · 内核：Hypit 0.2.6（本地副本 `hypit-main/`）· 技术调研见 `Hypit-Research.md`
 > Phase 0 先行验证结论见 `clone-studio/docs/spike-notes.md`，本版据其回写。
 
 ## 0. AI 使用说明
@@ -375,11 +375,16 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 
 **规则：**
 - MUST key 只存本机应用数据目录的配置文件，文件权限限当前用户；界面回显打码。
-- MUST 体检每项给出"是什么、现状、怎么修"。
+- MUST 体检每项给出"是什么、现状、怎么修"，修复命令可复制。
+- MUST 凭据类体检项判定的是"验证过没有"，不是"配置了没有"。只填了一个没验证过的 key 一律算未通过，出片闸门照挡。key 一改，之前的验证结果立刻作废。
+- MUST 凭据验证由 Clone Studio 直接问服务方，不经 hypit：hypit 没有校验远端凭据的命令，`doctor --endpoint` 对错误 key 也返回 ok，`auth status` 只报凭据在不在。验证必须零花费——不得为了验证而产生任何计费请求。
+- MUST 验证失败时把**服务方返回的原文**（状态码 + 响应体）原样展示，不改写、不归纳。
+- MUST 命令类体检项先把命令名解析成真实可执行文件再探测，不能直接按名字 spawn；否则 Windows 上以 `.cmd` 垫片分发的命令（npm 全局安装的那些）会被误报成"不在 PATH"。
 
 **验收标准：**
-- [ ] AC-022: Given ffmpeg 不在 PATH, when 打开设置页, then 该项红色并给出 `winget install --id Gyan.FFmpeg.Shared -e`。
-- [ ] AC-023: Given 填入错误的 TokenDance key, when 点验证, then 显示验证失败及 Hypit 返回的原因，出片按钮保持禁用。
+- [ ] AC-022: Given ffmpeg 不在 PATH, when 打开设置页, then 该项红色并给出 `winget install --id Gyan.FFmpeg.Shared -e`；恢复后变绿。
+- [ ] AC-023: Given 填入错误的 TokenDance key, when 点验证, then 显示验证失败及**服务方返回的原文**（如 HTTP 401 与 `{"error":{"message":"API 密钥不存在","code":"unauthorized"}}`），该体检项保持未通过，出片按钮保持禁用。
+- [ ] AC-039: Given 一个以 `.cmd` 垫片分发的命令行工具已安装, when 打开设置页, then 该体检项显示它的真实版本，而不是"不在 PATH"。
 
 ### REQ-009: 花费台账
 

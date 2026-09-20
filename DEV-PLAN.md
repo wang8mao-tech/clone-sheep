@@ -125,7 +125,7 @@ Task 拆分，按序做，每个走 review→fix 循环：
 | Task | 内容 | 状态 |
 |---|---|---|
 | 3.1 | 后端：客户/模板 CRUD + 级联删除服务 | ✅ de5aba6。审查 Stage 1 过、Stage 2 的 5 条应修已修完（b7ec073） |
-| 3.2 | 前端：侧栏树接真实数据 + 行尾「…」菜单（重命名/删除）+ 新建客户 | ✅ 77cebe9。**UI 交互层欠真机验证**，见下 |
+| 3.2 | 前端：侧栏树接真实数据 + 行尾「…」菜单（重命名/删除）+ 新建客户 | ✅ 77cebe9 + 6682239（二轮审查修复）。已真机验证 |
 | 3.3 | 前端：首页空状态 + 客户页模板紧凑行列表 | ⬜ 下一步 |
 | 3.4 | 前端：模板页框架（页头 + 步骤条 CMP-001 + 步骤路由 + 刷新保持） | ⬜ |
 
@@ -135,7 +135,15 @@ Task 拆分，按序做，每个走 review→fix 循环：
 - 新增 `purgeTrash()`，`index.ts` 启动时调一次
 - `DIRECTORY_BUSY` 的 message 里可能追加「工作目录未能挪回原处，现暂存在 …」，前端原样展示即可
 
-**Task 3.2 的欠账**：菜单、就地改名、删除弹窗这三处 UI 交互没做真机点击验证——浏览器扩展当时没连上，web 包也还没有组件测试栈（`web/package.json` 的 test 是 `vitest run --passWithNoTests`，没有 jsdom / testing-library）。已验的是：typecheck、build、11 条纯逻辑单测、以及走真后端的 AC-001 / AC-003 / SSE `archive` 事件。要补的话有两条路，选哪条没定：装 jsdom + @testing-library/react 做组件测试，或按 dev-builder 说的上 Playwright 测核心流程。DEV-PLAN 的技术选型表里 vitest 那行只写了服务端用途，前端测试策略从没定过。
+**二轮审查（重派）结论**：Stage 1 抓到一条阻塞 —— 点模板行会打到没匹配的路由，且路由表没有 `errorElement`，整个 `<Shell/>` 被 react-router 的内置错误页顶掉。这条从 Phase 1 就埋着，但那时侧栏是空数组、模板行渲染不出来，Task 3.2 接上真实数据才让它首次可点。已在 6682239 修掉：根路由加 `errorElement` + 通配兜底页 + `clients/:clientId/templates/:templateId` 占位路由。Stage 2 的 12 条（Q1-Q12）已全部处理，含 `killAll` 留孤儿孙进程、状态点只靠颜色区分、`purgeTrash` 能拦住后端启动、fetch 无超时。两个超 300 行的文件已拆：`deletion.ts` → 出 `trash.ts`，`Sidebar.tsx` → 出 `ClientNode.tsx` + `useArchiveActions.ts`（后者 Task 3.3 的首页「新建客户」直接复用）。
+
+**真机验证已补做**（浏览器扩展 1440×900）：点模板行进占位页且侧栏保留、不存在的模板 id 显示「这个模板已经不存在了」、完全不匹配的地址进兜底页。真机还抓到一个 typecheck 与 build 都看不见的问题：**`max-w-lg` 在这套 Tailwind 配置里解析成 16px**（没有 `--container-*` 刻度），兜底页文字被挤成一字一行。结论：**不要用 `max-w-*` / `w-<数字>` 之外的语义刻度**，跟项目既有先例走显式值（弹窗 `w-[420px]`、toast `w-80`、HealthRow `max-w-[380px]`）。
+
+**设计稿偏差备案**：模板行右 padding 用 `pr-8`（32px）而非设计稿的 12px，那 20px 是给行尾「…」菜单让位。代价是模板名的 `truncate` 提前 20px 截断。
+
+**Task 3.3 开工前已知的一件事**：`HomePage.tsx` 现在恒显示「还没有客户」，有客户时也这么说。空状态与客户页都归 Task 3.3，一并改。
+
+**前端测试栈仍未定**：菜单、就地改名、删除弹窗这三处 UI 交互没做真机点击验证——浏览器扩展当时没连上，web 包也还没有组件测试栈（`web/package.json` 的 test 是 `vitest run --passWithNoTests`，没有 jsdom / testing-library）。已验的是：typecheck、build、11 条纯逻辑单测、以及走真后端的 AC-001 / AC-003 / SSE `archive` 事件。要补的话有两条路，选哪条没定：装 jsdom + @testing-library/react 做组件测试，或按 dev-builder 说的上 Playwright 测核心流程。DEV-PLAN 的技术选型表里 vitest 那行只写了服务端用途，前端测试策略从没定过。
 
 Task 3.1 已落地的接口，前端直接照这个对接：
 

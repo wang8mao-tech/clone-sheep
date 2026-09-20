@@ -6,12 +6,12 @@ import { Badge } from "../components/ui/Badge.js";
 import { Button } from "../components/ui/Button.js";
 import { ConfirmDangerDialog } from "../components/ui/ConfirmDangerDialog.js";
 import { InlineNameEditor } from "../components/ui/InlineNameEditor.js";
+import { QueryErrorState } from "../components/ui/QueryErrorState.js";
 import { RowMenu } from "../components/ui/RowMenu.js";
 import { TemplateDot } from "../components/ui/TemplateDot.js";
 import { TaskRow } from "../components/TaskRow.js";
 import { archiveApi, archiveKeys, impactLines } from "../lib/archive.js";
 import { formatActivityTime, formatUsd } from "../lib/format.js";
-import { isGone } from "../lib/api.js";
 
 /**
  * SCREEN-002 客户页：模板的紧凑行列表（CMP-002）。
@@ -33,24 +33,14 @@ export function ClientPage() {
   });
 
   if (detail.isError) {
-    // 5 秒超时抛的是 ApiError("后端未响应")，不分流的话后端一卡就宣布客户被删了
-    const gone = isGone(detail.error);
     return (
-      <div className="flex flex-1 items-center justify-center p-6">
-        <div className="flex flex-col items-center gap-4 text-center">
-          <p className="text-[13px] text-text-secondary">{gone ? "这个客户已经不存在了。" : "读不到这个客户。"}</p>
-          {gone ? null : (
-            <>
-              <pre className="max-h-40 w-[420px] overflow-auto rounded-md border border-border bg-surface p-3 text-left font-mono text-caption whitespace-pre-wrap text-text-secondary">
-                {detail.error instanceof Error ? detail.error.message : String(detail.error)}
-              </pre>
-              <Button variant="secondary" onClick={() => void detail.refetch()} loading={detail.isFetching}>
-                重试
-              </Button>
-            </>
-          )}
-        </div>
-      </div>
+      <QueryErrorState
+        error={detail.error}
+        goneText="这个客户已经不存在了。"
+        errorText="读不到这个客户。"
+        retrying={detail.isFetching}
+        onRetry={() => void detail.refetch()}
+      />
     );
   }
 

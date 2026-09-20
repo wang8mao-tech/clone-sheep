@@ -8,6 +8,11 @@ interface Props {
   current: StepKey;
   /** 点已解锁的步骤跳过去；未解锁的不可点 */
   hrefFor: (key: StepKey) => string;
+  /**
+   * 模板数据还没到。此时步骤表是按缺省值猜出来的（一个已验货的模板会先被
+   * 画成「①进行中 + 后面四个 ·」），这一帧的信息是错的，所以整体不可点。
+   */
+  loading?: boolean;
 }
 
 /** 七态里除「当前」之外的六态各自的说法，给屏幕阅读器用 */
@@ -34,11 +39,15 @@ const STATE_LABEL: Record<StepState, string> = {
  * 按「有设计稿时 UI 以设计稿为准」走。状态本身靠 sr-only 文字读出来，
  * 不只依赖形状与颜色（Design-Brief 8.2）。
  */
-export function Stepper({ steps, current, hrefFor }: Props) {
+export function Stepper({ steps, current, hrefFor, loading = false }: Props) {
   const navigate = useNavigate();
 
   return (
-    <nav aria-label="流水线步骤" className="flex h-11 shrink-0 items-center gap-3 border-b border-border px-6">
+    <nav
+      aria-label="流水线步骤"
+      aria-busy={loading || undefined}
+      className={`flex h-11 shrink-0 items-center gap-3 border-b border-border px-6 ${loading ? "opacity-40" : ""}`}
+    >
       {steps.map((step, i) => {
         const isCurrent = step.key === current;
         return (
@@ -46,9 +55,9 @@ export function Stepper({ steps, current, hrefFor }: Props) {
             {i > 0 ? <span aria-hidden className="h-px w-7 shrink-0 bg-border" /> : null}
             <button
               type="button"
-              disabled={!step.enterable}
+              disabled={loading || !step.enterable}
               aria-current={isCurrent ? "step" : undefined}
-              title={step.enterable ? undefined : "还没解锁"}
+              title={loading ? "读取中" : step.enterable ? undefined : "还没解锁"}
               onClick={() => void navigate(hrefFor(step.key))}
               className={[
                 "flex h-full items-center gap-2 border-b-2 px-1 transition-colors",

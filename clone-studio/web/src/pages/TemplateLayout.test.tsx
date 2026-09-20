@@ -149,6 +149,29 @@ describe("步骤条（CMP-001）", () => {
     expect(stepButton("参考")).not.toHaveAttribute("aria-current");
   });
 
+  /**
+   * 数据没到时这份步骤表是按缺省值猜的：一个已验货的模板会先被画成
+   * 「①进行中 + 后面四个 ·」。这一帧的信息是错的，手快点下去会跳到一个
+   * 马上要被重定向走的步骤，所以整体先不可点。
+   */
+  it("模板数据没回来前步骤条整体不可点", async () => {
+    stub("approved", { outputs: 3 });
+    renderApp(BASE);
+
+    const bar = await screen.findByRole("navigation", { name: "流水线步骤" });
+    expect(bar).toHaveAttribute("aria-busy", "true");
+    expect(
+      within(bar)
+        .getAllByRole("button")
+        .every((b) => (b as HTMLButtonElement).disabled),
+    ).toBe(true);
+
+    // 数据到了之后恢复可点
+    await screen.findByRole("heading", { name: "足球榜单" });
+    expect(screen.getByRole("navigation", { name: "流水线步骤" })).not.toHaveAttribute("aria-busy");
+    expect(stepButton("变体")).toBeEnabled();
+  });
+
   it("待验货时 ③ 读作「需处理」——CMP-001 的琥珀点要能被读出来", async () => {
     stub("awaiting_review");
     renderApp(BASE);
@@ -168,7 +191,14 @@ describe("步骤路由与刷新保持", () => {
   it("地址里带了哪一步就停在哪一步——刷新保持靠的就是这个", async () => {
     stub("approved", { outputs: 3 });
     renderApp(`${BASE}/clone`);
-    expect(await screen.findByRole("region", { name: "② 复刻 工作区" })).toBeInTheDocument();
+
+    // 必须先等数据到：第一帧 detail.data 还是 undefined，重定向被「加载中」守卫
+    // 挡住，工作区已经按 URL 渲出来了。不等这一行，断言全都落在加载帧上，
+    // 把「数据到了之后会不会被弹走」这件唯一要验的事整个绕过去——
+    // 实测把重定向改成无视 URL，这条用例照样绿。
+    await screen.findByRole("heading", { name: "足球榜单" });
+
+    expect(screen.getByRole("region", { name: "② 复刻 工作区" })).toBeInTheDocument();
     expect(stepButton("复刻")).toHaveAttribute("aria-current", "step");
   });
 

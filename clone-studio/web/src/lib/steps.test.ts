@@ -103,6 +103,35 @@ describe("defaultStep", () => {
     expect(at({ status: "approved", hasSource: true, outputs: 2 })).toBe("outputs");
     expect(at({ status: "approved", hasSource: true, outputs: 0 })).toBe("variants");
   });
+
+  /**
+   * 每一级都只在可进的步骤里挑。调用方的判据是「目标不可进就跳到这里」，
+   * 这里要是能返回一个不可进的步骤，就会来回重定向、整页停在 <Navigate> 上。
+   */
+  it("永远不会返回一个进不去的步骤", () => {
+    const cases: StepInput[] = [
+      { status: "importing", hasSource: false, outputs: 0 },
+      { status: "cloning", hasSource: true, outputs: 0 },
+      { status: "awaiting_review", hasSource: true, outputs: 0 },
+      { status: "approved", hasSource: true, outputs: 5 },
+      { status: "failed", hasSource: false, outputs: 0 },
+      { status: "failed", hasSource: true, outputs: 3 },
+    ];
+    for (const input of cases) {
+      const steps = deriveSteps(input);
+      const key = defaultStep(steps);
+      expect(steps.find((s) => s.key === key)?.enterable).toBe(true);
+    }
+  });
+
+  it("一步都进不去时返回 undefined，而不是硬塞一个进不去的", () => {
+    const allLocked = deriveSteps({ status: "importing", hasSource: false, outputs: 0 }).map((s) => ({
+      ...s,
+      state: "locked" as const,
+      enterable: false,
+    }));
+    expect(defaultStep(allLocked)).toBeUndefined();
+  });
 });
 
 describe("isStepKey", () => {

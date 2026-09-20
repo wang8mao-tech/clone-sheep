@@ -98,14 +98,23 @@ export function deriveSteps({ status, hasSource, outputs }: StepInput): Step[] {
   }));
 }
 
-/** 当前该停在哪一步：优先需要人动手的，其次在跑的，再次最后一个能进的 */
-export function defaultStep(steps: readonly Step[]): StepKey {
+/**
+ * 当前该停在哪一步：优先需要人动手的，其次在跑的，再次失败那一步，
+ * 最后取能进的最后一步。
+ *
+ * **每一级都只在可进的步骤里选**，兜底也必须返回一个真的能进的步骤。
+ * 调用方（TemplateLayout）的判据是「目标不可进就重定向到这里」——
+ * 这里要是返回一个不可进的步骤，就会来回重定向，页面永远停在 <Navigate>
+ * 上，页头、步骤条、工作区一个都渲染不出来。今天靠 deriveSteps 从不把
+ * reference 设成 locked 这条约定兜着，但那是约定不是代码保证。
+ */
+export function defaultStep(steps: readonly Step[]): StepKey | undefined {
+  const open = steps.filter((s) => s.enterable);
   return (
-    steps.find((s) => s.state === "attention")?.key ??
-    steps.find((s) => s.state === "running")?.key ??
-    steps.find((s) => s.state === "failed")?.key ??
-    [...steps].reverse().find((s) => s.enterable)?.key ??
-    "reference"
+    open.find((s) => s.state === "attention")?.key ??
+    open.find((s) => s.state === "running")?.key ??
+    open.find((s) => s.state === "failed")?.key ??
+    [...open].reverse()[0]?.key
   );
 }
 

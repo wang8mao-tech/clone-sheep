@@ -206,6 +206,23 @@ Task 3.1 已落地的接口，前端直接照这个对接：
 
 ## Phase 4: 参考视频导入与证据准备（REQ-002，设计稿"① 参考"）
 
+**开工前的实测事实（2026-09-20，素材取自 `clone video/test1`）**
+
+命令接口与 Spec 一致，`media` 没列在顶层 `--help` 里但确实存在（`probe`/`cut`/`frames`/`tile`/`tiles`/`boundaries`/`fetch`/`prepare-fetch`）。三步实跑结果：
+
+| 步骤 | 命令 | 实测 |
+|---|---|---|
+| probe | `media probe <file> --json` | 扁平对象 `{path,duration,hasVideo,width,height,frameRate,hasAudio}`，**成功时不带 `ok` 信封** |
+| transcribe | `transcribe <file> --to <json> --language <code> --workspace <ws>` | 19.5s 视频耗 14.2s；输出 `hypit.transcript@1`，`passages[].words[]` 带 `start_seconds`/`end_seconds`/`score` |
+| tiles | `media tiles <file> --frames <n> [--transcript <json>] --to <dir> --json` | 耗 8.3s，产出 2 张拼图；返回 `{directory,columns,rows,cellWidth,grids[]}`，默认 3 列 3 行、cell 480 |
+
+**两个必须先解的坑**：
+
+1. **工作目录没「选中」Runtime Profile，`transcribe` 一律失败。** hypit 明说「Selection is read only from that project's `.hypit/runtime`」，且不做文件名发现、不继承父目录。Phase 2 的 `createWorkspace` 只写了 `hypit.runtime.json`，没写 `.hypit/runtime`，于是报 `No Runtime Profile is selected`。要在建目录时补一步 `runtime use <绝对路径的 profile> --workspace <ws>`（**profile 路径必须绝对**，相对路径按当前工作目录解析会 ENOENT），并给存量模板补迁移。
+2. **WhisperX 的 `punkt_tab` 在本机下不下来。** `raw.githubusercontent.com` 被 DNS 污染，解析结果里除 4 个正常 IPv4 外多一个 `::`，hypit 的安全层挑中它判为 `SSRF attempt to restricted IP ::`。**已离线修复**：把 punkt_tab 解压进 `%LOCALAPPDATA%\Hypit\programs\whisperx-<endpoint>
+ltk_data	okenizers\`（路径来自 `provider-whisperx-local/src/program.ts` 的 `join(stateRoot,"nltk_data")`，**不是** `resources.py` 默认的用户缓存）。`resources.py` 里 `prepare_punkt_tab` 会先 `assert_punkt_tab` 命中就直接 return，不碰网络。修复后 `programs up --endpoint whisperx.local` 返回 `ready: true`。这条要写进 Task 4.5 的体检修复指引。
+
+
 **交付内容**：
 - 实现上传（≤500 MB，流式落盘）与链接导入（`hypit media prepare-fetch` / `fetch`）
 - 实现证据流水线：probe → 时长 3-180 秒校验 → transcribe（本地 WhisperX）→ tiles；每步状态与耗时经 SSE 推送，单步可重试，单步 10 分钟超时

@@ -3,7 +3,7 @@
 > 本文件记录项目的开发阶段划分、当前进度和剩余工作。
 > 新 session 启动时应首先阅读此文件，了解项目状态后再继续开发。
 >
-> **当前进度（2026-09-20）**：Phase 0 ✅（带一项已知阻塞）· Phase 1 ✅ · Phase 2 ✅（带三项遗留）· Phase 3 进行中，Task 3.1 已提交（de5aba6），下一步 Task 3.2。详见 Phase 3 的「进度与交接」。
+> **当前进度（2026-09-20）**：Phase 0 ✅（带一项已知阻塞）· Phase 1 ✅ · Phase 2 ✅（带三项遗留）· Phase 3 进行中，Task 3.1、3.2 已提交并过完一轮 review→fix，下一步 Task 3.3。详见 Phase 3 的「进度与交接」。
 > 分支 `feat/clone-studio`。Phase 6 开工前必须先解「本机渲染不通」，见「已知风险」。
 >
 > 依据：Product-Spec.md v1.5、Design-Brief.md v1.0、设计稿 https://claude.ai/artifact/7DWGBWDbka6Wm71vV6TBbH（7 屏，UI 以设计稿为准）、Hypit-Research.md、用户提供的《Codex 生图配置说明》（不随仓库分发，要点已写入 Spec REQ-011）。
@@ -124,10 +124,18 @@ Task 拆分，按序做，每个走 review→fix 循环：
 
 | Task | 内容 | 状态 |
 |---|---|---|
-| 3.1 | 后端：客户/模板 CRUD + 级联删除服务 | ✅ 已提交 de5aba6，**欠一次 code-reviewer 两阶段审查** |
-| 3.2 | 前端：侧栏树接真实数据 + 行尾「…」菜单（重命名/删除）+ 新建客户 | ⬜ 下一步 |
-| 3.3 | 前端：首页空状态 + 客户页模板紧凑行列表 | ⬜ |
+| 3.1 | 后端：客户/模板 CRUD + 级联删除服务 | ✅ de5aba6。审查 Stage 1 过、Stage 2 的 5 条应修已修完（b7ec073） |
+| 3.2 | 前端：侧栏树接真实数据 + 行尾「…」菜单（重命名/删除）+ 新建客户 | ✅ 77cebe9。**UI 交互层欠真机验证**，见下 |
+| 3.3 | 前端：首页空状态 + 客户页模板紧凑行列表 | ⬜ 下一步 |
 | 3.4 | 前端：模板页框架（页头 + 步骤条 CMP-001 + 步骤路由 + 刷新保持） | ⬜ |
+
+**Task 3.1 审查后的改动（b7ec073）**，Task 3.3 往后要按新形状对接：
+- `deleteClient` / `deleteTemplate` 改成 `async`，路由要 `await`
+- 删除失败时任务状态写 `interrupted`（不是 `cancelled`），因为对象保留、用户还能重跑
+- 新增 `purgeTrash()`，`index.ts` 启动时调一次
+- `DIRECTORY_BUSY` 的 message 里可能追加「工作目录未能挪回原处，现暂存在 …」，前端原样展示即可
+
+**Task 3.2 的欠账**：菜单、就地改名、删除弹窗这三处 UI 交互没做真机点击验证——浏览器扩展当时没连上，web 包也还没有组件测试栈（`web/package.json` 的 test 是 `vitest run --passWithNoTests`，没有 jsdom / testing-library）。已验的是：typecheck、build、11 条纯逻辑单测、以及走真后端的 AC-001 / AC-003 / SSE `archive` 事件。要补的话有两条路，选哪条没定：装 jsdom + @testing-library/react 做组件测试，或按 dev-builder 说的上 Playwright 测核心流程。DEV-PLAN 的技术选型表里 vitest 那行只写了服务端用途，前端测试策略从没定过。
 
 Task 3.1 已落地的接口，前端直接照这个对接：
 
@@ -147,12 +155,12 @@ Task 3.1 已落地的接口，前端直接照这个对接：
 - `Shell.tsx` 里 `const clients: SidebarClient[] = []` 是 Phase 1 留的占位，Task 3.2 换成真实 query。
 - `HomePage.tsx` 的「新建客户」按钮现在是 `disabled` + `disabledReason="新建客户在 Phase 3 接通"`，Task 3.3 要接通。
 
-**Task 3.2 开工前要先定的一件事**：设计稿（7 屏全部）三级文字色实测用 `#8A909A`，而 Phase 1 的 `web/src/styles/tokens.css` 按 Design-Brief 的「约 #666C75」写成了 `#666c75`。按「有设计稿时 UI 以设计稿为准」应改成 `#8A909A`，影响面是全局 `text-text-tertiary`（改后变亮，对比度提升）。这是 Phase 1 的偏差，单独一个 `fix:` 提交，改前先 grep 引用点。
+~~**Task 3.2 开工前要先定的一件事**：三级文字色偏差~~ **已改**（29a465b）：`--color-text-tertiary` 从 `#666c75` 改为 `#8a909a`，全局 17 处引用都走这一个 token，无硬编码色值。
 
 设计稿实测值（Task 3.2-3.4 直接用，取自 `project/Reference.dc.html`）：
 - 侧栏客户行：高 32、`padding 0 12`、折叠箭头 10px `#8A909A`、客户名 13/500
 - 侧栏模板行：高 32、`padding 0 12px 0 30px`、`radius 6`、`margin 0 6`；选中 `bg #1D2024` 且状态点带 `box-shadow 0 0 0 3px #19E3B133`；名称选中 `#ECEEF1`、未选 `#9BA1AA`
-  （现有 `Sidebar.tsx` 用的是 `pl-[26px]`，与设计稿的 30px 差 4px，Task 3.2 一并对齐）
+  （~~现有 `Sidebar.tsx` 用的是 `pl-[26px]`~~ 已在 77cebe9 对齐为 `pl-[30px]`，选中态光环用新增的 `.dot-ring` 工具类）
 - 模板页头：高 56、`padding 0 24`；面包屑「客户名 13px `#9BA1AA` / 分隔 `#8A909A` / 模板名 18/600」；右侧「模板累计」12px + 金额 mono 13px
 - 步骤条：高 44、`padding 0 24`、步间距 12；每步 `padding 0 4`、底边 2px（当前 `#19E3B1`，其余 transparent）；序号圆 18px、1px 描边、mono 11px，当前显数字且主色，未解锁显 `·` 且 `#8A909A`；步名 13px，当前 600 `#ECEEF1`，其余 400 `#8A909A`；步与步之间一根 28×1px `#2A2E33` 连接线
 - 主工作区：`padding 20px 24px`、`gap 20`
@@ -419,6 +427,7 @@ Task 3.1 已落地的接口，前端直接照这个对接：
 ## 已知风险
 
 - **本机渲染不通 → 阻塞 Phase 6，Phase 1-5 不受影响。** `hyperframes.local` 在本机两种失败形态：900 帧目标在编码后校验失败 `Rendered visual frame rate differs from its document`（同一错误逐字复现两次，确定性失败）；4112 帧目标跑到 3489 帧时 CLI 自身崩在 `Bad escaped character in JSON`。已排除 ffmpeg（原样复现编码命令三组，输出均为干净的 `30/1`）与 run 文件改动（保留的是本来就合法的 target）。下一步：抓编码产物本身 ffprobe、查子进程输出被本机 ANSI 代码页解码的问题。证据见 `clone-studio/docs/spike-notes.md`「本机渲染不通」。
+- **本机 `rmSync` 对中文名路径静默失败。** Phase 3 实测：`rmSync(dir, {recursive:true, force:true})` 删中文名目录时既不抛错也不删除，空目录和带文件的都一样，加 `maxRetries` 无效；同样的调用对 ASCII 名目录正常。与「本机渲染不通」里那条 ANSI 代码页嫌疑很可能同源。**生产路径踩不到**：工程目录与 `.trash` 条目名都取自 UUID，用户输入的名称按设计从不进路径（`workspace.ts` 的 `slug` 只进 `package.json` 的 name 字段）。影响两点：一是涉及 fs 删除的测试不要用中文名造数据，否则测的是生产走不到的路径；二是判断删除成败要看 `existsSync` 结果，不能只看有没有抛异常，`purgeTrash()` 已按此实现。
 - **本机内存/显存是共享资源。** 渲染 workers 默认 4 对这台机器偏高：Phase 0 实测 8 workers 触发 SQLite out of memory、2 workers 渲染进程 ACCESS_VIOLATION、1 worker 才稳。并发默认值要按实际余量定，不照搬默认；本机同时在跑生视频测试时不要启动渲染。
 - ~~订阅登录下 SDK 花费字段与限流行为未知~~ **Phase 0 已解**：`total_cost_usd` 五组实跑均返回真实数值，$ 熔断成立且改用 SDK 原生 `maxBudgetUsd`。同轮发现 `canUseTool` 拦不住花钱动作，拦截机制已改（见 Phase 5）。
 - ~~`hypit pricing` 对 TokenDance 的估价可用性未知~~ **Phase 0 已解且为否**：估价与实际花费都拿不到，改为自维护费率表并全部标"估"（见 Phase 6）。

@@ -4,6 +4,8 @@ export class ApiError extends Error {
     readonly status: number,
     /** 后端返回的错误原文，界面要原样显示，不改写 */
     readonly detail?: string,
+    /** 后端的错误码，界面靠它决定就地红字还是 toast */
+    readonly code?: string,
   ) {
     super(message);
     this.name = "ApiError";
@@ -29,7 +31,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const body = parsed as { error?: { message?: string; code?: string } } | undefined;
-    throw new ApiError(body?.error?.message ?? `请求失败（HTTP ${res.status}）`, res.status, text || undefined);
+    throw new ApiError(
+      body?.error?.message ?? `请求失败（HTTP ${res.status}）`,
+      res.status,
+      text || undefined,
+      body?.error?.code,
+    );
   }
   return parsed as T;
 }

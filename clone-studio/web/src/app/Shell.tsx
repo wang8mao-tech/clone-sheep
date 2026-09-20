@@ -1,15 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
-import { Outlet, useNavigate } from "react-router";
+import { Outlet } from "react-router";
 import { AgentDrawer } from "./AgentDrawer.js";
-import { Sidebar, type SidebarClient } from "./Sidebar.js";
+import { Sidebar } from "./Sidebar.js";
 import { DesktopOnlyGate } from "./DesktopOnlyGate.js";
 import { HealthBanner } from "../components/HealthBanner.js";
 import { api, type Health } from "../lib/api.js";
+import { archiveApi, archiveKeys } from "../lib/archive.js";
 import type { HealthSummary } from "../lib/types.js";
+import { useInvalidateArchive } from "../lib/useArchive.js";
 import { useSse } from "../lib/useSse.js";
 
 export function Shell() {
-  const navigate = useNavigate();
+  const invalidateArchive = useInvalidateArchive();
 
   const health = useQuery({
     queryKey: ["health"],
@@ -25,23 +27,39 @@ export function Shell() {
     staleTime: 60_000,
   });
 
-  // 客户树的数据接口在 Phase 3 才有，这里先给空列表，外壳照常渲染。
-  const clients: SidebarClient[] = [];
+  const clients = useQuery({
+    queryKey: archiveKeys.clients,
+    queryFn: () => archiveApi.listClients(),
+  });
 
-  useSse(["global"], () => {
+  useSse(["global"], (event) => {
+    // 归档结构变了只重拉归档；体检要 spawn 子进程，别被它连累
+    if (event === "archive") {
+      invalidateArchive();
+      return;
+    }
     void health.refetch();
     void checks.refetch();
   });
+
+  // 后端整个不响应时，侧栏那条红条说的是同一件事，别让客户树再喊一遍
+  const sidebarError = health.isError
+    ? "后端未响应"
+    : clients.isError
+      ? (clients.error as Error).message
+      : undefined;
 
   return (
     <DesktopOnlyGate>
       <div className="flex h-full w-full overflow-hidden bg-bg">
         <Sidebar
-          clients={clients}
-          loading={false}
-          error={health.isError ? "后端未响应" : undefined}
-          onRetry={() => void health.refetch()}
-          onNewClient={() => void navigate("/")}
+          clients={clients.data?.clients ?? []}
+          loading={clients.isLoading}
+          error={sidebarError}
+          onRetry={() => {
+            void health.refetch();
+            void clients.refetch();
+          }}
           healthOk={(checks.data?.blockingFailures.length ?? 0) === 0 && health.data?.ok === true}
         />
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">

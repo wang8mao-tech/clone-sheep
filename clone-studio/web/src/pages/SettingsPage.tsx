@@ -104,12 +104,20 @@ export function SettingsPage() {
   });
 
   const saveSecret = useMutation({
+    // 后端注册的是 PUT（设置某个具名凭据，幂等替换）。这里曾经发的是 POST，
+    // 结果是一路 404，而下面原本没有 onError，失败被完全吞掉——用户点保存
+    // 毫无反应，接着验证又说"未配置 key"，看上去像两个 bug
     mutationFn: (value: string | null) =>
-      api.post<{ masked: string | null }>("/api/settings/secret", { key: "tokendance.apiKey", value }),
-    onSuccess: () => {
+      api.put<{ masked: string | null }>("/api/settings/secret", { key: "tokendance.apiKey", value }),
+    onSuccess: (_result, value) => {
       setTokenDraft("");
+      toast.push("success", value === null ? "已清除 TokenDance key" : "已保存，接着点「验证」");
       void qc.invalidateQueries({ queryKey: ["settings"] });
       void qc.invalidateQueries({ queryKey: ["health", "checks"] });
+    },
+    onError: (e: unknown) => {
+      const err = e as ApiError;
+      toast.push("danger", "保存失败", err.detail ?? err.message);
     },
   });
 

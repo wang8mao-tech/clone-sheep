@@ -3,7 +3,7 @@
 > 本文件记录项目的开发阶段划分、当前进度和剩余工作。
 > 新 session 启动时应首先阅读此文件，了解项目状态后再继续开发。
 >
-> **当前进度（2026-09-20）**：Phase 0 ✅（带一项已知阻塞）· Phase 1 ✅ · Phase 2 ✅（带三项遗留）· Phase 3 进行中，Task 3.1、3.2 已提交并过完一轮 review→fix，下一步 Task 3.3。详见 Phase 3 的「进度与交接」。
+> **当前进度（2026-09-20）**：Phase 0 ✅（带一项已知阻塞）· Phase 1 ✅ · Phase 2 ✅（带三项遗留）· Phase 3 进行中，Task 3.1-3.3 已提交，3.1/3.2 过完两轮 review→fix，3.3 审查中，下一步 Task 3.4。详见 Phase 3 的「进度与交接」。
 > 分支 `feat/clone-studio`。Phase 6 开工前必须先解「本机渲染不通」，见「已知风险」。
 >
 > 依据：Product-Spec.md v1.5、Design-Brief.md v1.0、设计稿 https://claude.ai/artifact/7DWGBWDbka6Wm71vV6TBbH（7 屏，UI 以设计稿为准）、Hypit-Research.md、用户提供的《Codex 生图配置说明》（不随仓库分发，要点已写入 Spec REQ-011）。
@@ -126,8 +126,8 @@ Task 拆分，按序做，每个走 review→fix 循环：
 |---|---|---|
 | 3.1 | 后端：客户/模板 CRUD + 级联删除服务 | ✅ de5aba6。审查 Stage 1 过、Stage 2 的 5 条应修已修完（b7ec073） |
 | 3.2 | 前端：侧栏树接真实数据 + 行尾「…」菜单（重命名/删除）+ 新建客户 | ✅ 77cebe9 + 6682239（二轮审查修复）。已真机验证 |
-| 3.3 | 前端：首页空状态 + 客户页模板紧凑行列表 | ⬜ 下一步 |
-| 3.4 | 前端：模板页框架（页头 + 步骤条 CMP-001 + 步骤路由 + 刷新保持） | ⬜ |
+| 3.3 | 前端：首页空状态 + 客户页模板紧凑行列表 | ✅ 96f9aa6。审查中 |
+| 3.4 | 前端：模板页框架（页头 + 步骤条 CMP-001 + 步骤路由 + 刷新保持） | ⬜ 下一步。现在是 `TemplatePlaceholderPage`，替掉它 |
 
 **Task 3.1 审查后的改动（b7ec073）**，Task 3.3 往后要按新形状对接：
 - `deleteClient` / `deleteTemplate` 改成 `async`，路由要 `await`
@@ -141,9 +141,24 @@ Task 拆分，按序做，每个走 review→fix 循环：
 
 **设计稿偏差备案**：模板行右 padding 用 `pr-8`（32px）而非设计稿的 12px，那 20px 是给行尾「…」菜单让位。代价是模板名的 `truncate` 提前 20px 截断。
 
-**Task 3.3 开工前已知的一件事**：`HomePage.tsx` 现在恒显示「还没有客户」，有客户时也这么说。空状态与客户页都归 Task 3.3，一并改。
+**Task 3.3 落地要点**（3.4 会复用）：
+- `components/TaskRow.tsx` 是 CMP-002 的原语，列宽由调用方给。SCREEN-006 的变体队列是同一种行，直接复用，别再手搓一份
+- `components/ui/TemplateDot.tsx` 是状态点的单一来源，侧栏与客户页共用
+- `lib/format.ts` 管花费与「最近活动」的格式
+- `useArchiveActions` 现在含 createClient / createTemplate / rename / remove / askDelete，模板页要用改名直接接这个
+- 可点的行必须给 `openLabel` 显式无障碍名，否则名字由行内容拼出来，跟行尾菜单按钮撞车
+- ~~`HomePage.tsx` 恒显示「还没有客户」~~ 已改：按客户数分两句话
 
-**前端测试栈仍未定**：菜单、就地改名、删除弹窗这三处 UI 交互没做真机点击验证——浏览器扩展当时没连上，web 包也还没有组件测试栈（`web/package.json` 的 test 是 `vitest run --passWithNoTests`，没有 jsdom / testing-library）。已验的是：typecheck、build、11 条纯逻辑单测、以及走真后端的 AC-001 / AC-003 / SSE `archive` 事件。要补的话有两条路，选哪条没定：装 jsdom + @testing-library/react 做组件测试，或按 dev-builder 说的上 Playwright 测核心流程。DEV-PLAN 的技术选型表里 vitest 那行只写了服务端用途，前端测试策略从没定过。
+**截图工具的坑**（Task 3.4 验证时会再遇到）：浏览器扩展的抓图帧固定约 1425px 宽，而本机页面 CSS 视口约 2327px，**右侧内容拍不进画面，`resize_window` 调了也没用**。别据此断言「东西不见了」——要验右侧布局用 `javascript_tool` 量 `getBoundingClientRect`。
+
+**前端测试栈已定：jsdom + @testing-library**（1924c5a，用户拍板）。选型表里 vitest 那行原先只写了服务端用途，现在前端同一套。Playwright 留到 Phase 5 之后再议——那时才有值得端到端钉住的主流程，现在上只能测「点一下新建客户」，撑不起维护成本。
+
+落地细节，Task 3.4 往后写用例直接照这个来：
+- 版本：jsdom 30.1.0 + @testing-library/react 16.3.3（peer 明确支持 React 19）+ user-event 14.6.7 + jest-dom 7.0.1
+- `web/vitest.config.ts` 单独一份，不混进 vite.config；`src/lib/**` 仍跑 node 环境
+- `src/test/setup.ts`：**jsdom 30 实测缺 `showModal` / `EventSource` / `matchMedia` / `scrollIntoView`**，逐个补桩。补桩覆盖到的行为不算被测过——弹窗的真模态性、焦点陷阱、SSE 的断线重连都要靠真机看
+- `src/test/harness.tsx`：只桩 fetch 那一层，组件、react-query、路由全是真的。`renderApp()` 用真实路由表跑整个外壳，不另抄配置。桩不中的请求直接抛，免得静默返回 undefined 变成假绿
+- **用例写完要做变异验证**：把被测代码改回错误实现，确认对应用例真变红。跑绿不等于测到了
 
 Task 3.1 已落地的接口，前端直接照这个对接：
 

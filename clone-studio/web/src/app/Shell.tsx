@@ -4,7 +4,7 @@ import { AgentDrawer } from "./AgentDrawer.js";
 import { Sidebar } from "./Sidebar.js";
 import { DesktopOnlyGate } from "./DesktopOnlyGate.js";
 import { HealthBanner } from "../components/HealthBanner.js";
-import { api, type Health } from "../lib/api.js";
+import { api, TIMEOUT_MS, type Health } from "../lib/api.js";
 import { archiveApi, archiveKeys } from "../lib/archive.js";
 import type { HealthSummary } from "../lib/types.js";
 import { useInvalidateArchive } from "../lib/useArchive.js";
@@ -22,7 +22,7 @@ export function Shell() {
 
   const checks = useQuery({
     queryKey: ["health", "checks"],
-    queryFn: () => api.get<HealthSummary>("/api/health/checks"),
+    queryFn: () => api.get<HealthSummary>("/api/health/checks", TIMEOUT_MS.healthChecks),
     // 体检要 spawn 好几个子进程，别频繁重跑
     staleTime: 60_000,
   });

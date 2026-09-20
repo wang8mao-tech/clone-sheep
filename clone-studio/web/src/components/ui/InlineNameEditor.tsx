@@ -9,6 +9,8 @@ interface Props {
   error?: string;
   /** 左内边距对齐所在行的文字位置 */
   indentClass?: string;
+  /** 用户开始改字时通知父级清掉上一次的错误，别让"名称已存在"挂在新名字下面 */
+  onDirty?: () => void;
   onCommit: (name: string) => void;
   onCancel: () => void;
 }
@@ -25,6 +27,7 @@ export function InlineNameEditor({
   busy = false,
   error,
   indentClass = "pl-3",
+  onDirty,
   onCommit,
   onCancel,
 }: Props) {
@@ -55,7 +58,10 @@ export function InlineNameEditor({
         autoComplete="off"
         aria-label={placeholder ?? "名称"}
         aria-invalid={error ? true : undefined}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={(e) => {
+          setValue(e.target.value);
+          if (error) onDirty?.();
+        }}
         onBlur={() => {
           if (!busy) onCancel();
         }}

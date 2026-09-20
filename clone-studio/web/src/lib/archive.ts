@@ -1,4 +1,4 @@
-import { api } from "./api.js";
+import { api, TIMEOUT_MS } from "./api.js";
 
 /**
  * 归档域（客户 / 模板）的类型与请求。
@@ -86,14 +86,14 @@ export const archiveApi = {
   createClient: (name: string) => api.post<Client>("/api/clients", { name }),
   renameClient: (id: string, name: string) => api.patch<Client>(`/api/clients/${id}`, { name }),
   clientImpact: (id: string) => api.get<DeletionImpact>(`/api/clients/${id}/deletion-impact`),
-  deleteClient: (id: string) => api.delete<DeletionImpact>(`/api/clients/${id}`),
+  deleteClient: (id: string) => api.delete<DeletionImpact>(`/api/clients/${id}`, TIMEOUT_MS.deletion),
 
   createTemplate: (clientId: string, name: string) =>
-    api.post<Template>(`/api/clients/${clientId}/templates`, { name }),
+    api.post<Template>(`/api/clients/${clientId}/templates`, { name }, TIMEOUT_MS.createTemplate),
   template: (id: string) => api.get<TemplateDetail>(`/api/templates/${id}`),
   renameTemplate: (id: string, name: string) => api.patch<Template>(`/api/templates/${id}`, { name }),
   templateImpact: (id: string) => api.get<DeletionImpact>(`/api/templates/${id}/deletion-impact`),
-  deleteTemplate: (id: string) => api.delete<DeletionImpact>(`/api/templates/${id}`),
+  deleteTemplate: (id: string) => api.delete<DeletionImpact>(`/api/templates/${id}`, TIMEOUT_MS.deletion),
 };
 
 /**

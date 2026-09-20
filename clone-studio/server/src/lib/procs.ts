@@ -4,13 +4,24 @@ import type { ChildProcess } from "node:child_process";
 /** 强杀后等 exit 事件的宽限，超过就不等了 */
 const FORCE_KILL_GRACE_MS = 2_000;
 
-/** 连子孙一起强杀。Windows 只能借 taskkill，POSIX 走进程组。 */
-function forceKillTree(pid: number): void {
+/**
+ * 连子孙一起强杀。
+ *
+ * Windows 用 taskkill /T 杀整棵树——hypit 渲染会拉起一串孙进程，
+ * 只杀父进程会留下占着工作目录的孤儿。
+ *
+ * POSIX 这边不能用 `process.kill(-pid)` 杀进程组：spawn 时没给 `detached: true`
+ * （见 hypit/cli.ts），子进程不是进程组长，它的 PGID 继承自后端自己，
+ * 拿 -pid 去杀要么 ESRCH 被静默吞掉、要么 PID 复用时误伤无关进程组。
+ * v1 只跑本机 Windows（Spec OUT-002），POSIX 这条路退回只杀进程本身，
+ * 宁可漏掉孙进程也不能杀错人。
+ */
+function forceKillTree(child: ChildProcess, pid: number): void {
   try {
     if (process.platform === "win32") {
       spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
     } else {
-      process.kill(-pid, "SIGKILL");
+      child.kill("SIGKILL");
     }
   } catch {
     // 进程可能已经自己退了，杀不到就是好事
@@ -80,42 +91,54 @@ class ProcRegistry {
     if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
 
     return new Promise<void>((resolve) => {
+      let killTimer: NodeJS.Timeout | undefined;
+      let graceTimer: NodeJS.Timeout | undefined;
       let settled = false;
+
       const finish = (): void => {
         if (settled) return;
         settled = true;
-        clearTimeout(timer);
+        // 两个定时器和监听器都要摘干净：先退出时留着宽限定时器会把事件循环
+        // 多拽住 2 秒，超时路径留着监听器则是每杀一次泄漏一个
+        clearTimeout(killTimer);
+        clearTimeout(graceTimer);
+        child.off("exit", finish);
         resolve();
       };
 
       child.once("exit", finish);
       child.kill("SIGTERM");
 
-      const timer = setTimeout(() => {
-        // Windows 上 SIGKILL 对不肯退的进程一样没用，而 hypit 渲染会拉起一串
-        // 孙进程，只杀父进程会留下占着目录的孤儿——必须带 /T 杀整棵树
-        forceKillTree(pid);
+      killTimer = setTimeout(() => {
+        forceKillTree(child, pid);
         // 强杀后再给一点时间收 exit 事件；还不来就不等了，
         // 真没退的话后面移目录会撞 EPERM，照常报 DIRECTORY_BUSY
-        setTimeout(finish, FORCE_KILL_GRACE_MS);
+        graceTimer = setTimeout(finish, FORCE_KILL_GRACE_MS);
       }, timeoutMs);
     });
   }
 
-  /** 按 pid 杀单个，用于"取消"动作 */
-  kill(pid: number): boolean {
+  /** 按 pid 杀单个并等它退出，用于"取消"动作 */
+  async kill(pid: number, timeoutMs = 10_000): Promise<boolean> {
     const entry = this.entries.get(pid);
     if (!entry) return false;
-    entry.child.kill("SIGTERM");
+    await this.terminate(pid, entry, timeoutMs);
     return true;
   }
 
+  /**
+   * 后端退出时收尸。必须连孙进程一起杀：渲染进程不会因为后端退出而自己停，
+   * 只对直接子进程发 SIGTERM 会留下一堆孤儿接着吃 CPU 和显存
+   * （DEV-PLAN Phase 13 验收要求「无孤儿子进程」）。
+   *
+   * 这里是同步的、不等退出：信号处理器里没有等待的余地，后端马上就要退了。
+   */
   killAll(): void {
     if (this.shuttingDown) return;
     this.shuttingDown = true;
-    for (const [, entry] of this.entries) {
-      // Windows 上 SIGTERM 等价于强杀，这里不做优雅等待——后端都要退了
+    for (const [pid, entry] of this.entries) {
       entry.child.kill("SIGTERM");
+      forceKillTree(entry.child, pid);
     }
     this.entries.clear();
   }

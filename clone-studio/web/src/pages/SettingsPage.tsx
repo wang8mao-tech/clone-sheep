@@ -6,7 +6,7 @@ import { Button } from "../components/ui/Button.js";
 import { Input } from "../components/ui/Input.js";
 import { useToast } from "../components/ui/Toast.js";
 import { HealthRow } from "../components/HealthRow.js";
-import { api, ApiError } from "../lib/api.js";
+import { api, TIMEOUT_MS, ApiError } from "../lib/api.js";
 import type { HealthSummary, Settings, VerifyResult } from "../lib/types.js";
 
 function Section({ id, title, action, children }: {
@@ -85,7 +85,7 @@ export function SettingsPage() {
 
   const health = useQuery({
     queryKey: ["health", "checks"],
-    queryFn: () => api.get<HealthSummary>("/api/health/checks"),
+    queryFn: () => api.get<HealthSummary>("/api/health/checks", TIMEOUT_MS.healthChecks),
   });
   const settings = useQuery({ queryKey: ["settings"], queryFn: () => api.get<Settings>("/api/settings") });
 
@@ -109,7 +109,7 @@ export function SettingsPage() {
   });
 
   const verify = useMutation({
-    mutationFn: () => api.post<VerifyResult>("/api/settings/verify/tokendance"),
+    mutationFn: () => api.post<VerifyResult>("/api/settings/verify/tokendance", undefined, TIMEOUT_MS.verify),
     onSuccess: (result) => {
       if (result.ok) {
         toast.push("success", "TokenDance key 验证通过");

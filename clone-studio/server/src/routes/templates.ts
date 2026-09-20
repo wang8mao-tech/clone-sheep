@@ -43,7 +43,7 @@ export async function templateRoutes(app: FastifyInstance): Promise<void> {
 
   app.delete("/api/templates/:id", async (request) => {
     const { id } = request.params as { id: string };
-    const impact = deleteTemplate(id);
+    const impact = await deleteTemplate(id);
     sseHub.publish("global", "archive", { kind: "template", action: "deleted", id });
     return impact;
   });

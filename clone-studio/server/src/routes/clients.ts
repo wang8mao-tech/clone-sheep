@@ -60,7 +60,7 @@ export async function clientRoutes(app: FastifyInstance): Promise<void> {
 
   app.delete("/api/clients/:id", async (request) => {
     const { id } = request.params as { id: string };
-    const impact = deleteClient(id);
+    const impact = await deleteClient(id);
     sseHub.publish("global", "archive", { kind: "client", action: "deleted", id });
     return impact;
   });

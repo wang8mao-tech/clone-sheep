@@ -2,6 +2,7 @@ import Fastify from "fastify";
 import { config } from "./config.js";
 import { markStaleRunningAsInterrupted, migrate } from "./db/migrate.js";
 import { procs } from "./lib/procs.js";
+import { purgeTrash } from "./services/deletion.js";
 import { clientRoutes } from "./routes/clients.js";
 import { settingsRoutes } from "./routes/settings.js";
 import { systemRoutes } from "./routes/system.js";
@@ -19,6 +20,9 @@ const app = Fastify({
 
 async function main(): Promise<void> {
   migrate();
+  const purged = purgeTrash();
+  if (purged) app.log.info({ purged }, "清掉了上次删除残留在 .trash 的目录");
+
   const stale = markStaleRunningAsInterrupted();
   if (stale.jobs || stale.productions || stale.builds) {
     app.log.warn(

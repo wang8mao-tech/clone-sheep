@@ -71,7 +71,7 @@ export async function runHypit<T = unknown>(
       ...options.env,
     },
   });
-  procs.register(child, `hypit ${args[0] ?? ""}`);
+  procs.register(child, `hypit ${args[0] ?? ""}`, options.subject);
 
   let stdout = "";
   let stderr = "";

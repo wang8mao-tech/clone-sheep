@@ -3,7 +3,7 @@
 > 本文件记录项目的开发阶段划分、当前进度和剩余工作。
 > 新 session 启动时应首先阅读此文件，了解项目状态后再继续开发。
 >
-> **当前进度（2026-09-20）**：Phase 0 ✅（带一项已知阻塞）· Phase 1 ✅ · Phase 2 ✅（带三项遗留）· Phase 3 进行中，Task 3.1-3.3 已提交，3.1/3.2 过完两轮 review→fix，3.3 审查中，下一步 Task 3.4。详见 Phase 3 的「进度与交接」。
+> **当前进度（2026-09-20）**：Phase 0 ✅（带一项已知阻塞）· Phase 1 ✅ · Phase 2 ✅（带三项遗留）· **Phase 3 ✅**（四个 Task 交付，过完五轮 review→fix，AC-001 / AC-003 实跑通过，AC-002 按原计划留 Phase 5）· 下一步 Phase 4。
 > 分支 `feat/clone-studio`。Phase 6 开工前必须先解「本机渲染不通」，见「已知风险」。
 >
 > 依据：Product-Spec.md v1.5、Design-Brief.md v1.0、设计稿 https://claude.ai/artifact/7DWGBWDbka6Wm71vV6TBbH（7 屏，UI 以设计稿为准）、Hypit-Research.md、用户提供的《Codex 生图配置说明》（不随仓库分发，要点已写入 Spec REQ-011）。
@@ -111,7 +111,7 @@
 **关键文件**：
 - `clone-studio/server/src/routes/clients.ts`、`server/src/routes/templates.ts`
 - `clone-studio/server/src/services/deletion.ts` — 停任务 → 删目录 → 删库，失败整体回滚
-- `clone-studio/web/src/pages/HomePage.tsx`、`web/src/pages/ClientPage.tsx`、`web/src/pages/template/TemplateLayout.tsx`
+- `clone-studio/web/src/pages/HomePage.tsx`、`web/src/pages/ClientPage.tsx`、`web/src/pages/TemplateLayout.tsx`（实际落在 `pages/` 下，没有 `template/` 层）
 - `clone-studio/web/src/components/Stepper.tsx`（CMP-001）、`web/src/components/TaskRow.tsx`（CMP-002）
 
 **验收标准**：
@@ -126,8 +126,8 @@ Task 拆分，按序做，每个走 review→fix 循环：
 |---|---|---|
 | 3.1 | 后端：客户/模板 CRUD + 级联删除服务 | ✅ de5aba6。审查 Stage 1 过、Stage 2 的 5 条应修已修完（b7ec073） |
 | 3.2 | 前端：侧栏树接真实数据 + 行尾「…」菜单（重命名/删除）+ 新建客户 | ✅ 77cebe9 + 6682239（二轮审查修复）。已真机验证 |
-| 3.3 | 前端：首页空状态 + 客户页模板紧凑行列表 | ✅ 96f9aa6。审查中 |
-| 3.4 | 前端：模板页框架（页头 + 步骤条 CMP-001 + 步骤路由 + 刷新保持） | ⬜ 下一步。现在是 `TemplatePlaceholderPage`，替掉它 |
+| 3.3 | 前端：首页空状态 + 客户页模板紧凑行列表 | ✅ 96f9aa6 + 824ac72 |
+| 3.4 | 前端：模板页框架（页头 + 步骤条 CMP-001 + 步骤路由 + 刷新保持） | ✅ d1766a6 + c05595d。`TemplatePlaceholderPage` 已删 |
 
 **Task 3.1 审查后的改动（b7ec073）**，Task 3.3 往后要按新形状对接：
 - `deleteClient` / `deleteTemplate` 改成 `async`，路由要 `await`
@@ -148,6 +148,18 @@ Task 拆分，按序做，每个走 review→fix 循环：
 - `useArchiveActions` 现在含 createClient / createTemplate / rename / remove / askDelete，模板页要用改名直接接这个
 - 可点的行必须给 `openLabel` 显式无障碍名，否则名字由行内容拼出来，跟行尾菜单按钮撞车
 - ~~`HomePage.tsx` 恒显示「还没有客户」~~ 已改：按客户数分两句话
+
+**Phase 3 收口时记下的三件事，Phase 4 起会用到：**
+
+1. **两条产品规则是在代码层发明的，Spec / Design-Brief / 本文件都没有出处**，现记于此作为暂时的真相源，**是否回写 Product-Spec 待用户拍板**：
+   - `outputs > 0` 就解锁 ⑤成片，不必等验货通过。依据是 FLOW-002 的「复刻片作为该模板下第一条成片入库」+ REQ-001 的「⑤成片 列出复刻片与全部变体成片」，推出「有片就能看」。SCOPE-004 只 gate 了 ④，没人说 ⑤ 怎么 gate。
+   - `defaultStep` 的四级优先级：**需处理 > 进行中 > 失败 > 能进的最后一步**。Spec 与 Brief 都没规定「进入模板页默认落在哪一步」。Phase 4/6/7/8/9 每个工作区都要依赖它。
+2. **`steps.ts` 里两条推导从未在真实数据上跑过**：Phase 3 全仓没有任何一处写 `templates.source_path`，也没有任何一处 `UPDATE templates SET status`（唯一的 `UPDATE templates` 是改名）。所以 `hasSource` 恒 false、`status` 恒 `importing`，`failed` 落点判定与 `cloning`/`approved` 等分支只有单元测试证明。**Phase 4 接上写入方之后必须补真机验证。**
+3. **`disabled` + `title` 给不出「原因 tooltip」**（Design-Brief 组件通用七态要求禁用态给原因）：浏览器对 disabled 表单控件不派发指针事件，原生 title 气泡不出现。这是 Phase 1 的 `components/ui/Button.tsx` 就定下的先例（还额外加了 `disabled:pointer-events-none`），`Stepper` 照着走。**要修得整体修**——换 `aria-disabled` + onClick 拦截，或包一层 wrapper 承载 tooltip，别只改一处。
+
+**写 UI 时的两条硬约定**（都是真机实测踩出来的）：
+- 不要用 `max-w-*` 这类语义刻度，这套 Tailwind 配置里没有 `--container-*`，`max-w-lg` 会解析成 16px。跟项目先例走显式值（弹窗 `w-[420px]`、toast `w-80`、HealthRow `max-w-[380px]`）。
+- 自定义 CSS 一律写进 `@layer`。无层规则永远压过 Tailwind 的全部工具类——侧栏链接颜色那次事故就是这么来的，全应用所有 `<a>` 的 `text-*` 类集体失效。
 
 **截图工具的坑**（Task 3.4 验证时会再遇到）：浏览器扩展的抓图帧固定约 1425px 宽，而本机页面 CSS 视口约 2327px，**右侧内容拍不进画面，`resize_window` 调了也没用**。别据此断言「东西不见了」——要验右侧布局用 `javascript_tool` 量 `getBoundingClientRect`。
 

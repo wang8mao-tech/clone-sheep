@@ -98,12 +98,19 @@ samp {
   outline-offset: 2px;
 }
 
-a {
-  color: var(--color-primary);
-  text-decoration: none;
-}
-a:hover {
-  color: var(--color-primary-soft);
+/*
+ * 必须放进 @layer base：Tailwind v4 的工具类都在 @layer utilities 里，而无层规则
+ * 永远压过任何 @layer。不分层的话，任何 <a> 上的 text-* 类全部失效——侧栏的
+ * text-text-secondary 会被渲染成主色绿，选中态在文字颜色上等于没做。
+ */
+@layer base {
+  a {
+    color: var(--color-primary);
+    text-decoration: none;
+  }
+  a:hover {
+    color: var(--color-primary-soft);
+  }
 }
 
 /* 侧栏选中行的状态点光环（设计稿实测 box-shadow 0 0 0 3px #19E3B133） */

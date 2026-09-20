@@ -14,9 +14,11 @@ export default mergeConfig(
       environment: "jsdom",
       globals: false,
       setupFiles: ["./src/test/setup.ts"],
-      // 纯逻辑用例跑在 node 环境更快，也免得它们被 jsdom 的缺省实现带偏
-      environmentMatchGlobs: [["src/lib/**", "node"]],
       restoreMocks: true,
+      // restoreMocks 只管 vi.spyOn 建的 spy，撤不掉 vi.stubGlobal。
+      // 不加这条，某条用例忘了装 fetch 桩会安静地复用上一条的桩跑绿，
+      // 而不是按 harness 的设计抛「没有给 … 准备桩」
+      unstubGlobals: true,
     },
   }),
 );

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { NavLink } from "react-router";
+import { NavLink, useNavigate } from "react-router";
 import { Plus, Settings, TriangleAlert } from "lucide-react";
 import { ClientNode } from "./ClientNode.js";
 import { useArchiveActions } from "./useArchiveActions.js";
@@ -21,6 +21,7 @@ interface Props {
 
 export function Sidebar({ clients, loading, error, onRetry, healthOk }: Props) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const navigate = useNavigate();
 
   const setOpen = (id: string, open: boolean): void => {
     setCollapsed((prev) => {
@@ -31,8 +32,12 @@ export function Sidebar({ clients, loading, error, onRetry, healthOk }: Props) {
     });
   };
 
-  // REQ-001「新建后自动选中」：客户页的路由在 Task 3.3 落，先把新客户的枝展开
-  const actions = useArchiveActions((clientId) => setOpen(clientId, true));
+  // REQ-001「新建后自动选中」：展开新客户的枝，并进它的客户页。
+  // 首页那个入口也是这个行为——同一个动作两个入口，结果必须一致
+  const actions = useArchiveActions((clientId) => {
+    setOpen(clientId, true);
+    void navigate(`/clients/${clientId}`);
+  });
   const { editing, editError, pending, beginEdit, closeEditor, clearEditError, cancelDelete, createClient, remove } =
     actions;
 

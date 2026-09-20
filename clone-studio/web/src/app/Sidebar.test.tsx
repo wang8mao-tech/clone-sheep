@@ -166,6 +166,9 @@ describe("侧栏：新建客户", () => {
           post(init?.body);
           return { status: 201, body: { id: "new", name: "计生协会", createdAt: "2026-09-20T05:00:00.000Z" } };
         },
+        "/api/clients/new": {
+          body: { client: { id: "new", name: "计生协会", createdAt: "2026-09-20T05:00:00.000Z" }, templates: [] },
+        },
       }),
     );
     renderApp("/");
@@ -174,6 +177,8 @@ describe("侧栏：新建客户", () => {
 
     await waitFor(() => expect(post).toHaveBeenCalledWith(JSON.stringify({ name: "计生协会" })));
     await waitFor(() => expect(screen.queryByLabelText("客户名")).not.toBeInTheDocument());
+    // REQ-001「新建后自动选中」：侧栏这个入口要和首页那个一样进客户页
+    expect(await screen.findByRole("heading", { name: "计生协会" })).toBeInTheDocument();
   });
 
   it("超长名的提示也贴在输入框下（AC-003 同一条通道）", async () => {
@@ -201,10 +206,14 @@ describe("侧栏：级联删除", () => {
 
     await useRowMenu("老王工作室", "删除");
 
-    expect(await screen.findByText("连带删除 2 个模板")).toBeInTheDocument();
-    expect(screen.getByText("连带删除 5 条成片与变体")).toBeInTheDocument();
-    expect(screen.getByText("将中止 1 个运行中的任务")).toBeInTheDocument();
-    expect(screen.getByText(/不可恢复/)).toBeInTheDocument();
+    // 必须先断言弹窗真开了：getByText 不看可见性，<dialog> 的子树一直挂在
+    // DOM 上，只查文字的话弹窗压根没打开也能查到——那是假绿
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toBeVisible();
+    expect(within(dialog).getByText("连带删除 2 个模板")).toBeInTheDocument();
+    expect(within(dialog).getByText("连带删除 5 条成片与变体")).toBeInTheDocument();
+    expect(within(dialog).getByText("将中止 1 个运行中的任务")).toBeInTheDocument();
+    expect(within(dialog).getByText(/不可恢复/)).toBeInTheDocument();
   });
 
   it("名字没输对就不让确认（FLOW-004 的二次确认）", async () => {

@@ -29,15 +29,23 @@ export function HomePage() {
   return (
     <div className="flex flex-1 items-center justify-center p-6">
       <div className="flex w-80 flex-col items-center gap-4">
+        {/* 拿不到列表时绝不能说「还没有客户」——用户手上可能有二十个，
+            只是后端没应答。这正是这个页面上一版犯的错，换个触发条件而已 */}
         <p className="text-center text-[13px] text-text-secondary">
-          {clients.isLoading
-            ? "　"
-            : count === 0
-              ? "还没有客户。建一个客户，再往里加参考视频。"
-              : "从左侧选一个客户，或者再建一个。"}
+          {clients.isError
+            ? "读不到客户列表，后端可能没在跑。"
+            : clients.isLoading
+              ? "　"
+              : count === 0
+                ? "还没有客户。建一个客户，再往里加参考视频。"
+                : "从左侧选一个客户，或者再建一个。"}
         </p>
 
-        {adding ? (
+        {clients.isError ? (
+          <Button variant="secondary" onClick={() => void clients.refetch()} loading={clients.isFetching}>
+            重试
+          </Button>
+        ) : adding ? (
           <div className="w-full">
             <InlineNameEditor
               placeholder="客户名"

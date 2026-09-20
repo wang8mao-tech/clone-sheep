@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate, useParams } from "react-router";
+import { useParams } from "react-router";
 import { Film, Plus } from "lucide-react";
 import { useArchiveActions } from "../app/useArchiveActions.js";
 import { Badge } from "../components/ui/Badge.js";
@@ -11,6 +11,12 @@ import { TemplateDot } from "../components/ui/TemplateDot.js";
 import { TaskRow } from "../components/TaskRow.js";
 import { archiveApi, archiveKeys, impactLines } from "../lib/archive.js";
 import { formatActivityTime, formatUsd } from "../lib/format.js";
+import { ApiError } from "../lib/api.js";
+
+/** 404 才是"对象没了"，别把超时和后端挂掉也说成删除 */
+function isGone(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404;
+}
 
 /**
  * SCREEN-002 客户页：模板的紧凑行列表（CMP-002）。
@@ -21,7 +27,6 @@ import { formatActivityTime, formatUsd } from "../lib/format.js";
  */
 export function ClientPage() {
   const { clientId = "" } = useParams();
-  const navigate = useNavigate();
   const actions = useArchiveActions();
   const { editing, editError, pending, beginEdit, closeEditor, clearEditError, cancelDelete } = actions;
 
@@ -33,9 +38,25 @@ export function ClientPage() {
   });
 
   if (detail.isError) {
+    // 5 秒超时抛的是 ApiError("后端未响应")，不分流的话后端一卡就宣布客户被删了
+    const gone = isGone(detail.error);
     return (
       <div className="flex flex-1 items-center justify-center p-6">
-        <p className="text-[13px] text-text-secondary">这个客户已经不存在了。</p>
+        <div className="flex flex-col items-center gap-4 text-center">
+          <p className="text-[13px] text-text-secondary">
+            {gone ? "这个客户已经不存在了。" : "读不到这个客户。"}
+          </p>
+          {gone ? null : (
+            <>
+              <pre className="max-h-40 w-[420px] overflow-auto rounded-md border border-border bg-surface p-3 text-left font-mono text-caption whitespace-pre-wrap text-text-secondary">
+                {detail.error instanceof Error ? detail.error.message : String(detail.error)}
+              </pre>
+              <Button variant="secondary" onClick={() => void detail.refetch()} loading={detail.isFetching}>
+                重试
+              </Button>
+            </>
+          )}
+        </div>
       </div>
     );
   }
@@ -47,14 +68,18 @@ export function ClientPage() {
     <div className="flex flex-1 flex-col gap-5 overflow-y-auto px-6 py-5">
       <div className="flex h-8 items-center justify-between gap-3">
         <h1 className="truncate text-heading-lg">{detail.data?.client.name ?? "　"}</h1>
-        <Button
-          variant="primary"
-          icon={<Plus aria-hidden className="size-4" />}
-          disabled={actions.busy || !detail.data}
-          onClick={() => beginEdit({ kind: "new-template", clientId })}
-        >
-          新建模板
-        </Button>
+        {/* 空状态自己会给一个「新建模板」，页头这个就收起来——
+            两个可访问名一模一样的按钮，读屏用户分不清点哪个 */}
+        {templates.length === 0 && !detail.isLoading ? null : (
+          <Button
+            variant="primary"
+            icon={<Plus aria-hidden className="size-4" />}
+            disabled={actions.busy || !detail.data}
+            onClick={() => beginEdit({ kind: "new-template", clientId })}
+          >
+            新建模板
+          </Button>
+        )}
       </div>
 
       {addingTemplate ? (
@@ -103,7 +128,7 @@ export function ClientPage() {
             <span className="w-24 shrink-0 text-right">最近活动</span>
             <span className="w-5 shrink-0" />
           </div>
-          <ul className="flex flex-col">
+          <ul aria-label="模板列表" className="flex flex-col">
             {templates.map((tpl) =>
               editing?.kind === "template" && editing.id === tpl.id ? (
                 <li key={tpl.id} className="border-b border-border/60 last:border-b-0">
@@ -120,7 +145,7 @@ export function ClientPage() {
               ) : (
               <TaskRow
                 key={tpl.id}
-                onOpen={() => void navigate(`/clients/${clientId}/templates/${tpl.id}`)}
+                href={`/clients/${clientId}/templates/${tpl.id}`}
                 openLabel={`打开模板 ${tpl.name}`}
                 lead={
                   <div className="flex items-center gap-3">
@@ -145,13 +170,13 @@ export function ClientPage() {
                     width: "6rem",
                     numeric: true,
                     content: (
+                      // REQ-009 MUST：两类花费一律标"估"，不看 costIsEstimate 分支。
+                      // Q-003 已定死 build 后也拿不到实际金额，不存在"不是估算"的花费
                       <span className="inline-flex items-center justify-end gap-1">
                         {formatUsd(tpl.stats.totalCostUsd)}
-                        {tpl.stats.costIsEstimate ? (
-                          <Badge tone="warning" title="含估算值，非实际账单">
-                            估
-                          </Badge>
-                        ) : null}
+                        <Badge tone="warning" title="花费均为估算，以 Provider 侧为准">
+                          估
+                        </Badge>
                       </span>
                     ),
                   },

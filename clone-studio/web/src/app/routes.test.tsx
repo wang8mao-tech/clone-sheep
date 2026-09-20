@@ -44,7 +44,7 @@ beforeEach(() => {
     ...healthStubs,
     "/api/clients": { body: oneClientWithTemplate },
     [`/api/templates/${TEMPLATE_ID}`]: { body: templateDetail },
-    "/api/templates/": { status: 404, body: { error: { code: "TEMPLATE_NOT_FOUND", message: "模板不存在" } } },
+    "/api/templates/:id": { status: 404, body: { error: { code: "TEMPLATE_NOT_FOUND", message: "模板不存在" } } },
   });
 });
 

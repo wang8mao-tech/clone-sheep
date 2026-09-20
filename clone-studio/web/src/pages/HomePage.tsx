@@ -42,9 +42,16 @@ export function HomePage() {
         </p>
 
         {clients.isError ? (
-          <Button variant="secondary" onClick={() => void clients.refetch()} loading={clients.isFetching}>
-            重试
-          </Button>
+          // 重试与新建并排：后端回来之前建不了客户，但不能把入口整个抽走——
+          // 侧栏那个「新客户」还在，一个入口消失一个还在才是更糟的不一致
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" onClick={() => void clients.refetch()} loading={clients.isFetching}>
+              重试
+            </Button>
+            <Button variant="primary" disabled disabledReason="后端没应答，先重试">
+              新建客户
+            </Button>
+          </div>
         ) : adding ? (
           <div className="w-full">
             <InlineNameEditor

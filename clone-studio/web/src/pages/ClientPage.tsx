@@ -11,12 +11,7 @@ import { TemplateDot } from "../components/ui/TemplateDot.js";
 import { TaskRow } from "../components/TaskRow.js";
 import { archiveApi, archiveKeys, impactLines } from "../lib/archive.js";
 import { formatActivityTime, formatUsd } from "../lib/format.js";
-import { ApiError } from "../lib/api.js";
-
-/** 404 才是"对象没了"，别把超时和后端挂掉也说成删除 */
-function isGone(error: unknown): boolean {
-  return error instanceof ApiError && error.status === 404;
-}
+import { isGone } from "../lib/api.js";
 
 /**
  * SCREEN-002 客户页：模板的紧凑行列表（CMP-002）。

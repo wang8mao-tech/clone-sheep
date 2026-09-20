@@ -15,7 +15,9 @@ export function HealthBanner({ failures }: { failures: readonly CheckResult[] })
       <span className="flex-1 text-[13px] text-warning">
         {failures.length} 项环境体检未通过：{first ? `${first.name} ${first.detail}` : ""}，导入与出片暂不可用
       </span>
-      <Link to="/settings" className="text-[13px] underline">
+      {/* 颜色必须显式给：不给的话吃 @layer base 的 a{color:primary}，
+          在琥珀横幅里渲染成一条主色绿，和周围的 text-warning 打架 */}
+      <Link to="/settings" className="text-[13px] text-warning underline hover:text-warning/80">
         去设置
       </Link>
     </div>

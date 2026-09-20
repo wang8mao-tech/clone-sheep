@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "react-router";
 import { archiveApi, archiveKeys } from "../lib/archive.js";
-import { ApiError } from "../lib/api.js";
+import { isGone } from "../lib/api.js";
+import { Button } from "../components/ui/Button.js";
 
 /**
  * 模板页占位。
@@ -23,12 +24,22 @@ export function TemplatePlaceholderPage() {
   return (
     <div className="flex flex-1 flex-col gap-5 px-6 py-5">
       {template.isError ? (
-        // 只有 404 才是真没了；超时和后端挂掉要说实话
-        <p className="text-[13px] text-text-secondary">
-          {template.error instanceof ApiError && template.error.status === 404
-            ? "这个模板已经不存在了。"
-            : `读不到这个模板：${template.error instanceof Error ? template.error.message : String(template.error)}`}
-        </p>
+        // 只有 404 才是真没了；超时和后端挂掉要说实话，并给一条回得去的路
+        <div className="flex flex-col items-start gap-3">
+          <p className="text-[13px] text-text-secondary">
+            {isGone(template.error) ? "这个模板已经不存在了。" : "读不到这个模板。"}
+          </p>
+          {isGone(template.error) ? null : (
+            <>
+              <pre className="max-h-40 w-[420px] overflow-auto rounded-md border border-border bg-surface p-3 font-mono text-caption whitespace-pre-wrap text-text-secondary">
+                {template.error instanceof Error ? template.error.message : String(template.error)}
+              </pre>
+              <Button variant="secondary" onClick={() => void template.refetch()} loading={template.isFetching}>
+                重试
+              </Button>
+            </>
+          )}
+        </div>
       ) : (
         <>
           <div className="flex flex-col gap-1">

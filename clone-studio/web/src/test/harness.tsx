@@ -36,7 +36,9 @@ function pathMatches(pattern: string, url: string): boolean {
   const p = pattern.split("/");
   const u = url.split("/");
   if (p.length !== u.length) return false;
-  return p.every((seg, i) => seg.startsWith(":") || seg === u[i]);
+  // `:占位` 必须吃到非空的一段：不加这条的话 "/api/clients/" 会被
+  // "/api/clients/:id" 当成"空 id"匹配上，安静地返回一份客户详情
+  return p.every((seg, i) => (seg.startsWith(":") ? u[i] !== "" : seg === u[i]));
 }
 
 export interface RouteStub {

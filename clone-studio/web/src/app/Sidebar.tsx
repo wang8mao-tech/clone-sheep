@@ -99,7 +99,10 @@ export function Sidebar({ clients, loading, error, onRetry, healthOk }: Props) {
             <Button
               variant="ghost"
               icon={<Plus aria-hidden className="size-4" />}
-              disabled={actions.busy}
+              // 后端没应答时一并禁掉：首页那个入口也是禁的，
+              // 同一个动作两个入口，结果必须一致
+              disabled={actions.busy || Boolean(error)}
+              disabledReason={error ? "后端没应答，先重试" : undefined}
               onClick={() => beginEdit({ kind: "new-client" })}
             >
               新客户

@@ -82,45 +82,54 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* 数字、金额、时间码、模型 id、命令一律等宽并开启 tabular-nums（Design-Brief 5.2） */
-.font-mono,
-code,
-kbd,
-pre,
-samp {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-}
+/*
+ * 以下自定义规则全部分层。无层规则永远压过任何 @layer，也就压过 Tailwind 的
+ * 全部工具类——侧栏链接颜色那次事故就是这么来的。下面这几条当前没有调用点撞上，
+ * 但形状完全一样：谁哪天写个 focus-visible:outline-none 或 shadow-none 就会再踩。
+ */
+@layer base {
+  /* 数字、金额、时间码、模型 id、命令一律等宽并开启 tabular-nums（Design-Brief 5.2） */
+  .font-mono,
+  code,
+  kbd,
+  pre,
+  samp {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
 
-/* 焦点环 2px 强调色（Design-Brief 8.2） */
-:focus-visible {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
+  /* 焦点环 2px 强调色（Design-Brief 8.2） */
+  :focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
 }
 
 /*
- * 必须放进 @layer base：Tailwind v4 的工具类都在 @layer utilities 里，而无层规则
- * 永远压过任何 @layer。不分层的话，任何 <a> 上的 text-* 类全部失效——侧栏的
- * text-text-secondary 会被渲染成主色绿，选中态在文字颜色上等于没做。
+ * 链接的缺省色。必须在 @layer base 里：不分层的话任何 <a> 上的 text-* 类全部失效，
+ * 侧栏的 text-text-secondary 会被渲染成主色绿，选中态在文字颜色上等于没做。
+ *
+ * 分层之后反过来了：带 text-* 类的链接不再吃这条，连 a:hover 也一起被工具类压掉。
+ * 所以 hover 不在这里定——要 hover 变色的链接自己写 hover:text-*，
+ * 留一条管不着大多数链接的规则只会让人以为有统一行为。
  */
 @layer base {
   a {
     color: var(--color-primary);
     text-decoration: none;
   }
-  a:hover {
-    color: var(--color-primary-soft);
+}
+
+@layer components {
+  /* 侧栏选中行的状态点光环（设计稿实测 box-shadow 0 0 0 3px #19E3B133） */
+  .dot-ring {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 20%, transparent);
   }
-}
 
-/* 侧栏选中行的状态点光环（设计稿实测 box-shadow 0 0 0 3px #19E3B133） */
-.dot-ring {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 20%, transparent);
-}
-
-/* 层级靠边框和表面亮度，不靠阴影；仅弹窗与下拉用一层柔和阴影（5.4） */
-.elevation-overlay {
-  box-shadow: 0 8px 24px rgb(0 0 0 / 45%);
+  /* 层级靠边框和表面亮度，不靠阴影；仅弹窗与下拉用一层柔和阴影（5.4） */
+  .elevation-overlay {
+    box-shadow: 0 8px 24px rgb(0 0 0 / 45%);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

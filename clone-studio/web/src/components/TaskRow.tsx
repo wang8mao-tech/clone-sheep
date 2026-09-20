@@ -49,8 +49,10 @@ export function TaskRow({ lead, title, columns, actions, href, openLabel, errorD
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <li className="group relative border-b border-border/60 last:border-b-0">
-      <div className="flex h-9 items-center gap-3 px-3 text-[13px]">
+    <li className="group border-b border-border/60 last:border-b-0">
+      {/* relative 挂在这一行上而不是 li 上：挂 li 的话，展开错误原文后 li 变高，
+          整行覆盖层跟着罩住展开区，点那片留白会跳走 */}
+      <div className="relative flex h-9 items-center gap-3 px-3 text-[13px]">
         {errorDetail ? (
           <button
             type="button"

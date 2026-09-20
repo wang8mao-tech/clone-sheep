@@ -54,10 +54,11 @@ export default tseslint.config(
     },
   },
 
-  // 这些文件不在任何 tsconfig 的 include 里（server 的 tsconfig 刻意排除了
-  // *.test.ts，免得测试进 dist），类型感知规则跑不了，只跑语法与逻辑规则
+  // 这些文件确实不在任何 tsconfig 的 include 里，类型感知规则跑不了，
+  // 只跑语法与逻辑规则。server 的测试文件不在此列——它们现在进
+  // tsconfig.json（只管检查），构建走 tsconfig.build.json 把测试排掉
   {
-    files: ["**/*.mjs", "*.config.js", "**/vitest.config.ts", "server/src/**/*.test.ts"],
+    files: ["**/*.mjs", "*.config.js", "**/vitest.config.ts"],
     languageOptions: { globals: globals.node },
     extends: [tseslint.configs.disableTypeChecked],
   },

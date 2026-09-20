@@ -289,7 +289,12 @@ describe("客户页：行尾菜单与删除", () => {
     expect(within(dialog).queryByText(/个模板/)).not.toBeInTheDocument();
   });
 
-  it("点行尾菜单不会顺带把整行点开", async () => {
+  /**
+   * 注意这条验的是「点菜单不会触发导航」的**事件层**，不是层叠层：jsdom 不做
+   * 命中测试，把行尾动作的 relative z-10 去掉它照样绿。真正挡住整行链接的是
+   * 覆盖层的层叠，那个只能真机量 elementFromPoint。
+   */
+  it("点行尾菜单不会顺带把整行点开（事件层，层叠要真机验）", async () => {
     stubFetch(withOne());
     renderApp(`/clients/${CLIENT_ID}`);
 
@@ -312,5 +317,85 @@ describe("客户页：行尾菜单与删除", () => {
     await userEvent.keyboard("{Enter}");
 
     expect(await screen.findByRole("heading", { name: "足球榜单" })).toBeInTheDocument();
+  });
+});
+
+describe("后端挂掉时的错误态", () => {
+  /**
+   * 这三条钉的是一次真回归：首页原先恒说「还没有客户」，改成按数量分两句后，
+   * 拿不到列表时又会掉回「还没有客户」——用户手上可能有二十个。
+   * 把 isError 分支删掉，这几条必红。
+   */
+  it("读不到客户列表时不能说「还没有客户」", async () => {
+    const fetchSpy = vi.fn();
+    stubFetch({
+      ...healthStubs,
+      "/api/clients": () => {
+        fetchSpy();
+        return { status: 500, body: { error: { code: "INTERNAL", message: "boom" } } };
+      },
+    });
+    renderApp("/");
+
+    expect(await screen.findByText("读不到客户列表，后端可能没在跑。")).toBeInTheDocument();
+    expect(screen.queryByText(/还没有客户/)).not.toBeInTheDocument();
+    // 漏桩时请求会抛、组件照样进错误态——必须断言请求真发出去过，否则这条用例
+    // 在没有桩的情况下也会绿，而且绿得毫无道理
+    expect(fetchSpy).toHaveBeenCalled();
+  });
+
+  it("错误态给重试，且两个建客户入口一起禁掉", async () => {
+    stubFetch({ ...healthStubs, "/api/clients": { status: 500, body: {} } });
+    renderApp("/");
+
+    expect(await screen.findByRole("button", { name: "重试" })).toBeInTheDocument();
+    // 首页的与侧栏的都要禁：一个消失一个还能点是更糟的不一致
+    expect(screen.getByRole("button", { name: "新建客户" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "新客户" })).toBeDisabled();
+  });
+
+  it("客户页读不到时说读不到并给原文与重试，而不是说客户被删了", async () => {
+    stubFetch({
+      ...healthStubs,
+      "/api/clients": { body: tree },
+      [`/api/clients/${CLIENT_ID}`]: {
+        status: 500,
+        body: { error: { code: "INTERNAL", message: "数据库锁住了" } },
+      },
+    });
+    renderApp(`/clients/${CLIENT_ID}`);
+
+    expect(await screen.findByText("读不到这个客户。")).toBeInTheDocument();
+    expect(screen.queryByText("这个客户已经不存在了。")).not.toBeInTheDocument();
+    expect(screen.getByText("数据库锁住了")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "重试" })).toBeInTheDocument();
+  });
+
+  it("404 才说客户已经不存在（与上一条互为对照）", async () => {
+    stubFetch({
+      ...healthStubs,
+      "/api/clients": { body: tree },
+      [`/api/clients/${CLIENT_ID}`]: {
+        status: 404,
+        body: { error: { code: "CLIENT_NOT_FOUND", message: "客户不存在" } },
+      },
+    });
+    renderApp(`/clients/${CLIENT_ID}`);
+
+    expect(await screen.findByText("这个客户已经不存在了。")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "重试" })).not.toBeInTheDocument();
+  });
+
+  it("模板页读不到时同样分流，并给重试", async () => {
+    stubFetch({
+      ...healthStubs,
+      "/api/clients": { body: tree },
+      [`/api/templates/${TPL_A}`]: { status: 500, body: { error: { code: "INTERNAL", message: "炸了" } } },
+    });
+    renderApp(`/clients/${CLIENT_ID}/templates/${TPL_A}`);
+
+    expect(await screen.findByText("读不到这个模板。")).toBeInTheDocument();
+    expect(screen.getByText("炸了")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "重试" })).toBeInTheDocument();
   });
 });

@@ -81,6 +81,14 @@ export const api = {
   delete: <T>(path: string, timeoutMs?: number) => request<T>(path, { method: "DELETE" }, timeoutMs),
 };
 
+/**
+ * 只有 404 才是"对象真没了"。超时走的是 `ApiError("后端未响应", 0, …, "TIMEOUT")`，
+ * status 是 0，不分流的话后端一卡就会被界面说成"已被删除"。
+ */
+export function isGone(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404;
+}
+
 export interface Health {
   ok: boolean;
   version: string;

@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { buildRuntimeProfile } from "./workspace.js";
 
 const BASE = { renderWorkers: 4, renderConcurrency: 1 } as const;
@@ -61,5 +64,131 @@ describe("buildRuntimeProfile", () => {
   it("credentials 永远声明 env store，否则 apiKey 引用解析不了", () => {
     const p = buildRuntimeProfile({ ...BASE, tokendance: true, hypihub: false, whisperx: false });
     expect(p.credentials.env).toEqual({ use: "@hypit/credential-store-env" });
+  });
+});
+
+describe("createWorkspace", () => {
+  let dataRoot: string;
+
+  beforeEach(() => {
+    dataRoot = mkdtempSync(path.join(tmpdir(), "clone-studio-ws-"));
+    process.env.CLONE_STUDIO_DATA_ROOT = dataRoot;
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    rmSync(dataRoot, { recursive: true, force: true });
+    delete process.env.CLONE_STUDIO_DATA_ROOT;
+  });
+
+  async function make() {
+    const mod = await import("./workspace.js");
+    return {
+      mod,
+      created: mod.createWorkspace({
+        clientId: "c1",
+        templateId: "t1",
+        slug: "足球榜",
+        services: { tokendance: false, hypihub: false, whisperx: true, renderWorkers: 1, renderConcurrency: 1 },
+      }),
+    };
+  }
+
+  it("建出 hypit 认得的工程：package.json + profile + 参考视频目录", async () => {
+    const { created } = await make();
+    for (const rel of ["package.json", "hypit.runtime.json", "productions", "assets", "references/src"]) {
+      expect(existsSync(path.join(created.dir, rel)), rel).toBe(true);
+    }
+  });
+
+  /**
+   * 这条钉的是 Phase 2 漏掉、直接卡死 Phase 4 转写的那一环：
+   * hypit 只从该项目的 .hypit/runtime 读选择，不按文件名发现 hypit.runtime.json，
+   * 也不继承父目录。只写 profile 不选中，transcribe 一律报
+   * 「No Runtime Profile is selected」。
+   */
+  it("选中 Runtime Profile，内容就是 profile 文件名", async () => {
+    const { created } = await make();
+    expect(readFileSync(path.join(created.dir, ".hypit", "runtime"), "utf8").trim()).toBe("hypit.runtime.json");
+    // .hypit 是执行状态目录，不该进任何版本库
+    expect(readFileSync(path.join(created.dir, ".hypit", ".gitignore"), "utf8").trim()).toBe("*");
+  });
+
+  it("ensureWorkspaceLayout 能给存量目录补选中（迁移路径）", async () => {
+    const { mod, created } = await make();
+    const selection = path.join(created.dir, ".hypit", "runtime");
+
+    // 模拟 Phase 2 建出来的存量目录：有 profile，没有选中
+    rmSync(path.join(created.dir, ".hypit"), { recursive: true, force: true });
+    expect(existsSync(selection)).toBe(false);
+
+    mod.ensureWorkspaceLayout(created.dir);
+    expect(readFileSync(selection, "utf8").trim()).toBe("hypit.runtime.json");
+
+    // 再调一次不应该出错，也不该改动内容
+    mod.ensureWorkspaceLayout(created.dir);
+    expect(readFileSync(selection, "utf8").trim()).toBe("hypit.runtime.json");
+  });
+
+  it("目录里没有 profile 时明确报错，而不是写一个指向空气的选择", async () => {
+    const { mod } = await make();
+    const empty = path.join(dataRoot, "空目录");
+    mkdirSync(empty, { recursive: true });
+    expect(() => mod.ensureWorkspaceLayout(empty)).toThrowError(/缺少 hypit\.runtime\.json/);
+  });
+
+  /**
+   * 幂等不是「重复调用不报错」，是「重复调用不重写」。
+   * 上一版用例只验了前者，把短路那一行删掉照样全绿——那段成了死代码。
+   * 这里用 mtime 钉住：不短路的话，启动迁移会在每次后端启动给每个模板重写。
+   */
+  it("已经齐全时不重写任何文件", async () => {
+    const { mod, created } = await make();
+    const selection = path.join(created.dir, ".hypit", "runtime");
+    const gitignore = path.join(created.dir, ".hypit", ".gitignore");
+    const before = [statSync(selection).mtimeMs, statSync(gitignore).mtimeMs];
+
+    // mtime 在部分文件系统上精度只到毫秒，等一下免得两次写落在同一刻度里
+    await new Promise((r) => setTimeout(r, 20));
+    mod.ensureWorkspaceLayout(created.dir);
+
+    expect([statSync(selection).mtimeMs, statSync(gitignore).mtimeMs]).toEqual(before);
+  });
+
+  it("建目录中途失败时不留半成品（写不进 package.json 的情形）", async () => {
+    process.env.CLONE_STUDIO_DATA_ROOT = dataRoot;
+    vi.resetModules();
+    const mod = await import("./workspace.js");
+    const dir = mod.workspaceDir("c-fail", "t-fail");
+
+    // 让 package.json 这个名字先被一个目录占住，writeFileSync 必然 EISDIR
+    mkdirSync(path.join(dir, "package.json"), { recursive: true });
+    // 这不是"本次新建"，所以按设计不该被删掉
+    expect(() =>
+      mod.createWorkspace({
+        clientId: "c-fail",
+        templateId: "t-fail",
+        slug: "x",
+        services: { tokendance: false, hypihub: false, whisperx: true, renderWorkers: 1, renderConcurrency: 1 },
+      }),
+    ).toThrow();
+    expect(existsSync(dir)).toBe(true);
+
+    // 而全新的目录失败后要清掉
+    const fresh = mod.workspaceDir("c-fresh", "t-fresh");
+    mkdirSync(path.dirname(fresh), { recursive: true });
+    const spy = vi.spyOn(JSON, "stringify").mockImplementation(() => {
+      throw new Error("模拟写文件前就炸");
+    });
+    expect(() =>
+      mod.createWorkspace({
+        clientId: "c-fresh",
+        templateId: "t-fresh",
+        slug: "x",
+        services: { tokendance: false, hypihub: false, whisperx: true, renderWorkers: 1, renderConcurrency: 1 },
+      }),
+    ).toThrow();
+    spy.mockRestore();
+    expect(existsSync(fresh)).toBe(false);
   });
 });

@@ -218,7 +218,11 @@ Task 3.1 已落地的接口，前端直接照这个对接：
 
 **两个必须先解的坑**：
 
-1. **工作目录没「选中」Runtime Profile，`transcribe` 一律失败。** hypit 明说「Selection is read only from that project's `.hypit/runtime`」，且不做文件名发现、不继承父目录。Phase 2 的 `createWorkspace` 只写了 `hypit.runtime.json`，没写 `.hypit/runtime`，于是报 `No Runtime Profile is selected`。要在建目录时补一步 `runtime use <绝对路径的 profile> --workspace <ws>`（**profile 路径必须绝对**，相对路径按当前工作目录解析会 ENOENT），并给存量模板补迁移。
+1. ~~工作目录没「选中」Runtime Profile~~ **Task 4.1 已解**。hypit 明说「Selection is read only from that project's `.hypit/runtime`」，且不做文件名发现、不继承父目录；Phase 2 的 `createWorkspace` 只写了 `hypit.runtime.json`，于是 `transcribe` 报 `No Runtime Profile is selected`。
+   **实现取的是直接写文件，不 spawn `runtime use`**：实测 `runtime use` 也只写 `.hypit/runtime` = `hypit.runtime.json`、`.hypit/.gitignore` = `*` 两个文件，与我们的产出**逐字节相同**（审查用 `diff -r` 验过）；而每次 spawn 约 1.93 秒，建模板在同步路径上、单测里有 22 处调用，spawn 会给套件加四十多秒并让单测依赖 hypit 二进制。
+   代价是 hypit 改格式时这里会失效，**由 `server/src/hypit/workspace.contract.test.ts` 钉住**：整套只 spawn 一次 `doctor`（约 2 秒），断言 `profileSource === "project"` 且 `selectionFile` 指向我们写的文件；hypit CLI 不在时整组跳过。
+   顺带记一个坑：`runtime use` 的 profile 参数必须给绝对路径（按 cwd 解析，给相对路径会 ENOENT），但它落进 `.hypit/runtime` 的仍然只是裸文件名。
+   存量迁移在 `server/src/services/workspace-migration.ts`，启动时跑，**同时补 `.hypit/runtime` 与 `references/src`**——只补前者的话，Phase 4 往 `references/src/source.mp4` 落盘时只有存量模板会 ENOENT，用新模板自测百分百测不出来。
 2. **WhisperX 的 `punkt_tab` 在本机下不下来。** `raw.githubusercontent.com` 被 DNS 污染，解析结果里除 4 个正常 IPv4 外多一个 `::`，hypit 的安全层挑中它判为 `SSRF attempt to restricted IP ::`。**已离线修复**：把 punkt_tab 解压进 `%LOCALAPPDATA%\Hypit\programs\whisperx-<endpoint>
 ltk_data	okenizers\`（路径来自 `provider-whisperx-local/src/program.ts` 的 `join(stateRoot,"nltk_data")`，**不是** `resources.py` 默认的用户缓存）。`resources.py` 里 `prepare_punkt_tab` 会先 `assert_punkt_tab` 命中就直接 return，不碰网络。修复后 `programs up --endpoint whisperx.local` 返回 `ready: true`。这条要写进 Task 4.5 的体检修复指引。
 

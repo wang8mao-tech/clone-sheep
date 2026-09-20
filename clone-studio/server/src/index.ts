@@ -3,6 +3,7 @@ import { config } from "./config.js";
 import { markStaleRunningAsInterrupted, migrate } from "./db/migrate.js";
 import { procs } from "./lib/procs.js";
 import { purgeTrash } from "./services/deletion.js";
+import { migrateWorkspaces } from "./services/workspace-migration.js";
 import { clientRoutes } from "./routes/clients.js";
 import { settingsRoutes } from "./routes/settings.js";
 import { systemRoutes } from "./routes/system.js";
@@ -22,6 +23,15 @@ async function main(): Promise<void> {
   migrate();
   const purged = purgeTrash();
   if (purged) app.log.info({ purged }, "清掉了上次删除残留在 .trash 的目录");
+
+  // Phase 2 建的工作目录缺 Runtime Profile 选中与 references/src，补齐存量
+  const workspaces = migrateWorkspaces();
+  if (workspaces.repaired) {
+    app.log.info({ repaired: workspaces.repaired }, "补齐了存量模板的工作目录");
+  }
+  for (const failure of workspaces.failures) {
+    app.log.warn(failure, "模板的工作目录补不齐，该模板暂时无法导入参考视频");
+  }
 
   const stale = markStaleRunningAsInterrupted();
   if (stale.jobs || stale.productions || stale.builds) {

@@ -7,6 +7,7 @@ import { migrateWorkspaces } from "./services/workspace-migration.js";
 import { clientRoutes } from "./routes/clients.js";
 import { settingsRoutes } from "./routes/settings.js";
 import { systemRoutes } from "./routes/system.js";
+import { referenceRoutes } from "./routes/reference.js";
 import { templateRoutes } from "./routes/templates.js";
 
 const app = Fastify({
@@ -42,6 +43,7 @@ async function main(): Promise<void> {
   await app.register(settingsRoutes);
   await app.register(clientRoutes);
   await app.register(templateRoutes);
+  await app.register(referenceRoutes);
 
   // 只绑回环地址：单机单用户，不做权限模型，也就绝不能对外暴露（Spec 6.3 / 非功能需求）
   await app.listen({ host: config.host, port: config.port });

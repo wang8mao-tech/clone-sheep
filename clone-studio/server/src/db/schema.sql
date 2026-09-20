@@ -200,6 +200,29 @@ CREATE TABLE IF NOT EXISTS video_channels (
   created_at  TEXT NOT NULL
 );
 
+-- ── Phase 4：证据准备的逐步状态（REQ-002）。 ──────────────────────────
+-- 一个模板一套四步，刷新页面靠它恢复清单，所以必须落库而不是只存在内存里。
+CREATE TABLE IF NOT EXISTS evidence_steps (
+  id            TEXT PRIMARY KEY,
+  template_id   TEXT NOT NULL REFERENCES templates (id) ON DELETE CASCADE,
+  step          TEXT NOT NULL
+                  CHECK (step IN ('fetch','probe','transcribe','tiles')),
+  status        TEXT NOT NULL DEFAULT 'pending'
+                  CHECK (status IN ('pending','running','done','failed','timeout')),
+  started_at    TEXT,
+  ended_at      TEXT,
+  duration_ms   INTEGER,
+  -- 失败时原样存 hypit.cli-error@1 的 code 与 message，界面不改写（REQ-002 规则）
+  error_code    TEXT,
+  error_message TEXT,
+  -- 该步的结构化产出：probe 的时长分辨率、tiles 的产出清单等
+  detail        TEXT,
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_evidence_steps_template_step
+  ON evidence_steps (template_id, step);
+
 -- ── 迁移记录 ────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version    INTEGER PRIMARY KEY,

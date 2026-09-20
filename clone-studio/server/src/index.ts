@@ -1,6 +1,8 @@
 import Fastify from "fastify";
 import { config } from "./config.js";
 import { markStaleRunningAsInterrupted, migrate } from "./db/migrate.js";
+import { procs } from "./lib/procs.js";
+import { settingsRoutes } from "./routes/settings.js";
 import { systemRoutes } from "./routes/system.js";
 
 const app = Fastify({
@@ -24,6 +26,7 @@ async function main(): Promise<void> {
   }
 
   await app.register(systemRoutes);
+  await app.register(settingsRoutes);
 
   // 只绑回环地址：单机单用户，不做权限模型，也就绝不能对外暴露（Spec 6.3 / 非功能需求）
   await app.listen({ host: config.host, port: config.port });
@@ -31,6 +34,8 @@ async function main(): Promise<void> {
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
+    // 先收子进程的尸：渲染进程不会因为后端退出而自己停
+    procs.killAll();
     app.close().then(
       () => process.exit(0),
       () => process.exit(1),

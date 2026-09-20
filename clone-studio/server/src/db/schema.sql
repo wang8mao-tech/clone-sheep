@@ -17,6 +17,9 @@ CREATE TABLE IF NOT EXISTS settings (
   reference_max_seconds   INTEGER NOT NULL DEFAULT 180,
   batch_max_items         INTEGER NOT NULL DEFAULT 20,
   codex_provider_enabled  INTEGER NOT NULL DEFAULT 0,
+  -- 凭据验证时间。key 一改就清空：只"配置了"不等于"能用"（AC-023）
+  tokendance_verified_at  TEXT,
+  hypihub_verified_at     TEXT,
   updated_at              TEXT    NOT NULL
 );
 

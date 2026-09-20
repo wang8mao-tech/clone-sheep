@@ -9,7 +9,19 @@ import { db, schemaPath } from "./index.js";
  * 每次启动执行一遍即可把库拉到最新。schema_migrations 记录已应用的版本号，
  * 将来需要改列（SQLite 改列要重建表）时在 STEPS 里追加一步。
  */
-const STEPS: ReadonlyArray<{ version: number; run: (d: ReturnType<typeof db>) => void }> = [];
+const STEPS: ReadonlyArray<{ version: number; run: (d: ReturnType<typeof db>) => void }> = [
+  {
+    // 已存在的库补上凭据验证时间列。schema.sql 的 CREATE TABLE IF NOT EXISTS
+    // 不会给老表加列，加列只能走 ALTER。
+    version: 1,
+    run: (d) => {
+      const columns = d.prepare("PRAGMA table_info(settings)").all() as Array<{ name: string }>;
+      const have = new Set(columns.map((c) => c.name));
+      if (!have.has("tokendance_verified_at")) d.exec("ALTER TABLE settings ADD COLUMN tokendance_verified_at TEXT");
+      if (!have.has("hypihub_verified_at")) d.exec("ALTER TABLE settings ADD COLUMN hypihub_verified_at TEXT");
+    },
+  },
+];
 
 export function migrate(): void {
   const d = db();

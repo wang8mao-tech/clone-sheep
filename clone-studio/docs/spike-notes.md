@@ -136,6 +136,101 @@ preflight = { ok, capabilityCount, diagnosticCount, diagnostics }
 }
 ```
 
+### `build --follow --json` 与 `get` 的真实形状
+
+`build --follow --json` 先往 stderr 刷进度行，最后在 stdout 给一份 JSON。进度行的形状：
+
+```
+· Working · 0/3 steps complete · 9s
+· Working · 0/3 steps complete · 1 preparing resources · 29s
+· Working · 1/3 steps complete · 1 decoding source frames · 1425/2040 frames · 56s
+· Working · 1/3 steps complete · 1 rendering frames · 476/900 frames · 4m 41s
+· Working · 1/3 steps complete · 1 encoding video · 7m 56s
+· Saving Result · 1/3 steps complete · 8m 21s
+```
+
+阶段名（`preparing resources` / `decoding source frames` / `starting browsers` / `rendering frames` /
+`encoding video` / `Saving Result`）与 `x/y frames` 可直接喂给 CMP-007 出片进度条。
+
+失败时的 JSON（本机实跑，见下文"本机渲染不通"）：
+
+```json
+{
+  "format": "hypit.cli-build@1",
+  "build": {
+    "id": "bld_20260920T004652769Z_2D27EBCB17",
+    "targets": ["export-part-1.video"],
+    "failure": "Command need:...:request-visual-render ended without a stored result: Endpoint hyperframes.local failed render-visual: Rendered visual frame rate differs from its document
+[hyperframes] browserGpuMode probe ... ; caused by: Rendered visual frame rate differs from its document",
+    "work": { "state": "done", "outcome": "failed" },
+    "result": { "state": "failed", "outputCount": 74 }
+  }
+}
+```
+
+**要点**：`build.work.state` 为 `done` 但 `build.result.outcome` 为 `failed` —— 判成败必须看
+`result.outcome`／`result.state`，不能看 `work.state`。`failure` 是一整段人类可读文本，
+不是结构化错误码，界面要原样展示。`outputCount` 记的是已落盘的 Output 数，失败时也非零。
+
+`get` 的真实形状（对媒体包自带的那次成功 build 导出）：
+
+```json
+{
+  "format": "hypit.cli-get@1",
+  "build": "bld_20260914T043459227Z_E0B178D4A9",
+  "output": "case-creatify-media.media",
+  "type": "@hypit/media@1/SynchronizedMedia",
+  "kind": "composite",
+  "path": "...\get-out\creatify"
+}
+```
+
+`kind` 为 `composite` 时 `path` 是一个目录，里面 `value.json` + `files/`：
+
+```json
+{ "format": "hypit.result-value@1",
+  "value": { "timeline": { "frameCount": 301, "frameRate": { "numerator": 30, "denominator": 1 } },
+             "visual": { "artifact": null, "height": 1280, "width": 720 } },
+  "resources": [ { "at": ["visual","artifact"], "file": { "kind": "build-file", ... } } ] }
+```
+
+导出的 `files/file-0002.mp4`（2,473,858 字节）ffprobe 正常：`duration=10.033008`，
+`h264 720x1280 avg_frame_rate=30/1`。**可播放 mp4 这项因此成立，但要说清楚**：
+它是把已有 Output 导出来的，不是本机新渲染出来的。本机新渲染见下。
+
+### 本机渲染不通 —— Phase 6 的已知阻塞
+
+Phase 0 的验收要"最小 Run 产出一个可播放 mp4"。本机三次尝试，本地渲染路径两次失败、
+形态还不一样：
+
+| 尝试 | 载体 | 结果 |
+|---|---|---|
+| 1 | `spike-one-part.svrun`（900 帧，`export-part-1.video`） | 渲染 900 帧全部完成，编码后校验失败：`Rendered visual frame rate differs from its document` |
+| 1b | 同上，原样重跑一次 | **同一错误逐字复现**（build `bld_20260920T013427044Z_62A6539AA7`），说明是确定性失败，不是偶发 |
+| 2 | `render.svrun`（4112 帧，example 自带、未经修改） | 跑到 3489/4112 帧时 CLI 崩：`Bad escaped character in JSON at position 144439` |
+| 3 | `get` 导出已有 Output | 成功，见上 |
+
+排查到的事实：
+
+- **不是 ffmpeg 的问题。** hyperframes 的编码命令是
+  `ffmpeg -framerate <num>/<den> -i %09d.png -frames:v <n> -an -c:v libx264 -crf 23 -preset medium -pix_fmt yuv420p -movflags +faststart`
+  （`provider-hyperframes-local/src/capture.ts:256`）。用本机 ffmpeg 原样复现三组
+  （90 帧 / 900 帧 / 1 帧，全 30/1 输入），ffprobe 回来都是 `avg_frame_rate = 30/1`，与文档一致。
+- **不是我改坏了 run。** `spike-one-part.svrun` 保留的 `export-part-1.video` 是
+  `export-parts.svrun` 里本来就有的合法 target；plan 对它解析正常，`preflight.ok = true`、
+  `diagnosticCount = 0`，`needs` 报的正是 `1080x1920 / 0-900 帧 / 30/1`。
+- **校验点在** `provider-hyperframes-local/src/output.ts:69-70`：对产物跑
+  `ffprobe -count_frames`，把 `avg_frame_rate ?? r_frame_rate` 和 `document.frameRate` 做有理数相等比较。
+- 执行日志里有一条编码开始前的 stdout：`[HyperFrames] render runtime fps [object Object]`，
+  另有 GPU 探测行 `browserGpuMode probe → hardware (ANGLE, NVIDIA GeForce RTX 5060 Ti, D3D11)`。
+  日志落盘时那个 `→` 变成了替换字符，说明子进程输出的 UTF-8 在管线里被按本机代码页解码过一道；
+  尝试 2 的 `Bad escaped character in JSON` 很可能同源（144 KB 的单行 JSON 里混进了未转义内容）。
+
+**对 Clone Studio 的影响**：本地渲染是 REQ-006 出片的必经路径，现在这台机器上跑不通。
+Phase 6 开工前必须先解掉，否则出片链路整条不可用。它不阻塞 Phase 1-3（那三阶段不碰渲染）。
+下一步该查的方向：拿到编码产物本身 ffprobe（确认 `avg_frame_rate` 实际是多少）、
+以及子进程输出的编码问题是不是由本机 ANSI 代码页引起。
+
 ### Q-003 结论：不成立
 
 **估价拿不到可用数字。** 全部联网 Provider 声明的 pricing 都只是一个价格页链接，没有任何结构化费率：

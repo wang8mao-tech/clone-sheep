@@ -8,6 +8,7 @@ import { inlineNameError, useInvalidateArchive } from "../lib/useArchive.js";
 /** 正在就地编辑的那一个。同一时刻只允许一个，省掉多开时的名称冲突判断。 */
 export type Editing =
   | { kind: "new-client" }
+  | { kind: "new-template"; clientId: string }
   | { kind: "client"; id: string; name: string }
   | { kind: "template"; id: string; name: string }
   | null;
@@ -67,6 +68,16 @@ export function useArchiveActions(onCreated?: (clientId: string) => void) {
     onError: (err) => handleNameError(err, "新建客户"),
   });
 
+  const createTemplate = useMutation({
+    mutationFn: ({ clientId, name }: { clientId: string; name: string }) =>
+      archiveApi.createTemplate(clientId, name),
+    onSuccess: () => {
+      closeEditor();
+      invalidate();
+    },
+    onError: (err) => handleNameError(err, "新建模板"),
+  });
+
   const rename = useMutation({
     mutationFn: ({ kind, id, name }: { kind: "client" | "template"; id: string; name: string }) =>
       kind === "client" ? archiveApi.renameClient(id, name) : archiveApi.renameTemplate(id, name),
@@ -112,9 +123,10 @@ export function useArchiveActions(onCreated?: (clientId: string) => void) {
     clearEditError: () => setEditError(undefined),
     cancelDelete: () => setPending(null),
     createClient,
+    createTemplate,
     rename,
     remove,
     askDelete,
-    busy: createClient.isPending || rename.isPending,
+    busy: createClient.isPending || createTemplate.isPending || rename.isPending,
   };
 }

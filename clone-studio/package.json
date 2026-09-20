@@ -1,0 +1,17 @@
+{
+  "name": "clone-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Clone Studio —— 以 Hypit 为内核的短视频复刻与批量变体工作台",
+  "engines": {
+    "node": ">=22.15"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel run dev",
+    "build": "pnpm -r run build",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test",
+    "db:migrate": "pnpm --filter @clone-studio/server run db:migrate"
+  }
+}

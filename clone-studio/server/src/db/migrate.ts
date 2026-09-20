@@ -21,6 +21,18 @@ const STEPS: ReadonlyArray<{ version: number; run: (d: ReturnType<typeof db>) =>
       if (!have.has("hypihub_verified_at")) d.exec("ALTER TABLE settings ADD COLUMN hypihub_verified_at TEXT");
     },
   },
+  {
+    // evidence_steps 在 Task 4.2 先建了表，审查后才加 error_raw。老库里那张表
+    // 已经存在，schema.sql 的 CREATE TABLE IF NOT EXISTS 不会给它加列。
+    version: 2,
+    run: (d) => {
+      const columns = d.prepare("PRAGMA table_info(evidence_steps)").all() as Array<{ name: string }>;
+      const have = new Set(columns.map((c) => c.name));
+      if (columns.length > 0 && !have.has("error_raw")) {
+        d.exec("ALTER TABLE evidence_steps ADD COLUMN error_raw TEXT");
+      }
+    },
+  },
 ];
 
 export function migrate(): void {
@@ -56,7 +68,12 @@ function seedSettings(d: ReturnType<typeof db>): void {
  * 进程被杀后重启，库里会留下永远不会再动的"运行中"记录。
  * 启动时统一标为"中断"，前端据此给"继续"按钮（Spec AC-010）。
  */
-export function markStaleRunningAsInterrupted(): { jobs: number; productions: number; builds: number } {
+export function markStaleRunningAsInterrupted(): {
+  jobs: number;
+  productions: number;
+  builds: number;
+  evidence: number;
+} {
   const d = db();
   const now = new Date().toISOString();
   const jobs = d
@@ -72,6 +89,19 @@ export function markStaleRunningAsInterrupted(): { jobs: number; productions: nu
        WHERE status IN ('agent_running', 'awaiting_quota', 'building')`,
     )
     .run(now).changes;
+  // evidence_steps 的 CHECK 里没有 interrupted，且失败通道本来就能重试，
+  // 所以照 builds 的做法标 failed + 一个能看懂的原因。不标的话，后端一重启，
+  // 库里那行 running 会永远转圈，而重试又只放行 failed/timeout——用户被卡死，
+  // 唯一出路是重新提交视频，界面上却没有任何东西这么告诉他
+  const evidence = d
+    .prepare(
+      `UPDATE evidence_steps SET status = 'failed', ended_at = COALESCE(ended_at, ?),
+         error_code = COALESCE(error_code, 'BACKEND_RESTART'),
+         error_message = COALESCE(error_message, '后端进程重启，这一步的结果未知，可以重试')
+       WHERE status = 'running'`,
+    )
+    .run(now).changes;
+
   const builds = d
     .prepare(
       `UPDATE builds SET status = 'failed', ended_at = COALESCE(ended_at, ?),
@@ -80,7 +110,7 @@ export function markStaleRunningAsInterrupted(): { jobs: number; productions: nu
        WHERE status IN ('queued', 'running')`,
     )
     .run(now).changes;
-  return { jobs, productions, builds };
+  return { jobs, productions, builds, evidence };
 }
 
 // 允许 `pnpm db:migrate` 直接跑：比较本模块路径与进程入口路径

@@ -1,9 +1,10 @@
+import { rm } from "node:fs/promises";
 import { db } from "../db/index.js";
 import { HypitError } from "../hypit/cli.js";
 import { ensureWorkspaceLayout } from "../hypit/workspace.js";
 import { requireTemplate } from "./archive.js";
 import { EVIDENCE_STEPS, nextStep, pipelineStatus, type EvidenceStep, type ProbeFacts } from "./evidence-rules.js";
-import { execute, type StepContext } from "./evidence-steps.js";
+import { execute, tilesDirOf, transcriptPathOf } from "./evidence-steps.js";
 import {
   ensureSteps,
   listSteps,
@@ -13,6 +14,7 @@ import {
   resetSteps,
   type StepRecord,
 } from "./evidence-store.js";
+import { EvidenceError, type EvidenceSource, type StartArgs } from "./evidence-types.js";
 
 /**
  * 证据准备流水线（REQ-002）：取源 → 探测 → 转写 → 抽帧。
@@ -20,11 +22,12 @@ import {
  * 四步顺序跑，每步状态落库并推 SSE，任一步失败就停在那一步等重试
  * （REQ-002 错误态：哪一步失败停在哪一步）。
  *
- * 跑在后台：HTTP 请求只负责点火并立刻返回当前状态，整条链要好几分钟，
- * 让请求挂着等只会撞上前端 5 秒超时。
+ * 跑在后台：HTTP 请求只负责点火并立刻返回当前状态，整条链要十几秒到几分钟，
+ * 让请求挂着等只会撞上前端的超时。
  */
 
-export type EvidenceSource = { kind: "file"; path: string } | { kind: "url"; url: string };
+export { EvidenceError } from "./evidence-types.js";
+export type { EvidenceSource, StartArgs } from "./evidence-types.js";
 
 export interface EvidenceState {
   templateId: string;
@@ -51,24 +54,23 @@ export function evidenceState(templateId: string): EvidenceState {
   };
 }
 
-export interface StartArgs {
-  templateId: string;
-  source: EvidenceSource;
-  language: string;
-  note?: string;
-}
-
 /**
- * 开始证据准备。换源视频时四步全部清回 pending——旧的探测结果留着会骗人。
+ * 开始证据准备。换源视频时四步清回 pending，**磁盘上的旧产物也要一起清**——
+ * 只清库的话，新源在 fetch 就失败时，工作目录里留着的是上一条视频的转写和拼图，
+ * 而库里显示全部 pending。Phase 5 的 Agent 直接读工作目录，会拿这份错证据去复刻。
+ *
  * 点火后立刻返回，真正的执行在后台。
  */
-export function startEvidence(args: StartArgs): EvidenceState {
+export async function startEvidence(args: StartArgs): Promise<EvidenceState> {
   const template = requireTemplate(args.templateId);
-  if (running.has(args.templateId)) return evidenceState(args.templateId);
+  assertNotRunning(args.templateId);
 
-  ensureWorkspaceLayout(template.workspace_path as string);
+  const workspace = requireWorkspace(template);
+  ensureWorkspaceLayout(workspace);
   ensureSteps(args.templateId);
   resetSteps(args.templateId);
+  await rm(transcriptPathOf(workspace), { force: true });
+  await rm(tilesDirOf(workspace), { recursive: true, force: true });
 
   const now = new Date().toISOString();
   db()
@@ -97,7 +99,7 @@ export function startEvidence(args: StartArgs): EvidenceState {
  */
 export function retryEvidence(templateId: string, step: EvidenceStep): EvidenceState {
   const template = requireTemplate(templateId);
-  if (running.has(templateId)) return evidenceState(templateId);
+  assertNotRunning(templateId);
 
   const target = listSteps(templateId).find((s) => s.step === step);
   if (!target || (target.status !== "failed" && target.status !== "timeout")) {
@@ -114,15 +116,22 @@ export function retryEvidence(templateId: string, step: EvidenceStep): EvidenceS
   return evidenceState(templateId);
 }
 
-export class EvidenceError extends Error {
-  constructor(
-    readonly code: string,
-    message: string,
-    readonly status: number,
-  ) {
-    super(message);
-    this.name = "EvidenceError";
+/**
+ * 正在跑时拒绝新请求，而不是静默返回当前状态。
+ * 静默的话，用户换了个新链接点提交，拿到 200 和一份仍在跑旧视频的状态，
+ * 无从分辨「我的提交被忽略了」。
+ */
+function assertNotRunning(templateId: string): void {
+  if (running.has(templateId)) {
+    throw new EvidenceError("EVIDENCE_BUSY", "这个模板的证据准备还在跑，等它结束或先重试失败的那一步。", 409);
   }
+}
+
+function requireWorkspace(template: ReturnType<typeof requireTemplate>): string {
+  if (!template.workspace_path) {
+    throw new EvidenceError("NO_WORKSPACE", "这个模板没有工作目录，无法导入参考视频。", 409);
+  }
+  return template.workspace_path;
 }
 
 function sourceOf(template: ReturnType<typeof requireTemplate>): EvidenceSource {
@@ -139,29 +148,77 @@ async function run(args: StartArgs & { from?: EvidenceStep }): Promise<void> {
 
   try {
     const template = requireTemplate(templateId);
-    const workspace = template.workspace_path as string;
+    const workspace = requireWorkspace(template);
+    const maxSeconds = readMaxSeconds();
     const startAt = args.from ?? nextStep(listSteps(templateId)) ?? "fetch";
     const begin = EVIDENCE_STEPS.indexOf(startAt);
 
     for (const step of EVIDENCE_STEPS.slice(begin)) {
-      const ok = await runStep(step, { ...args, workspace });
-      if (!ok) return;
+      const ok = await runStep(step, { ...args, workspace, maxSeconds });
+      if (!ok) {
+        setTemplateStatus(templateId, "failed");
+        return;
+      }
     }
+    // 四步都过了。REQ-002 状态段的「成功→自动进入复刻」：这里只把状态推到
+    // cloning，真正启动复刻 Agent 是 Phase 5/6 的事
+    setTemplateStatus(templateId, "cloning");
   } catch (error) {
-    // 编排本身炸了（模板没了之类）也要留痕，否则界面永远停在 running
-    const steps = listSteps(templateId);
-    const stuck = steps.find((s) => s.status === "running")?.step ?? "fetch";
-    markFailed(templateId, stuck, {
-      code: "PIPELINE_ERROR",
-      message: error instanceof Error ? error.message : String(error),
-    });
+    // 收尾本身也可能炸（库已关、磁盘满）。run() 是 void 调用的游离 Promise，
+    // 让它抛出去就是一条未捕获拒绝——Node 默认会因此结束进程。宁可丢掉这条
+    // 错误记录，也不能把整个后端带走
+    try {
+      markPipelineFailure(templateId, error);
+    } catch {
+      // 状态留在 running，由下次启动的 markStaleRunningAsInterrupted 兜底
+    }
   } finally {
     running.delete(templateId);
   }
 }
 
+/**
+ * 编排本身炸了（模板没了、工作目录没了之类）也要留痕，否则界面永远停在 running。
+ *
+ * 落在「第一个还没完成的步骤」上，不能落在写死的 fetch：异常若发生在任何
+ * markRunning 之前，写死 fetch 会把一个**已经成功的** fetch 改写成 failed，
+ * 而重试 fetch 又会去动源视频。
+ */
+function markPipelineFailure(templateId: string, error: unknown): void {
+  const steps = listSteps(templateId);
+  const stuck =
+    steps.find((s) => s.status === "running")?.step ??
+    steps.find((s) => s.status !== "done")?.step ??
+    steps[steps.length - 1]?.step;
+  if (stuck) {
+    markFailed(templateId, stuck, {
+      code: "PIPELINE_ERROR",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+  setTemplateStatus(templateId, "failed");
+}
+
+function setTemplateStatus(templateId: string, status: "importing" | "cloning" | "failed"): void {
+  db()
+    .prepare("UPDATE templates SET status = ?, updated_at = ? WHERE id = ?")
+    .run(status, new Date().toISOString(), templateId);
+}
+
+/** 时长上限跟设置走（REQ-008 的 referenceMaxSeconds），不再硬编码一份 180 */
+function readMaxSeconds(): number {
+  const row = db().prepare("SELECT reference_max_seconds FROM settings WHERE id = 1").get() as
+    { reference_max_seconds: number } | undefined;
+  return row?.reference_max_seconds ?? 180;
+}
+
+interface StepContextLike extends StartArgs {
+  workspace: string;
+  maxSeconds: number;
+}
+
 /** 跑一步，成功返回 true。失败已经落库，调用方只需停下来。 */
-async function runStep(step: EvidenceStep, ctx: StepContext): Promise<boolean> {
+async function runStep(step: EvidenceStep, ctx: StepContextLike): Promise<boolean> {
   markRunning(ctx.templateId, step);
   try {
     const detail = await execute(step, ctx);
@@ -174,9 +231,17 @@ async function runStep(step: EvidenceStep, ctx: StepContext): Promise<boolean> {
 }
 
 /** 把各种错误归成界面能用的 code + message，hypit 的原文不改写（REQ-002 规则） */
-function classify(error: unknown): { code: string; message: string; timedOut?: boolean } {
+function classify(error: unknown): { code: string; message: string; timedOut?: boolean; raw?: string } {
   if (error instanceof HypitError) {
-    return { code: error.code, message: error.message, ...(error.code === "TIMEOUT" ? { timedOut: true } : {}) };
+    // BAD_OUTPUT / TIMEOUT 这两条支路的 message 是我们自己编的，唯一的线索
+    // 全在 raw 与 help 里。不带上就真成了「吞错」
+    const message = error.help ? `${error.message}\n${error.help}` : error.message;
+    return {
+      code: error.code,
+      message,
+      ...(error.code === "TIMEOUT" ? { timedOut: true } : {}),
+      ...(error.raw ? { raw: error.raw } : {}),
+    };
   }
   if (error instanceof EvidenceError) return { code: error.code, message: error.message };
   return { code: "UNEXPECTED", message: error instanceof Error ? error.message : String(error) };

@@ -215,6 +215,9 @@ CREATE TABLE IF NOT EXISTS evidence_steps (
   -- 失败时原样存 hypit.cli-error@1 的 code 与 message，界面不改写（REQ-002 规则）
   error_code    TEXT,
   error_message TEXT,
+  -- 原始 stdout/stderr。BAD_OUTPUT 与 TIMEOUT 这两条支路的 message 是我们自己
+  -- 编的，唯一的线索全在这里，不存就真成了「吞错」（REQ-002 MUST）
+  error_raw     TEXT,
   -- 该步的结构化产出：probe 的时长分辨率、tiles 的产出清单等
   detail        TEXT,
   created_at    TEXT NOT NULL,

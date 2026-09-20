@@ -35,7 +35,7 @@ async function main(): Promise<void> {
   }
 
   const stale = markStaleRunningAsInterrupted();
-  if (stale.jobs || stale.productions || stale.builds) {
+  if (stale.jobs || stale.productions || stale.builds || stale.evidence) {
     app.log.warn({ stale }, "上次退出时有未完成的任务，已标为中断");
   }
 

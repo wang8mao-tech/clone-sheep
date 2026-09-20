@@ -97,7 +97,7 @@ describe("migrate", () => {
     ).run(now);
 
     const changed = m.markStaleRunningAsInterrupted();
-    expect(changed).toEqual({ jobs: 1, productions: 1, builds: 1 });
+    expect(changed).toEqual({ jobs: 1, productions: 1, builds: 1, evidence: 0 });
 
     expect(d.prepare("SELECT status, stop_reason FROM agent_jobs WHERE id='j1'").get() as never).toMatchObject({
       status: "interrupted",
@@ -161,3 +161,45 @@ describe("migrate", () => {
     expect(msgsAfter.n).toBe(0);
   });
 });
+
+describe("加列迁移", () => {
+  /**
+   * 这条钉的是一个真出过的事故：Task 4.2 先建了 evidence_steps，审查后才加
+   * error_raw 列。单测每次建新库所以永远碰不到，而用户的老库里那张表已经存在，
+   * schema.sql 的 CREATE TABLE IF NOT EXISTS 不会给它加列——一跑流水线就
+   * 「no such column: error_raw」。加列只能走 ALTER。
+   */
+  it("老库里已有的 evidence_steps 会被补上 error_raw", async () => {
+    const { db } = await import("./index.js");
+    const m = await import("./migrate.js");
+    const d = db();
+    // 先把库拉到最新，再退回去造老表——否则 schema_migrations 都还不存在
+    m.migrate();
+
+    // 造一张 4.2 当时的老表：没有 error_raw
+    d.exec("DROP TABLE IF EXISTS evidence_steps");
+    d.exec(`CREATE TABLE evidence_steps (
+      id TEXT PRIMARY KEY, template_id TEXT NOT NULL, step TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      started_at TEXT, ended_at TEXT, duration_ms INTEGER,
+      error_code TEXT, error_message TEXT, detail TEXT,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
+    d.prepare("DELETE FROM schema_migrations WHERE version = 2").run();
+    expect(columnsOf(d, "evidence_steps")).not.toContain("error_raw");
+
+    m.migrate();
+    expect(columnsOf(d, "evidence_steps")).toContain("error_raw");
+  });
+
+  it("跑第二遍不会重复加列", async () => {
+    const { db } = await import("./index.js");
+    const m = await import("./migrate.js");
+    m.migrate();
+    expect(() => m.migrate()).not.toThrow();
+    expect(columnsOf(db(), "evidence_steps")).toContain("error_raw");
+  });
+});
+
+function columnsOf(d: ReturnType<typeof import("./index.js").db>, table: string): string[] {
+  return (d.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((c) => c.name);
+}

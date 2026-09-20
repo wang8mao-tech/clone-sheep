@@ -10,9 +10,9 @@ export type EvidenceStep = (typeof EVIDENCE_STEPS)[number];
 
 export type EvidenceStatus = "pending" | "running" | "done" | "failed" | "timeout";
 
-/** REQ-002 输入表：时长 3-180 秒（probe 后校验） */
+/** REQ-002 输入表：时长 3-180 秒（probe 后校验）。上限可在设置里改，下限固定。 */
 export const MIN_SOURCE_SECONDS = 3;
-export const MAX_SOURCE_SECONDS = 180;
+export const DEFAULT_MAX_SOURCE_SECONDS = 180;
 
 /** 单步超时。REQ-002 状态段：单项 >10 分钟标超时可重试 */
 export const STEP_TIMEOUT_MS = 10 * 60_000;
@@ -39,18 +39,21 @@ export interface ProbeFacts {
  * 时长超限按 AC-005 明确说出上限和实际值；没有视频轨的文件根本不能当参考片，
  * 也在这里挡掉——让它走到转写再失败，错误会指向一个看不懂的地方。
  */
-export function checkProbe(facts: ProbeFacts): { ok: true } | { ok: false; code: string; message: string } {
+export function checkProbe(
+  facts: ProbeFacts,
+  maxSeconds: number = DEFAULT_MAX_SOURCE_SECONDS,
+): { ok: true } | { ok: false; code: string; message: string } {
   if (!facts.hasVideo) {
     return { ok: false, code: "NO_VIDEO_STREAM", message: "这个文件里没有视频轨，不能作为参考视频。" };
   }
   if (!Number.isFinite(facts.duration) || facts.duration <= 0) {
     return { ok: false, code: "BAD_DURATION", message: "探测不到这个文件的时长，可能已经损坏。" };
   }
-  if (facts.duration > MAX_SOURCE_SECONDS) {
+  if (facts.duration > maxSeconds) {
     return {
       ok: false,
       code: "DURATION_TOO_LONG",
-      message: `时长超过 ${MAX_SOURCE_SECONDS} 秒（实际 ${facts.duration.toFixed(1)} 秒）。`,
+      message: `时长超过 ${maxSeconds} 秒（实际 ${facts.duration.toFixed(1)} 秒）。`,
     };
   }
   if (facts.duration < MIN_SOURCE_SECONDS) {

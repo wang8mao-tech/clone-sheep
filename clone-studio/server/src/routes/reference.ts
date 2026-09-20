@@ -5,12 +5,26 @@ import { EVIDENCE_STEPS } from "../services/evidence-rules.js";
 import { evidenceState, retryEvidence, startEvidence, EvidenceError } from "../services/evidence.js";
 import { archiveErrorHandler } from "./errors.js";
 
-/** REQ-002 输入表：语言必填，默认 zh；复刻备注 ≤1000 字 */
+/**
+ * REQ-002 输入表的语言枚举：WhisperX 的对齐语言。多给几个常见的，
+ * 不在表里的一律拒——拒绝比把一个它不认的码原样拼进 --language 强。
+ */
+const LANGUAGES = ["zh", "en", "ja", "ko", "es", "fr", "de", "ru", "pt", "it", "ar", "hi"] as const;
+
+/** REQ-002 输入表：语言必填默认 zh；链接限 http/https；复刻备注 ≤1000 字 */
 const StartBody = z
   .object({
-    language: z.string().min(2).max(16).default("zh"),
+    language: z.enum(LANGUAGES).default("zh"),
     note: z.string().max(1000).optional(),
-    url: z.string().url().optional(),
+    url: z
+      .string()
+      .url()
+      // z.string().url() 会放行 file: / javascript: / data:。file:// 交给
+      // yt-dlp 就是第二个任意文件读取入口，Spec 输入表写的就是 http/https
+      .refine((u) => ["http:", "https:"].includes(new URL(u).protocol), {
+        message: "只支持 http/https 链接",
+      })
+      .optional(),
     /** 上传接口（Task 4.3）落盘后把临时路径交过来 */
     uploadPath: z.string().min(1).optional(),
   })
@@ -30,7 +44,14 @@ export async function referenceRoutes(app: FastifyInstance): Promise<void> {
 
   app.post("/api/templates/:id/evidence", async (request) => {
     const { id } = request.params as { id: string };
-    const body = StartBody.parse(request.body);
+    const parsed = StartBody.safeParse(request.body);
+    if (!parsed.success) {
+      // 把第一条 issue 的原文带出来。统一压成「请求参数不合法」的话，前端读
+      // error.message 只会看到一句没信息量的废话
+      const first = parsed.error.issues[0];
+      throw new EvidenceError("INVALID_BODY", first?.message ?? "请求参数不合法", 400);
+    }
+    const body = parsed.data;
     return startEvidence({
       templateId: id,
       source: body.url ? { kind: "url", url: body.url } : { kind: "file", path: body.uploadPath as string },

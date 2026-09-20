@@ -21,12 +21,15 @@ export interface StepRow {
   duration_ms: number | null;
   error_code: string | null;
   error_message: string | null;
+  error_raw: string | null;
   detail: string | null;
 }
 
 export interface StepRecord extends StepView {
   startedAt?: string;
   endedAt?: string;
+  /** 原始 stdout/stderr，界面原样展示不改写（REQ-002 MUST） */
+  errorRaw?: string;
   detail?: unknown;
 }
 
@@ -60,6 +63,7 @@ function toRecord(row: StepRow | undefined, step: EvidenceStep): StepRecord {
     ...(row.duration_ms !== null ? { durationMs: row.duration_ms } : {}),
     ...(row.error_code ? { errorCode: row.error_code } : {}),
     ...(row.error_message ? { errorMessage: row.error_message } : {}),
+    ...(row.error_raw ? { errorRaw: row.error_raw } : {}),
     ...(row.detail ? { detail: JSON.parse(row.detail) as unknown } : {}),
   };
 }
@@ -70,7 +74,7 @@ export function markRunning(templateId: string, step: EvidenceStep): void {
     .prepare(
       `UPDATE evidence_steps
           SET status = 'running', started_at = ?, ended_at = NULL, duration_ms = NULL,
-              error_code = NULL, error_message = NULL, updated_at = ?
+              error_code = NULL, error_message = NULL, error_raw = NULL, updated_at = ?
         WHERE template_id = ? AND step = ?`,
     )
     .run(now, now, templateId, step);
@@ -84,7 +88,7 @@ export function markDone(templateId: string, step: EvidenceStep, detail?: unknow
 export function markFailed(
   templateId: string,
   step: EvidenceStep,
-  error: { code: string; message: string; timedOut?: boolean },
+  error: { code: string; message: string; timedOut?: boolean; raw?: string },
 ): void {
   finish(templateId, step, error.timedOut ? "timeout" : "failed", { error });
 }
@@ -93,7 +97,7 @@ function finish(
   templateId: string,
   step: EvidenceStep,
   status: EvidenceStatus,
-  extra: { detail?: unknown; error?: { code: string; message: string } },
+  extra: { detail?: unknown; error?: { code: string; message: string; raw?: string } },
 ): void {
   const now = new Date().toISOString();
   const row = db()
@@ -106,7 +110,7 @@ function finish(
     .prepare(
       `UPDATE evidence_steps
           SET status = ?, ended_at = ?, duration_ms = ?, error_code = ?, error_message = ?,
-              detail = COALESCE(?, detail), updated_at = ?
+              error_raw = ?, detail = COALESCE(?, detail), updated_at = ?
         WHERE template_id = ? AND step = ?`,
     )
     .run(
@@ -115,6 +119,7 @@ function finish(
       durationMs,
       extra.error?.code ?? null,
       extra.error?.message ?? null,
+      extra.error?.raw ?? null,
       extra.detail === undefined ? null : JSON.stringify(extra.detail),
       now,
       templateId,
@@ -130,7 +135,7 @@ export function resetSteps(templateId: string): void {
     .prepare(
       `UPDATE evidence_steps
           SET status = 'pending', started_at = NULL, ended_at = NULL, duration_ms = NULL,
-              error_code = NULL, error_message = NULL, detail = NULL, updated_at = ?
+              error_code = NULL, error_message = NULL, error_raw = NULL, detail = NULL, updated_at = ?
         WHERE template_id = ?`,
     )
     .run(now, templateId);

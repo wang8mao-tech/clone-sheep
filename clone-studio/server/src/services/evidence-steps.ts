@@ -1,10 +1,12 @@
-import { copyFileSync, existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { copyFile, mkdir, rename, rm } from "node:fs/promises";
 import path from "node:path";
+import { config } from "../config.js";
 import { db } from "../db/index.js";
 import { runHypit } from "../hypit/cli.js";
 import { checkProbe, STEP_TIMEOUT_MS, transcribeNote, type EvidenceStep, type ProbeFacts } from "./evidence-rules.js";
-import { listSteps } from "./evidence-store.js";
-import { EvidenceError, type StartArgs } from "./evidence.js";
+import { listSteps, markDone } from "./evidence-store.js";
+import { EvidenceError, type StartArgs } from "./evidence-types.js";
 
 /**
  * 四步各自怎么跑。编排（顺序、重试、状态落库）在 evidence.ts，这里只管
@@ -16,83 +18,146 @@ import { EvidenceError, type StartArgs } from "./evidence.js";
 
 export interface StepContext extends StartArgs {
   workspace: string;
+  /** 时长上限，来自设置（REQ-008 的 referenceMaxSeconds），不是硬编码 */
+  maxSeconds: number;
 }
 
 /** 抽多少帧。取整条片子均匀分布的中点，够 Agent 看清结构又不至于拼图太多。 */
 const TILE_FRAMES = 24;
 
+export function sourcePathOf(workspace: string): string {
+  return path.join(workspace, "references", "src", "source.mp4");
+}
+
+export function transcriptPathOf(workspace: string): string {
+  return path.join(workspace, "references", "transcript.json");
+}
+
+export function tilesDirOf(workspace: string): string {
+  return path.join(workspace, "references", "tiles");
+}
+
 export async function execute(step: EvidenceStep, ctx: StepContext): Promise<unknown> {
-  const sourcePath = path.join(ctx.workspace, "references", "src", "source.mp4");
   switch (step) {
     case "fetch":
-      return fetchSource(ctx, sourcePath);
+      return fetchSource(ctx);
     case "probe":
-      return probe(ctx, sourcePath);
+      return probe(ctx);
     case "transcribe":
-      return transcribe(ctx, sourcePath);
+      return transcribe(ctx);
     case "tiles":
-      return tiles(ctx, sourcePath);
+      return tiles(ctx);
   }
 }
 
 /** 上传的直接搬进工作目录；链接的交给 hypit 拉（它用的是钉死版本的 yt-dlp） */
-async function fetchSource(ctx: StepContext, sourcePath: string): Promise<unknown> {
-  mkdirSync(path.dirname(sourcePath), { recursive: true });
-  // hypit media fetch 拒绝覆盖已有文件，重试前必须先清掉
-  rmSync(sourcePath, { force: true });
+async function fetchSource(ctx: StepContext): Promise<unknown> {
+  const sourcePath = sourcePathOf(ctx.workspace);
+  await mkdir(path.dirname(sourcePath), { recursive: true });
 
   if (ctx.source.kind === "file") {
-    const from = ctx.source.path;
+    const from = path.resolve(ctx.source.path);
+
+    // 重试 fetch 时 source_path 已经指向工作目录里那一份，from 和目的地是同一个
+    // 文件。不先判这一下，下面的「清旧文件」会把用户唯一的源视频删掉，然后报
+    // 「上传的文件已经不在了，请重新上传」——而它刚刚被我们自己删了
+    if (from === path.resolve(sourcePath)) {
+      if (!existsSync(from)) {
+        throw new EvidenceError("SOURCE_GONE", "工作目录里的源视频不见了，请重新提交参考视频。", 409);
+      }
+      return { kind: "file", reused: true };
+    }
+
+    assertInsideUploads(from);
     if (!existsSync(from)) {
       throw new EvidenceError("UPLOAD_GONE", "上传的文件已经不在了，请重新上传。", 409);
     }
-    // 同盘就 rename（省一次整片拷贝），跨盘退回 copy
+
+    // 这里不需要先删目的地：rename 会直接覆盖。url 分支才必须先删——
+    // hypit media fetch 拒绝写进已有文件
     try {
-      renameSync(from, sourcePath);
-    } catch {
-      copyFileSync(from, sourcePath);
-      rmSync(from, { force: true });
+      await rename(from, sourcePath);
+    } catch (error) {
+      // 跨盘 rename 会 EXDEV，退回复制。别的错误（权限等）不该被当成跨盘吞掉
+      if ((error as NodeJS.ErrnoException).code !== "EXDEV") throw error;
+      await copyFile(from, sourcePath);
+      await rm(from, { force: true });
     }
     recordSourcePath(ctx.templateId, sourcePath);
     return { kind: "file" };
   }
 
+  await rm(sourcePath, { force: true });
+
   // 先把钉死版本的 yt-dlp 备好。不备的话第一次贴链接会撞上
   // 「yt-dlp … is not ready; run hypit media prepare-fetch」——那句话对用户
-  // 毫无意义，他并不知道 yt-dlp 是什么。装过就是毫秒级返回，可以每次都调
+  // 毫无意义，他并不知道 yt-dlp 是什么。装过就是毫秒级返回
+  const prepareStarted = Date.now();
   await runHypit<unknown>(["media", "prepare-fetch", "--json"], {
     cwd: ctx.workspace,
     subject: { kind: "template", id: ctx.templateId },
     timeoutMs: STEP_TIMEOUT_MS,
   });
 
+  // 整个 fetch 步共享一份 10 分钟预算（REQ-002：单项 >10 分钟标超时）。
+  // 两次 spawn 各给 10 分钟的话，最坏要 20 分钟才标超时
+  const left = Math.max(1_000, STEP_TIMEOUT_MS - (Date.now() - prepareStarted));
   const result = await runHypit<unknown>(["media", "fetch", ctx.source.url, "--to", sourcePath, "--json"], {
     cwd: ctx.workspace,
     subject: { kind: "template", id: ctx.templateId },
-    timeoutMs: STEP_TIMEOUT_MS,
+    timeoutMs: left,
   });
   recordSourcePath(ctx.templateId, sourcePath);
   return result.json;
 }
 
-async function probe(ctx: StepContext, sourcePath: string): Promise<ProbeFacts> {
-  const result = await runHypit<ProbeFacts>(["media", "probe", sourcePath, "--json"], {
+/**
+ * 上传文件只能来自上传目录。
+ * 不判的话 `uploadPath` 就是一个任意文件搬运接口——传 secrets.json 进来，
+ * 它会被 rename 进模板工作目录。后端只绑 127.0.0.1 不是不校验的理由。
+ */
+function assertInsideUploads(from: string): void {
+  const root = path.resolve(config.dataRoot);
+  const uploads = path.resolve(root, "uploads");
+  const rel = path.relative(uploads, from);
+  if (rel.startsWith("..") || path.isAbsolute(rel)) {
+    throw new EvidenceError("UPLOAD_OUTSIDE", "上传文件不在上传目录里，拒绝导入。", 400);
+  }
+}
+
+async function probe(ctx: StepContext): Promise<ProbeFacts> {
+  const result = await runHypit<ProbeFacts>(["media", "probe", sourcePathOf(ctx.workspace), "--json"], {
     cwd: ctx.workspace,
     subject: { kind: "template", id: ctx.templateId },
     timeoutMs: STEP_TIMEOUT_MS,
   });
 
-  const verdict = checkProbe(result.json);
-  if (!verdict.ok) throw new EvidenceError(verdict.code, verdict.message, 400);
+  const verdict = checkProbe(result.json, ctx.maxSeconds);
+  if (!verdict.ok) {
+    // 先把已经拿到的事实存下来再报错：不存的话界面只能从错误文案里抠时长，
+    // 分辨率和帧率就彻底拿不到了
+    markDone(ctx.templateId, "probe", result.json);
+    throw new EvidenceError(verdict.code, verdict.message, 400);
+  }
   return result.json;
 }
 
-async function transcribe(ctx: StepContext, sourcePath: string): Promise<unknown> {
-  const to = path.join(ctx.workspace, "references", "transcript.json");
-  rmSync(to, { force: true });
+async function transcribe(ctx: StepContext): Promise<unknown> {
+  const to = transcriptPathOf(ctx.workspace);
+  await rm(to, { force: true });
 
   const result = await runHypit<unknown>(
-    ["transcribe", sourcePath, "--to", to, "--language", ctx.language, "--workspace", ctx.workspace, "--json"],
+    [
+      "transcribe",
+      sourcePathOf(ctx.workspace),
+      "--to",
+      to,
+      "--language",
+      ctx.language,
+      "--workspace",
+      ctx.workspace,
+      "--json",
+    ],
     {
       cwd: ctx.workspace,
       subject: { kind: "template", id: ctx.templateId },
@@ -105,21 +170,32 @@ async function transcribe(ctx: StepContext, sourcePath: string): Promise<unknown
   return { ...(result.json as Record<string, unknown>), ...(note ? { note } : {}) };
 }
 
-async function tiles(ctx: StepContext, sourcePath: string): Promise<unknown> {
-  const to = path.join(ctx.workspace, "references", "tiles");
+async function tiles(ctx: StepContext): Promise<unknown> {
+  const to = tilesDirOf(ctx.workspace);
   // tiles 拒绝写进已有内容，重试前清干净
-  rmSync(to, { recursive: true, force: true });
+  await rm(to, { recursive: true, force: true });
 
-  const transcript = path.join(ctx.workspace, "references", "transcript.json");
-  const args = ["media", "tiles", sourcePath, "--frames", String(TILE_FRAMES), "--to", to, "--json"];
-  // 没有转写结果就不带 --transcript：带了会让 hypit 去读一个不存在的文件
-  if (existsSync(transcript)) args.splice(args.length - 1, 0, "--transcript", transcript);
-
-  const result = await runHypit<unknown>(args, {
-    cwd: ctx.workspace,
-    subject: { kind: "template", id: ctx.templateId },
-    timeoutMs: STEP_TIMEOUT_MS,
-  });
+  const transcript = transcriptPathOf(ctx.workspace);
+  const hasTranscript = existsSync(transcript);
+  const result = await runHypit<unknown>(
+    [
+      "media",
+      "tiles",
+      sourcePathOf(ctx.workspace),
+      "--frames",
+      String(TILE_FRAMES),
+      // 没有转写结果就不带 --transcript：带了会让 hypit 去读一个不存在的文件
+      ...(hasTranscript ? ["--transcript", transcript] : []),
+      "--to",
+      to,
+      "--json",
+    ],
+    {
+      cwd: ctx.workspace,
+      subject: { kind: "template", id: ctx.templateId },
+      timeoutMs: STEP_TIMEOUT_MS,
+    },
+  );
   return result.json;
 }
 

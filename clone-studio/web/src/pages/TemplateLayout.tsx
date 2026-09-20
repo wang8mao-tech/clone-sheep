@@ -44,7 +44,6 @@ export function TemplateLayout() {
   const steps = deriveSteps({
     status: template?.status ?? "importing",
     hasSource: template?.hasSource ?? false,
-    outputs: template?.stats.outputs ?? 0,
   });
   const hrefFor = (key: StepKey): string => `/clients/${clientId}/templates/${templateId}/${key}`;
 

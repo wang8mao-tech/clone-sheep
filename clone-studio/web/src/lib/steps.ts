@@ -35,8 +35,6 @@ export interface StepInput {
   status: TemplateStatus;
   /** 参考视频导入了没有。区分"在导入这一步失败"与"在复刻那一步失败"。 */
   hasSource: boolean;
-  /** 已完成的成片数，决定 ⑤成片 有没有东西可看 */
-  outputs: number;
 }
 
 /**
@@ -49,8 +47,11 @@ export interface StepInput {
  *
  * `failed` 落在哪一步用 hasSource 判：没导进参考视频就是倒在 ①参考，
  * 导进去了就是倒在 ②复刻。这是现有字段能给出的最准的答案。
+ *
+ * ④变体 与 ⑤成片 由同一道闸门控制：验货「通过」才解锁（REQ-004）。
+ * 不看成片数——FLOW-002 的完成状态写明复刻片是在「已验货」那一刻才入库成片的。
  */
-export function deriveSteps({ status, hasSource, outputs }: StepInput): Step[] {
+export function deriveSteps({ status, hasSource }: StepInput): Step[] {
   const state: Record<StepKey, StepState> = {
     reference: "done",
     clone: "locked",
@@ -74,8 +75,11 @@ export function deriveSteps({ status, hasSource, outputs }: StepInput): Step[] {
     case "approved":
       state.clone = "done";
       state.review = "done";
-      // SCOPE-004：验货通过才解锁变体
+      // SCOPE-004 / REQ-004：「通过」验货这一个动作同时解锁 ④变体 与 ⑤成片。
+      // 验货是质量闸门，没过之前不产出可交付的东西——复刻片在 ③验货 的并排
+      // 播放器里看得到，不需要靠 ⑤成片 去看
       state.variants = "available";
+      state.outputs = "available";
       break;
     case "failed":
       if (hasSource) {
@@ -85,9 +89,6 @@ export function deriveSteps({ status, hasSource, outputs }: StepInput): Step[] {
       }
       break;
   }
-
-  // ⑤成片：有片子就能看，不必等验货通过——复刻片本身也是成片
-  if (outputs > 0 && state.outputs === "locked") state.outputs = "available";
 
   return STEP_KEYS.map((key, i) => ({
     key,

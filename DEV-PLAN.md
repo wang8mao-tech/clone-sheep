@@ -151,9 +151,9 @@ Task 拆分，按序做，每个走 review→fix 循环：
 
 **Phase 3 收口时记下的三件事，Phase 4 起会用到：**
 
-1. **两条产品规则是在代码层发明的，Spec / Design-Brief / 本文件都没有出处**，现记于此作为暂时的真相源，**是否回写 Product-Spec 待用户拍板**：
-   - `outputs > 0` 就解锁 ⑤成片，不必等验货通过。依据是 FLOW-002 的「复刻片作为该模板下第一条成片入库」+ REQ-001 的「⑤成片 列出复刻片与全部变体成片」，推出「有片就能看」。SCOPE-004 只 gate 了 ④，没人说 ⑤ 怎么 gate。
-   - `defaultStep` 的四级优先级：**需处理 > 进行中 > 失败 > 能进的最后一步**。Spec 与 Brief 都没规定「进入模板页默认落在哪一步」。Phase 4/6/7/8/9 每个工作区都要依赖它。
+1. ~~两条产品规则是在代码层发明的，待拍板~~ **已回写 Spec（v1.7）**，真相源回到 Product-Spec：
+   - **⑤成片 与 ④变体 同一道闸门，验货「通过」才解锁**（SCOPE-004 备注、REQ-004 规则、AC-040）。原实现的 `outputs > 0 就解锁 ⑤` 与 FLOW-002 完成状态「复刻片在已验货那一刻才入库成片」直接冲突，已按 Spec 改回，`StepInput` 不再需要 `outputs`。
+   - **进模板页的默认步骤与地址行为**写进 REQ-001 规则段：默认落需处理 ＞ 进行中 ＞ 失败 ＞ 能进的最后一步；步骤写进地址、刷新停在原处；地址指定未解锁或不存在的步骤时送回算出来的那一步。
 2. **`steps.ts` 里两条推导从未在真实数据上跑过**：Phase 3 全仓没有任何一处写 `templates.source_path`，也没有任何一处 `UPDATE templates SET status`（唯一的 `UPDATE templates` 是改名）。所以 `hasSource` 恒 false、`status` 恒 `importing`，`failed` 落点判定与 `cloning`/`approved` 等分支只有单元测试证明。**Phase 4 接上写入方之后必须补真机验证。**
 3. **`disabled` + `title` 给不出「原因 tooltip」**（Design-Brief 组件通用七态要求禁用态给原因）：浏览器对 disabled 表单控件不派发指针事件，原生 title 气泡不出现。这是 Phase 1 的 `components/ui/Button.tsx` 就定下的先例（还额外加了 `disabled:pointer-events-none`），`Stepper` 照着走。**要修得整体修**——换 `aria-disabled` + onClick 拦截，或包一层 wrapper 承载 tooltip，别只改一处。
 

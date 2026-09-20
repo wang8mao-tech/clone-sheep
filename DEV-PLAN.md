@@ -3,7 +3,7 @@
 > 本文件记录项目的开发阶段划分、当前进度和剩余工作。
 > 新 session 启动时应首先阅读此文件，了解项目状态后再继续开发。
 >
-> **当前进度（2026-09-20）**：Phase 0 ✅（带一项已知阻塞）· Phase 1 ✅ · Phase 2 ✅（带三项遗留）· Phase 3 待开。
+> **当前进度（2026-09-20）**：Phase 0 ✅（带一项已知阻塞）· Phase 1 ✅ · Phase 2 ✅（带三项遗留）· Phase 3 进行中，Task 3.1 已提交（de5aba6），下一步 Task 3.2。详见 Phase 3 的「进度与交接」。
 > 分支 `feat/clone-studio`。Phase 6 开工前必须先解「本机渲染不通」，见「已知风险」。
 >
 > 依据：Product-Spec.md v1.5、Design-Brief.md v1.0、设计稿 https://claude.ai/artifact/7DWGBWDbka6Wm71vV6TBbH（7 屏，UI 以设计稿为准）、Hypit-Research.md、用户提供的《Codex 生图配置说明》（不随仓库分发，要点已写入 Spec REQ-011）。
@@ -117,6 +117,47 @@
 **验收标准**：
 - AC-001、AC-003 通过；AC-002 在 Phase 5 任务可运行后补验
 - 同名、超长名在输入框下红字提示
+
+**进度与交接（2026-09-20，因重启中断）**
+
+Task 拆分，按序做，每个走 review→fix 循环：
+
+| Task | 内容 | 状态 |
+|---|---|---|
+| 3.1 | 后端：客户/模板 CRUD + 级联删除服务 | ✅ 已提交 de5aba6，**欠一次 code-reviewer 两阶段审查** |
+| 3.2 | 前端：侧栏树接真实数据 + 行尾「…」菜单（重命名/删除）+ 新建客户 | ⬜ 下一步 |
+| 3.3 | 前端：首页空状态 + 客户页模板紧凑行列表 | ⬜ |
+| 3.4 | 前端：模板页框架（页头 + 步骤条 CMP-001 + 步骤路由 + 刷新保持） | ⬜ |
+
+Task 3.1 已落地的接口，前端直接照这个对接：
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| GET | `/api/clients` | 侧栏树 `{clients:[{id,name,createdAt,templates:[{id,name,status}]}]}` |
+| POST | `/api/clients` | 建客户 `{name}` → 201 |
+| GET | `/api/clients/:id` | 客户页：`{client, templates:[{...,stats:{outputs,totalCostUsd,costIsEstimate,lastActivityAt}}]}` |
+| PATCH | `/api/clients/:id` | 改名 `{name}` |
+| GET | `/api/clients/:id/deletion-impact` | 弹窗用：`{templates,productions,runningTasks,directories}` |
+| DELETE | `/api/clients/:id` | 级联删除，返回 impact |
+| POST | `/api/clients/:id/templates` | 建模板 `{name}` → 201 |
+| GET/PATCH/DELETE | `/api/templates/:id`、`/api/templates/:id/deletion-impact` | 同上，模板维度 |
+
+- 错误形状统一 `{error:{code,message}}`。重名 `409 NAME_TAKEN`，文案就是「名称已存在」，直接贴输入框下（AC-003）；超长 `400 NAME_TOO_LONG`；不存在 `404`；目录被占 `409 DIRECTORY_BUSY`。
+- 增删改后后端发 SSE：topic `global`、event `archive`。**前端 `web/src/lib/useSse.ts` 的事件名清单里还没有 `archive`，Task 3.2 要补进去**，否则侧栏不会自动刷新。
+- `Shell.tsx` 里 `const clients: SidebarClient[] = []` 是 Phase 1 留的占位，Task 3.2 换成真实 query。
+- `HomePage.tsx` 的「新建客户」按钮现在是 `disabled` + `disabledReason="新建客户在 Phase 3 接通"`，Task 3.3 要接通。
+
+**Task 3.2 开工前要先定的一件事**：设计稿（7 屏全部）三级文字色实测用 `#8A909A`，而 Phase 1 的 `web/src/styles/tokens.css` 按 Design-Brief 的「约 #666C75」写成了 `#666c75`。按「有设计稿时 UI 以设计稿为准」应改成 `#8A909A`，影响面是全局 `text-text-tertiary`（改后变亮，对比度提升）。这是 Phase 1 的偏差，单独一个 `fix:` 提交，改前先 grep 引用点。
+
+设计稿实测值（Task 3.2-3.4 直接用，取自 `project/Reference.dc.html`）：
+- 侧栏客户行：高 32、`padding 0 12`、折叠箭头 10px `#8A909A`、客户名 13/500
+- 侧栏模板行：高 32、`padding 0 12px 0 30px`、`radius 6`、`margin 0 6`；选中 `bg #1D2024` 且状态点带 `box-shadow 0 0 0 3px #19E3B133`；名称选中 `#ECEEF1`、未选 `#9BA1AA`
+  （现有 `Sidebar.tsx` 用的是 `pl-[26px]`，与设计稿的 30px 差 4px，Task 3.2 一并对齐）
+- 模板页头：高 56、`padding 0 24`；面包屑「客户名 13px `#9BA1AA` / 分隔 `#8A909A` / 模板名 18/600」；右侧「模板累计」12px + 金额 mono 13px
+- 步骤条：高 44、`padding 0 24`、步间距 12；每步 `padding 0 4`、底边 2px（当前 `#19E3B1`，其余 transparent）；序号圆 18px、1px 描边、mono 11px，当前显数字且主色，未解锁显 `·` 且 `#8A909A`；步名 13px，当前 600 `#ECEEF1`，其余 400 `#8A909A`；步与步之间一根 28×1px `#2A2E33` 连接线
+- 主工作区：`padding 20px 24px`、`gap 20`
+
+设计稿只画了 7 屏（①参考 ②复刻 ③验货 ④变体队列 ④素材审核 ⑤成片 设置），**首页空状态与客户页没有画**，Task 3.3 按 Design-Brief SCREEN-002 + CMP-002 实现，不自由发挥。
 
 ---
 

@@ -1,5 +1,26 @@
 # 变更记录
 
+## [v1.5] - 2026-09-20
+> 本版全部改动来自 Phase 0 先行验证的实跑结论，证据见 `clone-studio/docs/spike-notes.md`。
+
+### 修改
+- **REQ-003 拦截机制换底**：`canUseTool` 实测拦不住花钱动作——默认 `sandbox.autoAllowBashIfSandboxed` 为 true 使其根本不被调用，且只禁 `Bash` 时模型会派 `Task` 子 Agent 绕开照样执行。主拦截改为 `disallowedTools` 且必含 `Task`；拦截记录由宿主自写，不读恒为空的 `permission_denials`。AC-007 措辞同步。
+- **REQ-003 新增会话隔离要求**：必须传 `settingSources: []`，否则继承用户本机 `~/.claude` 的权限规则与 hooks。
+- **REQ-003 熔断改用 SDK 原生**：`maxBudgetUsd` + `error_max_budget_usd`，不自己累加；`total_cost_usd` 只取最新一条 result（resume 会续上累计值）。
+- **REQ-006 估价来源改由自己算**：hypit 的 `pricing.kind` 只有 `page`（价格页 URL）与 `local`（零价），无结构化费率，官方文档明言 "Hypit itself calculates no total"。改为 Clone Studio 自维护费率表，用 `plan --json` 的 `needs[].summary.fields` 计算，界面同时展示价格页链接供人工核对。
+- **REQ-006 / REQ-009 花费口径改为"估"**：build 的实际花费无处可取（Result 只有不含金额的 `receipt`），两类花费一律标估算，不出现"实际账单"字样；有 `receipt.url` 时给链接。
+- **REQ-011 底层模型标【未验证】**：Codex 走的是内置 `image_gen` 工具而非 CLI fallback，`gpt-image-2` 是 fallback 的默认模型，本次输出无字段暴露内置路径实际模型。
+- **REQ-011 新增沙箱约束**：不得把 `--sandbox workspace-write` 收紧到禁止执行命令——内置 `image_gen` 不接受目标路径参数，Codex 靠执行复制命令把图搬到 `./images/`。补记单张约 87K input tokens 的固定开销。
+
+### 结论落定
+- **ASM-002 成立**：订阅登录下 `total_cost_usd` 五组实跑均返回真实数值（0.0143-0.0518），$5 熔断可行。
+- **ASM-012 新增并判定不成立**：`canUseTool` 不能作为拦截主手段（见上）。
+- **Q-003 已解答且为否**：估价与实际花费都拿不到。原兜底方案"拿不到则全部走人工确认"转为正式决定。
+- REQ-011 Codex 生图实跑成功：退出码 0，产出 838KB 有效 PNG，Spec 描述的两条找图路径均成立。
+
+---
+
+
 ## [v1.4] - 2026-09-19
 ### 修改
 - REQ-012 本地 ComfyUI 通道的超时从"固定 30 分钟"改为按片长计算 `max(30 分钟, 秒数 × 6 分钟)`、上限 120 分钟；超时只停轮询标"超时待查"，不重新提交。依据用户另一项目的实测耗时。

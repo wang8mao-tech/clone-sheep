@@ -1,6 +1,7 @@
 # 产品需求规范：Clone Studio（暂定名）
 
-> 版本 v1.4 · 2026-09-19 · 内核：Hypit 0.2.6（本地副本 `hypit-main/`）· 技术调研见 `Hypit-Research.md`
+> 版本 v1.5 · 2026-09-20 · 内核：Hypit 0.2.6（本地副本 `hypit-main/`）· 技术调研见 `Hypit-Research.md`
+> Phase 0 先行验证结论见 `clone-studio/docs/spike-notes.md`，本版据其回写。
 
 ## 0. AI 使用说明
 
@@ -255,9 +256,12 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 **行为：** 后端用 Claude Agent SDK（TypeScript）`query()` 启动会话，cwd = 工作目录，工作目录的 `.claude/skills/hypit` 指向 `hypit-main/skills/hypit` 的副本。流式消息落库并经 SSE 推到前端抽屉。保存 session id 供 resume。
 
 **规则：**
+- MUST 传 `settingSources: []` 做会话隔离。实测不传会连用户本机 `~/.claude` 的权限规则与 hooks 一起继承（消息流里出现 `system:hook_started`），行为不可复现。
 - MUST 给 Agent 完整能力：Bash、文件读写、联网搜索与抓取，等同终端里的 Claude Code。
-- MUST 拦截花钱动作：经 `canUseTool` 拒绝任何 `hypit build` 与 `hypit result` 写操作，并在系统提示里说明"出片由宿主负责，你写到 check 通过为止"。
-- MUST 熔断：墙钟 45 分钟或等价花费 $5（SDK 报告的 total_cost_usd / `maxBudgetUsd`）先到先停；设置页可改。
+- MUST 拦截花钱动作：主拦截手段是 `disallowedTools`，**任何禁用清单必须把 `Task` 一并禁掉**——实测只禁 `Bash` 时模型会派 Task 子 Agent 绕开并照样执行命令。`canUseTool` 只作补充：默认配置下它根本不会被调用（`sandbox.autoAllowBashIfSandboxed` 默认 `true`，沙箱内 Bash 自动放行）。系统提示里说明"出片由宿主负责，你写到 check 通过为止"。
+- MUST 拦截记录由宿主自己写，不读 SDK 的 `permission_denials`：用 `disallowedTools` 隐藏工具时该字段恒为空数组。
+- MUST 熔断：墙钟 45 分钟或等价花费 $5 先到先停；花费熔断用 SDK 的 `maxBudgetUsd` 选项 + `error_max_budget_usd` 结果子类型，不自己累加。设置页可改。
+- MUST 读 `total_cost_usd` 时只取最新一条 `result` 消息，不跨 result 累加——resume 的会话会续上转录里保存的累计值（实测 resume 组 0.0518 > 被 resume 组 0.0479）。
 - MUST 卡死检测：同一条命令连续失败 5 次，或 10 分钟无任何新消息 → 停并标"已熔断"。
 - MUST 订阅限流不算失败：进"等待额度"，到重置时间自动 resume。
 - MUST Agent 过程回显只进右侧抽屉，不进工作区主内容。
@@ -267,7 +271,7 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 **状态：** 排队 / 运行中 / 等待额度 / 已熔断 / 中断 / 完成 / 已取消。
 
 **验收标准：**
-- [ ] AC-007: Given 运行中的 Agent 尝试执行 `hypit build`, when 工具调用到达宿主, then 被拒绝，日志里有一条"已拦截"记录，生成模型花费为 0。
+- [ ] AC-007: Given 运行中的 Agent 尝试执行 `hypit build`, when 该工具调用被宿主的 `disallowedTools`（含 `Task`）挡下, then 命令未执行，宿主自己的日志里有一条"已拦截"记录，生成模型花费为 0。
 - [ ] AC-008: Given 熔断预算设为 $0.2, when 复刻任务花费超过它, then 任务停在"已熔断"，中间文件保留，"继续"按钮可 resume 同一会话。
 - [ ] AC-009: Given Agent 运行中, when 刷新浏览器, then 抽屉恢复历史消息并继续流式接收。
 - [ ] AC-010: Given 后端进程被杀后重启, when 打开该模板, then 任务显示"中断"并可"继续"。
@@ -324,17 +328,22 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 
 **优先级：** P0　**关联任务：** TASK-004、TASK-005　**关联流程：** FLOW-002、FLOW-003
 
-**行为：** 出片前 spawn `hypit plan --json` 与 `hypit pricing --json` 得到外部请求数与估价。通过闸门后 spawn `hypit build <run> --follow --json`，并行 `hypit activity --watch --jsonl` 取结构化进度。完成后 `hypit get <build-id> --output final.video --to output/<name>.mp4 --json`。
+**行为：** 出片前 spawn `hypit plan --json` 与 `hypit pricing --json` 得到外部请求数与执行参数。通过闸门后 spawn `hypit build <run> --follow --json`，并行 `hypit activity --watch --jsonl` 取结构化进度。完成后 `hypit get <build-id> --output final.video --to output/<name>.mp4 --json`。
+
+**估价来源（Q-003 已解答，hypit 不出数）：** hypit 的 `pricing.kind` 只有 `"page"`（一个价格页 URL）和 `"local"`（零价）两种，不含任何结构化费率，官方文档明言 "Hypit itself calculates no total"。因此：
+- MUST Clone Studio 自己维护一张"能力/模型 → 单价"费率表（随设置页可编辑），用 `plan --json` 的 `needs[].summary.fields`（宽高、`startFrame`/`endFrameExclusive`、帧率、采样率）与 `providerRequestCount` 自行计算估价。
+- MUST 闸门界面同时展示 `providers[].pricing.url` 价格页链接，供人工核对费率表是否过期。
+- MUST 费率表缺该能力的单价 → 按"估价拿不到"处理。
 
 **规则：**
 - MUST 估价 ≤ 单条限额 且 批次已花+估价 ≤ 批次限额 → 自动放行；否则停在"待确认花费"显示明细，人点确认才 build。
-- MUST 估价拿不到（pricing 失败或 Provider 无价目）→ 一律按超限处理，等人确认。
+- MUST 估价拿不到（plan 失败、Provider 无价目、或费率表缺项）→ 一律按超限处理，等人确认。
 - MUST plan 有未解析请求或 preflight 失败 → 不出片，标失败并展示原因。
 - MUST 凭据用 `@hypit/credential-store-env`，TokenDance / HypiHub key 由后端注入 hypit 子进程环境变量，不写进工作目录任何文件。
 - MUST 后端生成的 `hypit.runtime.json` 按已验证的生成服务写 endpoints：TokenDance（`@hypit/provider-tokendance`，覆盖 Seedance 2.0/2.5 视频、Seedream 5.0 lite 生图、MiniMax H3 视频）为主；HypiHub 已连接时一并写入，覆盖 TokenDance 没有的能力（配音 TTS、GPT Image 等）。
 - MUST 把当前可用的能力清单（哪些模型能用、哪些不能）写进 Agent 系统提示，要求 Agent 只用可用能力写 SVML；plan 出现无 Provider 可解析的请求时标失败并指明缺哪种能力。
 - MUST 渲染并发受 `hyperframes.local` 的 `workers` 与全局渲染任务数限制，默认 workers=4。
-- MUST 记录实际花费到台账；实际值拿不到时记估价并标"估"。
+- MUST 记录花费到台账。**build 的实际花费拿不到**：hypit 的 Result 只有不含金额的 `receipt: { id, url? }`，全仓库无任何金额字段。故生成侧花费一律按"请求数 × 自维护单价"记账并标"估"，不谎称账单。
 
 **输入（设置）：**
 
@@ -376,10 +385,14 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 
 **优先级：** P0　**关联任务：** TASK-004
 
-**行为：** 每个 Agent 任务记：时长、等价 token 花费。每次 build 记：估价、实际、build-id。成片卡片显示合计；模板页头显示模板累计。
+**行为：** 每个 Agent 任务记：时长、等价 token 花费（取最新一条 `result` 的 `total_cost_usd`，SDK 自称 "An estimate, not a billing statement"）。每次 build 记：估价、build-id、`receipt.id`/`url`（若有）。成片卡片显示合计；模板页头显示模板累计。
+
+**规则：**
+- MUST 两类花费都标注为"估算"，界面不出现"实际账单"字样。build 侧没有实际金额可取（见 REQ-006 估价来源）。
+- MUST 有 `receipt.url` 时在花费明细里给出链接，让人能去 Provider 侧查真实账单。
 
 **验收标准：**
-- [ ] AC-024: Given 一条变体经历 1 次 Agent 任务与 1 次 build, when 查看成片详情, then 分别列出两笔花费及合计。
+- [ ] AC-024: Given 一条变体经历 1 次 Agent 任务与 1 次 build, when 查看成片详情, then 分别列出两笔花费及合计，且两笔均标"估"。
 
 ### REQ-010: Agent 模型切换
 
@@ -442,7 +455,7 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 
 **用途：** 用户有 ChatGPT/Codex 订阅，让生图走订阅额度而不是按量付费。依据：用户提供的《Codex 生图配置说明》（已在用户的其它项目中实跑，不随仓库分发）。
 
-**行为：** 在本项目代码目录（不在 `hypit-main/` 内）写一个 Hypit Provider 包，参照 `hypit-main/examples/provider-package` 与 `@hypit/endpoint-kit`，承接 `@hypit/gpt-image@1` 的生图能力。每个生图请求 spawn 一次 Codex CLI，由提示词里的 `$imagegen`（底层 gpt-image-2）出图，PNG 交回 Build。设置里启用后，后端生成的 `hypit.runtime.json` 把 gpt-image 能力绑定到它。
+**行为：** 在本项目代码目录（不在 `hypit-main/` 内）写一个 Hypit Provider 包，参照 `hypit-main/examples/provider-package` 与 `@hypit/endpoint-kit`，承接 `@hypit/gpt-image@1` 的生图能力。每个生图请求 spawn 一次 Codex CLI，由提示词里的 `$imagegen` 出图（走 Codex 内置 `image_gen` 工具，**底层模型不详【未验证】**——`gpt-image-2` 是 CLI fallback 路径的默认模型，内置路径的输出里没有任何字段暴露实际模型），PNG 交回 Build。设置里启用后，后端生成的 `hypit.runtime.json` 把 gpt-image 能力绑定到它。
 
 **规则：**
 - MUST 一图一进程，绝不批量。参数数组：`codex exec --ignore-user-config --json --ephemeral -c windows.sandbox="elevated" --sandbox workspace-write --skip-git-repo-check -C <临时工作目录> [--image <参考图绝对路径> …最多 4 张] -- "<提示词>"`。
@@ -456,7 +469,8 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 - MUST 设置页体检增加：Codex CLI ≥ 0.128 且 `~/.codex/auth.json` 存在；提供"试出一张图"按钮。
 - MUST 不支持透明背景：请求带透明背景参数时以"不支持"失败，不静默忽略。
 - MUST NOT 直连 `chatgpt.com/backend-api`。
-- SHOULD 并发默认 1（订阅额度约 40-50 张 / 3 小时滚动窗口）。
+- MUST NOT 把 `--sandbox workspace-write` 收紧到禁止执行命令。内置 `image_gen` 不接受目标路径参数，Codex 是先生成到 `$CODEX_HOME/generated_images/` 再执行一条复制命令把图搬到 `./images/`，禁命令就拿不到图。
+- SHOULD 并发默认 1（订阅额度约 40-50 张 / 3 小时滚动窗口）。单张固定带约 87K input tokens 开销（Codex 每次先读一遍 `imagegen/SKILL.md`，其中约 71K 命中缓存），美元计价仍为 $0，但影响单张耗时。
 
 **验收标准：**
 - [ ] AC-031: Given Codex 已登录且启用该 Provider, when 出一条含 1 个 gpt-image 请求的片子, then 该请求由 Codex 子进程完成，产物 PNG 进入 Build，台账该请求花费 $0、张数 1。
@@ -613,7 +627,8 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 | 编号 | 假设 | 假设依据 | 错误风险 |
 |---|---|---|---|
 | ASM-001 | 变体由 Agent 重写 SVML，而非程序化改字段 | Hypit 排行榜示例 swap-topic 是整份 33KB 重写的 SVML | 若多数变体其实只换几个字段，则白烧 token；可二期加"快速变体"通道 |
-| ASM-002 | 订阅登录下 SDK 仍返回可用的 total_cost_usd 供 $5 熔断使用 | SDK 结果消息含成本字段 | 若为 0 或不准，熔断退化为仅靠 45 分钟与卡死检测；开发第一阶段须实测 |
+| ASM-002 | ~~订阅登录下 SDK 仍返回可用的 total_cost_usd 供 $5 熔断使用~~ **已验证成立**（Phase 0） | 五组实跑均返回 number 型真实数值（0.0143-0.0518），`modelUsage` 另给分模型用量 | 已消解。改用 SDK 原生 `maxBudgetUsd` 熔断，见 REQ-003 |
+| ASM-012 | ~~`canUseTool` 可作为拦截花钱动作的主手段~~ **已验证不成立**（Phase 0） | 默认沙箱自动放行、只禁 Bash 会被 Task 绕开，实测四组中三组命令照样执行 | 已消解。改用 `disallowedTools`（必含 `Task`），见 REQ-003 |
 | ASM-003 | 订阅无头周额度够跑日常批量 | 2026-06 起无头独立额度池 | 不够则批量经常停在"等待额度"；此时切到 REQ-010 的其它模型档案 |
 | ASM-011 | 生成服务以 TokenDance 为主即可跑通 P0 验收样本 | 用户已订阅；Hypit 内置其 Provider | 参考片依赖 TTS 或 GPT Image 时 plan 会缺能力，需连 HypiHub 或等 REQ-011 |
 | ASM-009 | 切模型靠给 Agent SDK 子进程注入 `ANTHROPIC_BASE_URL` 等环境变量实现，不换 Agent 框架 | DeepSeek 官方文档与 LiteLLM 教程均以此方式接 Claude Code | 某家端点与 SDK 新版本不兼容时该档案不可用；靠"测试连接"提前暴露 |
@@ -633,7 +648,7 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 | Q-004 | 火山方舟当前的 Anthropic 兼容端点地址、模型 id 与是否支持图片输入 | No | 开发到 REQ-010 时联网核实后写进预设；核实不到则豆包预设降为"自定义"并由用户自填 |
 | Q-005 | 用户的 Gemini / ChatGPT 是聊天订阅还是 API key | No | 聊天订阅无法接入；只有 API key 能用，且需自起 LiteLLM |
 | Q-007 | Hypit 能否从 `hypit-main/` 之外加载自写 Provider 包（`--package-root` 或项目 `packages/`），以及 gpt-image 能力的请求/响应契约 | No | 已基本解答：`hypit-main/examples/provider-package` 证明项目自有 Provider 放在包目录、经 runtime profile 的 `bindings` 绑到 `@hypit/gpt-image@1#gpt-image-2` 即可；剩 `--package-root` 指向 hypit-main 之外目录的实测，排在 DEV-PLAN Phase 11 |
-| Q-003 | `hypit pricing` 对 TokenDance 是否能给出可用估价、build 后能否拿到实际花费 | 阻塞 REQ-006 细节 | 开发第一阶段实测；拿不到则全部走人工确认 |
+| ~~Q-003~~ | **已解答（Phase 0）**：`hypit pricing` 给不出可用估价，build 后也拿不到实际花费 | 不再阻塞 | `pricing.kind` 仅 `page`/`local`，Result 无金额字段。兜底方案转为正式决定：Clone Studio 自维护费率表算估价、全部花费标"估"，见 REQ-006 估价来源与 REQ-009。证据见 `clone-studio/docs/spike-notes.md` 验证一 |
 
 ---
 

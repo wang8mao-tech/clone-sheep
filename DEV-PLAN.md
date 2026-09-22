@@ -3,7 +3,7 @@
 > 本文件记录项目的开发阶段划分、当前进度和剩余工作。
 > 新 session 启动时应首先阅读此文件，了解项目状态后再继续开发。
 >
-> **当前进度（2026-09-20）**：Phase 0 ✅（带一项已知阻塞）· Phase 1 ✅ · Phase 2 ✅（带三项遗留）· **Phase 3 ✅**（四个 Task 交付，过完五轮 review→fix，AC-001 / AC-003 实跑通过，AC-002 按原计划留 Phase 5）· 下一步 Phase 4。
+> **当前进度（2026-09-22）**：Phase 0 ✅（带一项已知阻塞）· Phase 1 ✅ · Phase 2 ✅（带两项遗留）· Phase 3 ✅ · **Phase 4 ✅**（五个 Task 交付，4.3 过六轮、4.4 / 4.5 各过四轮 review→fix；AC-004 / AC-005 / AC-006 真机浏览器实跑通过，用户实测确认）· 下一步 Phase 5。
 > 分支 `feat/clone-studio`。Phase 6 开工前必须先解「本机渲染不通」，见「已知风险」。
 >
 > 依据：Product-Spec.md v1.5、Design-Brief.md v1.0、设计稿 https://claude.ai/artifact/7DWGBWDbka6Wm71vV6TBbH（7 屏，UI 以设计稿为准）、Hypit-Research.md、用户提供的《Codex 生图配置说明》（不随仓库分发，要点已写入 Spec REQ-011）。
@@ -250,6 +250,12 @@ ltk_data	okenizers\`（路径来自 `provider-whisperx-local/src/program.ts` 的
 - 即便服务已在跑，`programs up` 也要约 18 秒，所以先探 `/health`；冷启动实测 78 秒到 3 分钟。
 - 探测只有 `ECONNREFUSED` 算没在跑；连接被重置、回的不是 HTTP、超时都算端口被占/服务卡死，拦截，不去 `programs up`（它只会回 unchanged）。
 - `programs` 要从工作目录解析 Runtime Profile，给用户的修复命令必须带 `--workspace`。
+
+**Phase 4 收口（2026-09-22）**：四步走全过。
+- Code Review：交付清单四项齐；范围外改动三处均有出处（设置页随共用字段改卡片、`forceCloseConnections`、后端重启时同步模板状态）。关键文件实际落在 `web/src/pages/steps/`（沿用 Phase 3 目录），不是本节写的 `pages/template/`。
+- 测试：web 112 / server 183，关键修复均做过变异验证。`workspace.contract.test.ts` 在 Task 4.3 审查时偶发失败过一次，之后全套连跑 8 遍未复现，**留观**；它失败时会带出 hypit 原文。
+- 编译：前后端 `tsc --noEmit` 零错误，`pnpm build` 通过，eslint 0 error。
+- 功能：临时数据根下真浏览器实跑 AC-004（30 秒人声：四步全勾，transcript 32 词带词级时间，3 张拼图，自动进 ②）、AC-005（200 秒：探测红「时长超过 180 秒（实际 200.0 秒）」，未跑转写抽帧，agent_jobs 为 0）、AC-006（坏链接：下载红 + yt-dlp 原文 + 改为上传后跑通）；刷新不丢；用户在正式数据上复测无问题。
 
 **Task 4.3 遗留（不挡 Phase 4）**：
 - 超过 500 MB 的文件要整个读完才回 413（插件截断后仍消费剩余字节）。4.4 前端选文件时就校验大小挡住；要彻底解决得在 truncated 时走 `abandonRequest`。

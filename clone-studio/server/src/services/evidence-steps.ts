@@ -4,9 +4,10 @@ import path from "node:path";
 import { config } from "../config.js";
 import { db } from "../db/index.js";
 import { runHypit } from "../hypit/cli.js";
+import { ensureWhisperX } from "../hypit/whisperx-service.js";
 import { isReallyInside } from "../lib/safe-path.js";
 import { checkProbe, STEP_TIMEOUT_MS, transcribeNote, type EvidenceStep, type ProbeFacts } from "./evidence-rules.js";
-import { listSteps, markDone } from "./evidence-store.js";
+import { listSteps, markDone, noteRunning } from "./evidence-store.js";
 import { EvidenceError, type StartArgs } from "./evidence-types.js";
 
 /**
@@ -152,6 +153,27 @@ async function transcribe(ctx: StepContext): Promise<unknown> {
   const to = transcriptPathOf(ctx.workspace);
   await rm(to, { force: true });
 
+  // 服务停着时（重启电脑后必然）transcribe 两秒就失败、只报 fetch failed，
+  // 先拉起来。冷启动约 3 分钟，与转写共用这一步的 10 分钟预算
+  const started = Date.now();
+  const subject = { kind: "template", id: ctx.templateId };
+  let readiness: Awaited<ReturnType<typeof ensureWhisperX>>;
+  try {
+    readiness = await ensureWhisperX(
+      ctx.workspace,
+      { subject, timeoutMs: STEP_TIMEOUT_MS },
+      { onStarting: () => noteRunning(ctx.templateId, "transcribe", "正在启动 WhisperX 服务") },
+    );
+  } catch (error) {
+    // 拉不起来：撤掉「正在启动」再抛。markFailed 会保留已有的 detail，不撤的话失败行上
+    // 留着一句「正在启动」，以后读这一行诊断的人会被误导（复审第四轮）
+    noteRunning(ctx.templateId, "transcribe", null);
+    throw error;
+  }
+  // 服务起来了，接下来是真的在转写：撤掉「正在启动」，界面回到「转写中」
+  if (readiness === "started") noteRunning(ctx.templateId, "transcribe", null);
+  const left = Math.max(1_000, STEP_TIMEOUT_MS - (Date.now() - started));
+
   const result = await runHypit<unknown>(
     [
       "transcribe",
@@ -164,11 +186,7 @@ async function transcribe(ctx: StepContext): Promise<unknown> {
       ctx.workspace,
       "--json",
     ],
-    {
-      cwd: ctx.workspace,
-      subject: { kind: "template", id: ctx.templateId },
-      timeoutMs: STEP_TIMEOUT_MS,
-    },
+    { cwd: ctx.workspace, subject, timeoutMs: left },
   );
 
   const facts = listSteps(ctx.templateId).find((s) => s.step === "probe")?.detail as ProbeFacts | undefined;

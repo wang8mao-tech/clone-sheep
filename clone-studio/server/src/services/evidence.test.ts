@@ -52,6 +52,9 @@ function fakeHypit(fail?: { at: string; error: Error }) {
 async function seed(fake: ReturnType<typeof fakeHypit>) {
   const cli = await import("../hypit/cli.js");
   vi.spyOn(cli, "runHypit").mockImplementation(fake.impl as unknown as typeof cli.runHypit);
+  // 转写前的服务探测会真连 127.0.0.1:8765，结果随机器上服务开没开而变，一律桩掉
+  const svc = await import("../hypit/whisperx-service.js");
+  const ensure = vi.spyOn(svc, "ensureWhisperX").mockResolvedValue("already-up");
 
   const dbMod = await import("../db/index.js");
   const migrateMod = await import("../db/migrate.js");
@@ -62,7 +65,14 @@ async function seed(fake: ReturnType<typeof fakeHypit>) {
 
   const client = archive.createClient("老王工作室");
   const template = archive.createTemplate(client.id, "足球榜");
-  return { evidence, archive, db: dbMod.db, templateId: template.id, workspace: template.workspace_path as string };
+  return {
+    evidence,
+    archive,
+    ensure,
+    db: dbMod.db,
+    templateId: template.id,
+    workspace: template.workspace_path as string,
+  };
 }
 
 /** 造一个位于上传目录里的假视频文件 */
@@ -318,6 +328,116 @@ describe("取源这一步的文件操作", () => {
     expect(state.steps.find((s) => s.step === "fetch")?.errorCode).toBe("UPLOAD_OUTSIDE");
     // 拒绝了就不能动它
     expect(existsSync(outside)).toBe(true);
+  });
+
+  it("转写前先确保 WhisperX 服务在跑，且在 transcribe 之前", async () => {
+    const fake = fakeHypit();
+    const { evidence, templateId, workspace, ensure } = await seed(fake);
+    // ensure 被调的那一刻 hypit 已经跑过哪些命令：transcribe 必须还没跑
+    let ranBeforeEnsure: string[] = [];
+    ensure.mockImplementation(async () => {
+      ranBeforeEnsure = fake.calls.map((c) => c[0] as string);
+      return "started";
+    });
+    await evidence.startEvidence({ templateId, source: { kind: "file", path: fakeUpload() }, language: "zh" });
+    const state = await settle(evidence, templateId);
+
+    expect(state.status).toBe("done");
+    expect(ensure).toHaveBeenCalledTimes(1);
+    expect(ensure).toHaveBeenCalledWith(
+      workspace,
+      expect.objectContaining({ subject: { kind: "template", id: templateId } }),
+      expect.objectContaining({ onStarting: expect.any(Function) }),
+    );
+    expect(ranBeforeEnsure).not.toContain("transcribe");
+    expect(fake.calls.some((c) => c[0] === "transcribe")).toBe(true);
+  });
+
+  it("要拉起服务时，转写这一步挂上「正在启动 WhisperX 服务」的附注", async () => {
+    const fake = fakeHypit();
+    const { evidence, templateId, ensure } = await seed(fake);
+    let noteWhileStarting: unknown;
+    ensure.mockImplementation(async (_ws, _opts, hooks) => {
+      hooks?.onStarting?.();
+      noteWhileStarting = evidence.evidenceState(templateId).steps.find((s) => s.step === "transcribe")?.detail;
+      return "started";
+    });
+    await evidence.startEvidence({ templateId, source: { kind: "file", path: fakeUpload() }, language: "zh" });
+    const state = await settle(evidence, templateId);
+
+    expect(noteWhileStarting).toEqual({ note: "正在启动 WhisperX 服务" });
+    // 完成后附注被转写结果换掉，不残留
+    expect(state.steps.find((s) => s.step === "transcribe")?.detail).not.toEqual({ note: "正在启动 WhisperX 服务" });
+  });
+
+  it("服务拉起后真正转写时，「正在启动」附注已撤掉", async () => {
+    const fake = fakeHypit();
+    const { evidence, templateId, ensure } = await seed(fake);
+    ensure.mockImplementation(async (_ws, _opts, hooks) => {
+      hooks?.onStarting?.();
+      return "started";
+    });
+    const cli = await import("../hypit/cli.js");
+    let detailDuringTranscribe: unknown = "not-called";
+    vi.mocked(cli.runHypit).mockImplementation((async (args: readonly string[]) => {
+      if (args[0] === "transcribe") {
+        detailDuringTranscribe = evidence.evidenceState(templateId).steps.find((s) => s.step === "transcribe")?.detail;
+      }
+      return fake.impl(args);
+    }) as unknown as typeof cli.runHypit);
+
+    await evidence.startEvidence({ templateId, source: { kind: "file", path: fakeUpload() }, language: "zh" });
+    await settle(evidence, templateId);
+    expect(detailDuringTranscribe).toBeUndefined();
+  });
+
+  it("拉起失败后重试、服务已在跑：重试期间不残留上一轮的「正在启动」", async () => {
+    const fake = fakeHypit();
+    const { evidence, templateId, ensure } = await seed(fake);
+    const { HypitError } = await import("../hypit/cli.js");
+    ensure.mockImplementationOnce(async (_ws, _opts, hooks) => {
+      hooks?.onStarting?.();
+      throw new HypitError("WHISPERX_NOT_READY", "没起来");
+    });
+    await evidence.startEvidence({ templateId, source: { kind: "file", path: fakeUpload() }, language: "zh" });
+    await settle(evidence, templateId);
+
+    let detailOnRetry: unknown = "not-called";
+    ensure.mockImplementationOnce(async () => {
+      detailOnRetry = evidence.evidenceState(templateId).steps.find((s) => s.step === "transcribe")?.detail;
+      return "already-up";
+    });
+    evidence.retryEvidence(templateId, "transcribe");
+    const state = await settle(evidence, templateId);
+    expect(detailOnRetry).toBeUndefined();
+    expect(state.status).toBe("done");
+  });
+
+  it("服务拉不起来：停在转写并带上 hypit 的原文，不去跑 transcribe", async () => {
+    const fake = fakeHypit();
+    const { evidence, templateId, ensure } = await seed(fake);
+    const { HypitError } = await import("../hypit/cli.js");
+    // 真实顺序：先挂上「正在启动」，programs up 起不来再抛
+    ensure.mockImplementation(async (_ws, _opts, hooks) => {
+      hooks?.onStarting?.();
+      throw new HypitError(
+        "WHISPERX_NOT_READY",
+        "本地转写服务没能启动：whisperx · down",
+        undefined,
+        '{"ready": false}',
+      );
+    });
+
+    await evidence.startEvidence({ templateId, source: { kind: "file", path: fakeUpload() }, language: "zh" });
+    const state = await settle(evidence, templateId);
+
+    const step = state.steps.find((s) => s.step === "transcribe");
+    expect(step?.status).toBe("failed");
+    expect(step?.detail).toBeUndefined();
+    expect(step?.errorCode).toBe("WHISPERX_NOT_READY");
+    expect(step?.errorMessage).toContain("本地转写服务没能启动");
+    expect(step?.errorRaw).toBe('{"ready": false}');
+    expect(fake.calls.some((c) => c[0] === "transcribe")).toBe(false);
   });
 
   it("上传路径就是上传目录本身时拒绝，不把整个目录搬走（复审 #2）", async () => {

@@ -74,10 +74,24 @@ export function markRunning(templateId: string, step: EvidenceStep): void {
     .prepare(
       `UPDATE evidence_steps
           SET status = 'running', started_at = ?, ended_at = NULL, duration_ms = NULL,
-              error_code = NULL, error_message = NULL, error_raw = NULL, updated_at = ?
+              error_code = NULL, error_message = NULL, error_raw = NULL, detail = NULL, updated_at = ?
         WHERE template_id = ? AND step = ?`,
     )
     .run(now, now, templateId, step);
+  publish(templateId, step);
+}
+
+/**
+ * 运行中的附注（如「正在启动 WhisperX 服务」），null 清掉。只改还在跑的那一步，并推一条 SSE。
+ * 开跑时 markRunning 已经清过 detail：上一轮的附注或结果不该在重跑时冒出来（复审第三轮 M2）
+ */
+export function noteRunning(templateId: string, step: EvidenceStep, note: string | null): void {
+  db()
+    .prepare(
+      `UPDATE evidence_steps SET detail = ?, updated_at = ?
+        WHERE template_id = ? AND step = ? AND status = 'running'`,
+    )
+    .run(note === null ? null : JSON.stringify({ note }), new Date().toISOString(), templateId, step);
   publish(templateId, step);
 }
 

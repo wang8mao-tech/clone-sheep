@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { config } from "../config.js";
+import { WHISPERX_ENDPOINT_ID } from "./whisperx-service.js";
 
 /**
  * 模板工程目录生成器。
@@ -90,8 +91,9 @@ export function buildRuntimeProfile(services: WorkspaceServices): RuntimeProfile
   for (const cap of HYPERFRAMES_CAPABILITIES) bindings[cap] = "hyperframes.local";
 
   if (services.whisperx) {
-    endpoints["whisperx.local"] = { use: "@hypit/provider-whisperx-local", config: {} };
-    for (const cap of WHISPERX_CAPABILITIES) bindings[cap] = "whisperx.local";
+    // config 留空 = provider 默认地址 127.0.0.1:8765；体检与转写前的拉起都依赖这一点
+    endpoints[WHISPERX_ENDPOINT_ID] = { use: "@hypit/provider-whisperx-local", config: {} };
+    for (const cap of WHISPERX_CAPABILITIES) bindings[cap] = WHISPERX_ENDPOINT_ID;
   }
 
   if (services.tokendance) {

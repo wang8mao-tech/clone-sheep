@@ -73,7 +73,7 @@
 - 实现 hypit 子进程封装：`node <hypit-main>/bin/hypit.mjs … --json --workspace <dir>`，解析 `format` 化 JSON 与 `hypit.cli-error@1`，stderr 逐行回调，子进程登记表随后端退出清理，每次调用落 `hypit_calls` 表
 - 实现密钥存储：`secrets.json` 仅当前用户可读，接口只回打码值
 - 实现模板工程目录生成器：最小 `package.json` + `hypit.runtime.json`（`credential-store-env`；按已验证的服务写 TokenDance / HypiHub / 本地 media、hyperframes、whisperx endpoints 与 workers）
-- 实现体检 8 项：Node、hypit 依赖、ffmpeg/ffprobe、uv、Chrome Headless Shell、Claude Code 登录、TokenDance key、Codex CLI；每项给"是什么、现状、怎么修"，修复命令可复制
+- 实现体检（现 9 项）：Node、hypit 依赖、ffmpeg/ffprobe、uv、WhisperX 本地转写（Phase 4 Task 4.5 加）、Chrome Headless Shell、Claude Code 登录、TokenDance key、Codex CLI；每项给"是什么、现状、怎么修"，修复命令可复制
 - 命令探测必须先用 `where` / `which` 解析成真实路径再 spawn。Windows 上 npm 全局命令是 `.cmd` 垫片，`shell: false` 直接 spawn 命令名会得到"不在 PATH"的假阴性；`.cmd` 垫片自 Node 20 起（CVE-2024-27980）必须经 `cmd.exe` 启动，因此这条路只允许跑写死的参数，不得喂用户输入
 - Chrome Headless Shell 装在 `~/.cache/hyperframes/chrome`，不在 `hypit-main/` 内
 - 实现设置页（设计稿"设置"画板）：体检、TokenDance key 验证、HypiHub 浏览器授权连接、限额与熔断、并发、路径；改完即存
@@ -96,7 +96,7 @@
 
 **本阶段遗留（未实现，不影响 Phase 3-5，须在用到前补上）**：
 - 「一键准备」按钮（调 `hypit programs prepare` 并推进度）未实现。当前 Chrome Headless Shell 一项只给提示命令，靠首次出片时 hypit 自己下载。补在 **Phase 6 开工前**，那时才真的需要它就绪
-- WhisperX 服务连通性检测未实现。目前只查了 uv 在不在；服务通不通由 `doctor --runtime` 的 `MANAGED_PROGRAM_DOWN` 诊断暴露。补在 **Phase 4**（证据准备真正用到转写时）
+- ~~WhisperX 服务连通性检测未实现~~ **Phase 4 Task 4.5 已补**：体检问服务的 `/health`，并在转写前自动拉起（见 Phase 4 进度表）
 - HypiHub 浏览器授权连接未实现，补在 **Phase 6**
 
 ---
@@ -234,8 +234,8 @@ ltk_data	okenizers\`（路径来自 `provider-whisperx-local/src/program.ts` 的
 | 4.1 | 工作目录选中 Runtime Profile + references/src，含存量迁移 | ✅ 9080bff |
 | 4.2 | 证据流水线：取源 → probe → transcribe → tiles，单步重试、超时、SSE 推送 | ✅ 94af40e + 98ac492（审查 16 条修复） |
 | 4.3 | 上传（流式落盘）+ 带 Range 的播放接口 | ✅ 3fa71bd + 六轮 review→fix（见下） |
-| 4.4 | 前端 ① 参考页：导入表单 + 播放器 + 证据清单，SSE 驱动刷新 | 已写完待审 |
-| 4.5 | 体检加「WhisperX 本地转写」，缺 punkt_tab 给离线修复命令 | 已写完待审 |
+| 4.4 | 前端 ① 参考页：导入表单 + 播放器 + 证据清单，SSE 驱动刷新；步骤条按证据状态判断失败落在哪一步；设置页按设计稿改卡片 | 审查中 |
+| 4.5 | WhisperX 就绪：转写前探 `/health`、没在跑就 `programs up` 自动拉起（核对 ok/ready，起不来原样报因）；体检加「WhisperX 本地转写」，端口被占 / 缺 punkt_tab 拦截并给修复命令。Spec 回写 v1.8 | ✅ 四轮审查 |
 
 **Task 4.3 审查定下的上传约定**，改 `routes/media.ts` 前必读：
 - **不许给 `@fastify/multipart` 加 fields / files / parts 上限。** 插件触发任一上限都会 unpipe 请求并销毁文件流，请求挂死、半截文件留盘（实测）。parts 不写会被强塞默认 1000，所以显式写 `Infinity`。字段数由我们自己的循环数（`MAX_FIELDS = 100`）。
@@ -243,6 +243,13 @@ ltk_data	okenizers\`（路径来自 `provider-whisperx-local/src/program.ts` 的
 - `inject` 看不见 socket 层问题，连接/关停行为靠 `media-socket.test.ts` 的真端口用例守。
 - 路径判断一律走 `lib/safe-path.ts` 比真实路径（junction 能绕过字面比较，实测）。
 - `index.ts` 设了 `forceCloseConnections: true`：SSE 永不空闲，默认值下 SIGINT 会一直等。
+
+**Task 4.5 定下的 WhisperX 约定**，改转写或体检前必读：
+- hypit **不会自己拉起**本地托管程序（runtime-local 注明 `programs up` 是显式步骤）。服务停着时 `transcribe` 两秒就失败、只报 `fetch failed`，重启电脑后必然如此。所以转写前走 `hypit/whisperx-service.ts` 的 `ensureWhisperX`。
+- `programs up` 起不来时**不抛错**，正常输出 `ok:false, ready:false` 并以退出码 1 结束；`runHypit` 不看退出码，必须自己核对 `ok` 与 `ready`。
+- 即便服务已在跑，`programs up` 也要约 18 秒，所以先探 `/health`；冷启动实测 78 秒到 3 分钟。
+- 探测只有 `ECONNREFUSED` 算没在跑；连接被重置、回的不是 HTTP、超时都算端口被占/服务卡死，拦截，不去 `programs up`（它只会回 unchanged）。
+- `programs` 要从工作目录解析 Runtime Profile，给用户的修复命令必须带 `--workspace`。
 
 **Task 4.3 遗留（不挡 Phase 4）**：
 - 超过 500 MB 的文件要整个读完才回 413（插件截断后仍消费剩余字节）。4.4 前端选文件时就校验大小挡住；要彻底解决得在 truncated 时走 `abandonRequest`。

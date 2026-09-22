@@ -6,6 +6,7 @@ import { config, paths } from "../config.js";
 import { db } from "../db/index.js";
 import { hasSecret } from "../lib/secrets.js";
 import { which } from "../lib/which.js";
+import { checkWhisperX } from "./whisperx.js";
 
 export type CheckStatus = "pass" | "fail" | "warn" | "checking";
 
@@ -271,6 +272,7 @@ export async function runAllChecks(): Promise<CheckResult[]> {
     checkHypitDeps(),
     checkFfmpeg(),
     checkUv(),
+    checkWhisperX(),
     checkChromium(),
     checkClaudeLogin(),
     checkTokenDance(),

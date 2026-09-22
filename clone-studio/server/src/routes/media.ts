@@ -32,7 +32,8 @@ export { ABANDON_GRACE_MS } from "./upload-io.js";
  * 解析失败，连带两件事：
  *   1. `declare module "fastify"` 增强不到我们这份 fastify，`request.parts()`
  *      在类型上不存在；
- *   2. 插件自身的类型退化成 error 类型，注册时 eslint 报 no-unsafe-argument。
+ *   2. 插件自身的类型退化成 error 类型，注册时 eslint 报 no-unsafe-argument
+ *      （Phase 5 装 Agent SDK 后依赖树重排，这一条已不再出现，豁免随之删掉）。
  *
  * 试过 `public-hoist-pattern[]=fastify`，没用——没有可提升的东西。剩下的选择
  * 是 shamefully-hoist（全局副作用）或在这里把用到的部分显式声明出来。取后者：
@@ -65,9 +66,6 @@ export async function mediaRoutes(app: FastifyInstance, opts: MediaOptions): Pro
   const maxBytes = opts.maxUploadBytes ?? MAX_UPLOAD_BYTES;
   app.setErrorHandler(archiveErrorHandler);
 
-  // 见上：插件类型在 pnpm 下退化成 error 类型，这里的 disable 是它的直接后果，
-  // 不是在掩盖真实的类型问题
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
   await app.register(multipart, {
     // 只限单个文件的大小，fields / files 不设、parts 显式放开：插件在触发这几个
     // 上限时会 unpipe 请求并销毁当前文件流，结果是请求挂死或 500 Premature close，

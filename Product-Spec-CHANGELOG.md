@@ -8,7 +8,13 @@
   - 起因：`disallowedTools` 要么把整个 `Bash` 从 Agent 手里拿走（与「MUST 给 Agent 完整能力」冲突），要么用 `Bash(hypit build *)` 这种按命令写的规则——官方文档注明它只匹配字面写法，`node …/hypit.mjs build` 就绕过去了。`canUseTool` 在多种配置下会被提前放行，也靠不住。hook 先于一切权限检查执行，`bypassPermissions` 下照样生效。
   - 实测（SDK 0.3.278，订阅登录，临时目录 + 假 hypit，真被执行会留标记）：普通 Bash 放行；`node …/hypit.mjs build`、裸 `hypit build`、Write 写到工作目录外均被 hook 拦下且未执行；让它派子 Agent 去跑 build，子 Agent 里的那次 Bash 也被拦下（hook 输入带 `agent_id`）。子 Agent 工具现名为 `Agent`。
 - **AC-007**：「被 `disallowedTools`（含 `Task`）挡下」改为「被宿主的 `PreToolUse` hook 挡下」，并明确含子 Agent 发起的调用与任何写法。
+- **REQ-003 行为 · skill 预置方式**：「工作目录的 `.claude/skills/hypit`」改为「宿主在数据根下维护的插件目录，经 `plugins` 选项加载」。官方文档注明 `settingSources` 不含 user/project 时不从 `.claude/skills` 加载 skill；实测（`scripts/spike-plugin-skill.mjs`）`settingSources: []` 下插件照常加载，init 消息出现 `clone-studio:hypit`。插件放在工作目录之外，Agent 改不到自己的 skill。
 - **安全与隐私 · 写路径约束**：「`canUseTool` 对写路径做前缀校验」同步改为「`PreToolUse` hook 对写路径做前缀校验」。
+- **REQ-003 新增两条 MUST**（Task 5.1 复审真机复现后补）：hook 出异常一律拒绝（SDK 对抛异常的 hook 照常执行工具）；Agent 进程环境剔除生成服务 key 与 `ANTHROPIC_API_KEY`（原实现整个透传父进程环境，审查实测 `MINIMAX_API_KEY` 进了 Agent 环境）。
+- **REQ-003 新增 hypit 启动器 MUST 与「拦截的边界」说明**（Task 5.1 第二轮复审）：审查发现 Agent 的 PATH 上没有 hypit、提示里也没给路径，真实会话里它只能自己找或照 skill 全局安装；另外 hypit-main 的防改写判断把 `2>&1` 也当写入，拦掉了每一条正常的 `hypit check`。改为宿主放启动器、只看写入目标。同时写明拦截只针对常规写法、同用户下文件读取封不死，v1 接受这个边界（用户 2026-09-23 拍板）。
+- **REQ-003 · Agent 环境改放行名单、新增 Runtime Profile 保护**（Task 5.1 第三轮复审）：审查在本机实测剔除名单漏掉 `ELEVENLABS_API_KEY`、`FISH_API_KEY`，「环境里没有 key」这道兜底不成立，改为放行名单；Agent 能直接改工作目录里的 `hypit.runtime.json` 把宿主的 build 改路由，新增 MUST：hook 拦改写 + 宿主出片前重新生成。
+- **REQ-003 · 放行名单细化**（Task 5.1 第五轮复审）：`HYPIT_*` 不再整体放行，只单列 `HYPIT_STATE_HOME`（hypit 的状态根，宿主与 Agent 必须一致）；`LC_*` 写明放行。
+- **其余五处 `canUseTool` / `disallowedTools` 旧说法同步**（Task 5.1 复审指出）：AI 护栏的失控出片防线、DEP-003、ASM-012 消解说明、能力授权表的「禁止」行与全工具集行。能力授权表写明 Bash 的任意写路径不逐一解析，由「Agent 环境不带生成服务 key」兜底，不过度承诺。
 
 ## [v1.8] - 2026-09-22
 > 本版改动来自 Phase 4 Task 4.5 实测与审查：转写服务停着时的处理方式，代码与 Spec 分叉，经用户拍板（2026-09-22「自动拉起就行，Spec 按你改的来」）回写 Spec。

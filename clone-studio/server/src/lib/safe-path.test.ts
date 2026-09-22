@@ -55,6 +55,12 @@ describe("isReallyInside", () => {
     expect(isReallyInside(root, target)).toBe(false);
   });
 
+  it("经 junction 往外面新建文件（目标还不存在）：按最近的已存在上级取真实路径，判不在（复审 S1-M2）", () => {
+    symlinkSync(outside, path.join(root, "link"), "junction");
+    expect(isReallyInside(root, path.join(root, "link", "brand-new.txt"))).toBe(false);
+    expect(isReallyInside(root, path.join(root, "link", "deep", "new.txt"))).toBe(false);
+  });
+
   it("目标还不存在：退回字面判断", () => {
     expect(isReallyInside(root, path.join(root, "later.mp4"))).toBe(true);
     expect(isReallyInside(root, path.join(outside, "later.mp4"))).toBe(false);

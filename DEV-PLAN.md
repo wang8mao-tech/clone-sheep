@@ -282,7 +282,7 @@ ltk_data	okenizers\`（路径来自 `provider-whisperx-local/src/program.ts` 的
 ## Phase 5: Agent 任务运行器与过程抽屉（REQ-003，Design-Brief §A）
 
 **交付内容**：
-- 实现运行器：Agent SDK `query()`，cwd = 工程目录，预置 `.claude/skills/hypit`（从 `hypit-main/skills/hypit` 复制），完整工具集，系统提示注入"出片由宿主负责"与当前可用生成能力清单
+- 实现运行器：Agent SDK `query()`，cwd = 工程目录，hypit skill 以插件预置（数据根下的 `agent-plugin/`，从 `hypit-main/skills/hypit` 复制，经 `plugins` 选项加载，`skills: ["clone-studio:hypit"]` 只放行它——`settingSources: []` 下 `.claude/skills` 不会被读，实测 `scripts/spike-plugin-skill.mjs`），完整工具集，系统提示注入"出片由宿主负责"与当前可用生成能力清单
 - 实现硬拦截（Spec v1.9 改定）。**主手段是 `PreToolUse` hook**：先于一切权限检查执行、`bypassPermissions` 下照样生效、子 Agent 里的调用也经过它。会话用 `permissionMode: "bypassPermissions"`（+ `allowDangerouslySkipPermissions: true`）让 Bash 等完整能力在无头下直接可用，拦截全靠 hook。子 Agent 工具 `Agent`（旧名 `Task`）两个名字都列进 `disallowedTools` 作第二道。拦截目标仍是两条：任何 `hypit build` / `hypit result` 写操作（任何写法）；写入路径不在工程目录前缀内。
   - 2026-09-22 实测（`scripts/spike-hook.mjs`）：普通 Bash 放行；`node …/hypit.mjs build`、裸 `hypit build`、Write 越界、子 Agent 里的 build 全部被拦且未执行。**不用** `disallowedTools` 作主手段：禁 `Bash` 拿走完整能力，`Bash(hypit build *)` 只匹配字面写法（官方文档注明）
 - 会话必须传 `settingSources: []`。不传会连用户本机 `~/.claude` 的权限规则与 hooks 一起继承，行为不可复现（Phase 0 实测消息流里出现 `system:hook_started`）
@@ -297,7 +297,7 @@ ltk_data	okenizers\`（路径来自 `provider-whisperx-local/src/program.ts` 的
 
 | Task | 内容 | 覆盖 | 状态 |
 |---|---|---|---|
-| 5.1 | 运行器核心：server 接入 SDK、会话配置（`settingSources: []`、cwd、预置 hypit skill、`bypassPermissions` + guard hook + 禁 `Agent`/`Task`）、`guard.ts` 拦截规则与宿主拦截日志、`prompts.ts` 复刻 / 变体 / 打回提示 | AC-007、guard 单测 | 进行中 |
+| 5.1 | 运行器核心：server 接入 SDK、会话配置（`settingSources: []`、cwd、预置 hypit skill、`bypassPermissions` + guard hook + 禁 `Agent`/`Task`）、`guard.ts` 拦截规则与宿主拦截日志、`prompts.ts` 复刻 / 变体 / 打回提示 | AC-007、guard 单测 | ✅ 五轮 review→fix；AC-007 真机通过 |
 | 5.2 | 熔断与调度：墙钟、`maxBudgetUsd`、同命令连续失败、无消息卡死；订阅限流进等待额度并到点 resume；并发上限、排队、取消、中止、继续、重跑 | AC-008、AC-010 | |
 | 5.3 | 消息全量落 `agent_messages` + SSE + 刷新补发；`routes/agent-jobs.ts`；删模板先停 Agent 进程 | AC-009、AC-002 | |
 | 5.4 | 右侧抽屉：顶栏、待办、markdown 逐字流式、工具折叠行、长输出折叠、红 / 琥珀竖线、结束卡 | 设计稿 §A | |
@@ -328,6 +328,7 @@ ltk_data	okenizers\`（路径来自 `provider-whisperx-local/src/program.ts` 的
 - 单条限额与批次限额判定；估价拿不到（plan 失败、Provider 无价目、费率表缺该能力单价）一律按超限处理；plan 有未解析请求则失败并指明缺哪种能力
 - **build 的实际花费拿不到**：Result 只有不含金额的 `receipt: { id, url? }`，全仓库无任何金额字段。生成侧花费一律按"请求数 × 自维护单价"记账并标"估"，界面不出现"实际账单"字样；有 `receipt.url` 时给链接让人去 Provider 侧查真账单
 - 判 build 成败看 `result.outcome` / `result.state`，**不能看 `work.state`**：Phase 0 实测失败的 build 也是 `work.state: "done"` 配 `result.outcome: "failed"`。`failure` 是一整段人类可读文本而非结构化错误码，界面原样展示
+- 出片前宿主重新生成工作目录的 `hypit.runtime.json` 与 `.hypit/runtime`，不信任 Agent 会话之后留下的版本（Spec REQ-003，Task 5.1 第三轮复审）
 - 实现出片执行器：`build --follow --json` + `activity --watch --jsonl` 取结构化进度，渲染并发上限（默认 1），`get` 导出到 `output/`，key 只注入 hypit 子进程环境
 - 实现估价 / 限额卡 CMP-006、出片进度 CMP-007、台账写入（`builds`、AgentJob 花费）
 

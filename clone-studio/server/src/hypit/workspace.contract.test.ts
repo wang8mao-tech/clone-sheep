@@ -60,7 +60,9 @@ describe.skipIf(!hasHypit)("hypit 契约：手写的 Runtime Profile 选择", ()
     expect(parsed.profileSource).toBe("project");
     expect(parsed.selectionFile).toBe(path.join(dir, ".hypit", "runtime"));
     expect(parsed.profile).toBe(path.join(dir, "hypit.runtime.json"));
-  });
+    // 真 spawn 一次 hypit doctor：单独约 2 秒，全套并行、机器吃紧时实测拖到 6.3 秒，撞上
+    // vitest 默认 5 秒超时就成了偶发失败（Phase 4 审查首次见到，Phase 5 复现并定位）
+  }, 60_000);
 });
 
 /** --json 下 stdout 就是一整份 JSON，但前面可能垫着进度行，从第一个 { 取到底 */

@@ -256,13 +256,18 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 
 **用途：** 复刻和写变体是同一种东西：在某个工作目录里无头跑一个带 hypit skill 的 Claude Agent 会话。
 
-**行为：** 后端用 Claude Agent SDK（TypeScript）`query()` 启动会话，cwd = 工作目录，工作目录的 `.claude/skills/hypit` 指向 `hypit-main/skills/hypit` 的副本。流式消息落库并经 SSE 推到前端抽屉。保存 session id 供 resume。
+**行为：** 后端用 Claude Agent SDK（TypeScript）`query()` 启动会话，cwd = 工作目录，hypit skill 以插件形式预置（宿主在数据根下维护一个插件目录，内含 `hypit-main/skills/hypit` 的副本，经 `plugins` 选项加载，skill 名 `clone-studio:hypit`；`settingSources: []` 下 SDK 不读 `.claude/skills`，实测插件照常加载）。流式消息落库并经 SSE 推到前端抽屉。保存 session id 供 resume。
 
 **规则：**
 - MUST 传 `settingSources: []` 做会话隔离。实测不传会连用户本机 `~/.claude` 的权限规则与 hooks 一起继承（消息流里出现 `system:hook_started`），行为不可复现。
 - MUST 给 Agent 完整能力：Bash、文件读写、联网搜索与抓取，等同终端里的 Claude Code。
 - MUST 拦截花钱动作与越界写：主拦截手段是 SDK 的 `PreToolUse` hook——它先于一切权限检查执行，`bypassPermissions` 下照样生效，子 Agent 里的工具调用同样经过它（实测 `agent_id` 有值）。宿主在 hook 里解析命令与写入路径，命中 `hypit build` 等写操作（含 `node …/hypit.mjs build` 等任何写法）或写入路径不在工作目录前缀内即拒绝。不用 `disallowedTools` 作主手段：禁掉 `Bash` 会连带拿走 Agent 的完整能力，而 `Bash(hypit build *)` 这类按命令写的规则只匹配字面写法，换个写法就绕过。子 Agent 工具（现名 `Agent`，旧名 `Task`）另列入 `disallowedTools` 作第二道。系统提示里说明"出片由宿主负责，你写到 check 通过为止"。
 - MUST 拦截记录由宿主在 hook 里自己写，不读 SDK 的 `permission_denials`。
+- MUST hook 出任何异常一律拒绝（fail closed）：SDK 对 hook 抛异常的处理是照常执行工具（实测）。
+- MUST 宿主把 `hypit` 启动器放在 Agent 进程 PATH 的最前面（数据根下的 `agent-bin/`，转调宿主同一个 node 与 hypit-main），系统提示写明直接运行 `hypit`；Agent 不许全局安装软件包（hypit skill 会建议 `npm install --global @hypit/hypit`）。否则 Agent 找不到 hypit，或装出一个与宿主版本不一致的 hypit。
+- MUST 工作目录里的 Runtime Profile（`hypit.runtime.json` 与 `.hypit/runtime`）由宿主生成，Agent 不许改（hook 拦 Write / Edit 与 Bash 的常见写法）；宿主每次出片前重新生成它（Phase 6），不信任工作目录里留下的版本。否则 Agent 能把宿主之后的 build 路由到别的端点或凭据源。
+- 拦截的边界（不过度承诺）：hook 拦的是模型的常规写法——hypit skill 教的 `hypit build` 及其常见变体（路径调用、引号拼接、嵌套 shell、重定向与命令替换夹在参数里、管道喂给解释器）。刻意混淆（变量拼接、编码后执行、自写脚本再跑）字符串层面拦不全，兜底是 Agent 环境里没有 key。专用读工具按真实路径保护密钥文件；Bash 只拦字面提到它的写法。Agent 与宿主同一个 Windows 用户运行，理论上读得到宿主能读的文件，v1 单机自用接受这一点；要彻底隔离需另开系统账户或沙箱，不在 v1 范围。
+- MUST Agent 进程环境按放行名单构造（只带系统变量（含 `LC_*`）、Claude Code 自身所需的变量与 hypit 的状态根 `HYPIT_STATE_HOME`，其余 `HYPIT_*` 不带），因此不带任何生成服务 key（TokenDance / HypiHub / MiniMax，以及用户 shell 里挂着的任何别家 key）与 `ANTHROPIC_API_KEY`。用放行名单而不是剔除名单：别家 key 列不全，Agent 有完整 Bash 与联网能力，拿到任何一家都能绕开 hypit 直接花钱。前者让漏过 hook 的 build 拿不到凭据、花不了钱（Bash 里变量拼接、自写脚本再执行等写法字符串层面拦不全）；后者避免会话悄悄走 API 计费而不是订阅，换档案（REQ-010）时由档案显式注入。
 - MUST 熔断：墙钟 45 分钟或等价花费 $5 先到先停；花费熔断用 SDK 的 `maxBudgetUsd` 选项 + `error_max_budget_usd` 结果子类型，不自己累加。设置页可改。
 - MUST 读 `total_cost_usd` 时只取最新一条 `result` 消息，不跨 result 累加——resume 的会话会续上转录里保存的累计值（实测 resume 组 0.0518 > 被 resume 组 0.0479）。
 - MUST 卡死检测：同一条命令连续失败 5 次，或 10 分钟无任何新消息 → 停并标"已熔断"。
@@ -539,7 +544,7 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 | 图/视频生成（TokenDance 为主，HypiHub 可选补 TTS 等） | 生成 | 由人工验货与素材审核把关 | 过花钱闸门后自动 | — | Provider 报错→build 失败可重试 |
 
 **AI 护栏（绝不能做）：**
-- Agent 绝不能自己触发花钱的 build；最贵的错是失控循环出片，靠 `canUseTool` 拦截 + 后端独占 build + 双层限额防。
+- Agent 绝不能自己触发花钱的 build；最贵的错是失控循环出片，靠 `PreToolUse` hook 拦截 + Agent 进程环境不带生成服务 key（漏过的 build 拿不到凭据）+ 后端独占 build + 双层限额防。
 - Agent 绝不能写工作目录与其 assets 之外的路径，绝不能改 `hypit-main/`。系统提示声明 + `PreToolUse` hook 对写路径做前缀校验（见 REQ-003）。
 - Agent 绝不能读取或输出 TokenDance / HypiHub 等生成服务 key；key 不进 Agent 进程环境。
 - 未经人工素材审核的联网图片绝不进入成片。
@@ -588,7 +593,7 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 |---|---|---|---:|---|
 | DEP-001 | Hypit 0.2.6（`hypit-main/`，源码分发，tsx 直跑） | 内核：证据工具、check/plan/pricing/build/get | Yes | 需 `pnpm install --frozen-lockfile`；当前未安装 |
 | DEP-002 | Node.js ≥22.15、pnpm 10.33 | 运行 Hypit 与本应用后端 | Yes | |
-| DEP-003 | `@anthropic-ai/claude-agent-sdk`（TypeScript） | 无头驱动复刻/变体 Agent | Yes | 自带 Claude Code 二进制；用 query、canUseTool、maxBudgetUsd、resume、skills |
+| DEP-003 | `@anthropic-ai/claude-agent-sdk`（TypeScript） | 无头驱动复刻/变体 Agent | Yes | 自带 Claude Code 二进制；用 query、PreToolUse hooks、plugins、skills、maxBudgetUsd、resume |
 | DEP-004 | 本机 Claude Code 订阅登录 | Agent 默认认证 | Yes | 2026-06-15 起无头用量走独立周额度池；订阅凭据仅限个人本机使用 |
 | DEP-010 | DeepSeek Anthropic 兼容端点 `https://api.deepseek.com/anthropic` | 可选 Agent 模型 | No | 官方支持 Claude Code 接入；对 metadata.user_id 字符集有限制，测试连接时验证 |
 | DEP-011 | 火山方舟（豆包）Anthropic 兼容端点 | 可选 Agent 模型 | No | 见 Q-004 |
@@ -638,7 +643,7 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 |---|---|---|---|
 | ASM-001 | 变体由 Agent 重写 SVML，而非程序化改字段 | Hypit 排行榜示例 swap-topic 是整份 33KB 重写的 SVML | 若多数变体其实只换几个字段，则白烧 token；可二期加"快速变体"通道 |
 | ASM-002 | ~~订阅登录下 SDK 仍返回可用的 total_cost_usd 供 $5 熔断使用~~ **已验证成立**（Phase 0） | 五组实跑均返回 number 型真实数值（0.0143-0.0518），`modelUsage` 另给分模型用量 | 已消解。改用 SDK 原生 `maxBudgetUsd` 熔断，见 REQ-003 |
-| ASM-012 | ~~`canUseTool` 可作为拦截花钱动作的主手段~~ **已验证不成立**（Phase 0） | 默认沙箱自动放行、只禁 Bash 会被 Task 绕开，实测四组中三组命令照样执行 | 已消解。改用 `disallowedTools`（必含 `Task`），见 REQ-003 |
+| ASM-012 | ~~`canUseTool` 可作为拦截花钱动作的主手段~~ **已验证不成立**（Phase 0） | 默认沙箱自动放行、只禁 Bash 会被 Task 绕开，实测四组中三组命令照样执行 | 已消解。v1.9 起主拦截为 `PreToolUse` hook，子 Agent 工具（`Agent` / `Task`）列入 `disallowedTools` 作第二道，见 REQ-003 |
 | ASM-003 | 订阅无头周额度够跑日常批量 | 2026-06 起无头独立额度池 | 不够则批量经常停在"等待额度"；此时切到 REQ-010 的其它模型档案 |
 | ASM-011 | 生成服务以 TokenDance 为主即可跑通 P0 验收样本 | 用户已订阅；Hypit 内置其 Provider | 参考片依赖 TTS 或 GPT Image 时 plan 会缺能力，需连 HypiHub 或等 REQ-011 |
 | ASM-009 | 切模型靠给 Agent SDK 子进程注入 `ANTHROPIC_BASE_URL` 等环境变量实现，不换 Agent 框架 | DeepSeek 官方文档与 LiteLLM 教程均以此方式接 Claude Code | 某家端点与 SDK 新版本不兼容时该档案不可用；靠"测试连接"提前暴露 |
@@ -671,14 +676,14 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 | 读参考证据、写分析与 SVML、跑 check/vocabulary/snapshot/media 工具 | 自动 | 产物在工作目录，重跑即覆盖 |
 | 联网搜索与下载素材 | 自动 | 出片前人工素材审核 |
 | 花钱的 build | Agent 禁止；宿主在限额内自动、超限人工确认 | 不可回滚，故设双层限额 |
-| 写工作目录之外、改 hypit-main、读 key | 禁止 | canUseTool 拦截 |
+| 写工作目录之外、改 hypit-main、读 key | 禁止 | `PreToolUse` hook 拦截；文件写工具按真实路径校验；Read / Grep / Glob 按真实路径护住密钥文件（含祖先目录搜索、8.3 短名、NTFS 数据流）；Bash 里字面提到密钥文件即拒；写入目标（含 cd 之后的相对路径、Git Bash 的 `/c/…` 写法）落在 Agent 插件目录、hypit 启动器目录、hypit-main 或 Runtime Profile 上即拒，读放行。Bash 的任意写路径不逐一解析，同用户下的文件读取不能彻底封死，由「Agent 环境不带 key」兜底（边界见 REQ-003） |
 | 模板放行 | 人工验货 | 可打回重做 |
 
 ### 11.2 工具与能力集
 
 | 工具 / 能力 | 用途 | 权限级别 | 扩展机制 |
 |---|---|---|---|
-| Claude Code 全工具集（Bash、Read/Write/Edit、Glob/Grep、WebSearch、WebFetch） | 复刻与写变体 | 执行，受 canUseTool 两条硬拦截约束 | 无（v1 不开放用户加 MCP） |
+| Claude Code 全工具集（Bash、Read/Write/Edit、Glob/Grep、WebSearch、WebFetch） | 复刻与写变体 | 执行，受 `PreToolUse` hook 硬拦截约束 | 无（v1 不开放用户加 MCP） |
 | hypit skill（`skills/hypit`，SKILL.md + references） | 领域知识 | 只读 | 随 hypit-main 版本更新 |
 
 ### 11.3 上下文与记忆

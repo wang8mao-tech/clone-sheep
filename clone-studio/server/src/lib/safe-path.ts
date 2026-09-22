@@ -30,13 +30,26 @@ export function realpathOrUndefined(p: string): string | undefined {
 /**
  * 字面与真实路径都得在 root 里。root 本身也取真实路径：数据根可能就放在
  * 一个经 junction 挂进来的盘上，那时两边都要解开了才能比。
- * 目标不存在时只能做字面判断，调用方自己决定怎么报「不存在」。
+ *
+ * 目标还不存在时，取它最近的已存在上级的真实路径，再把没建出来的那几段接回去：
+ * 不这样的话，先建一个指到外面的 junction、再往里「新建」文件，字面判断照样放行
+ * （Task 5.1 复审 S1-M2）。
  */
 export function isReallyInside(root: string, target: string): boolean {
   const literalRoot = path.resolve(root);
   const literal = path.resolve(target);
   if (!isInside(literalRoot, literal)) return false;
-  const real = realpathOrUndefined(literal);
-  if (real === undefined) return true;
-  return isInside(realpathOrUndefined(literalRoot) ?? literalRoot, real);
+  const realRoot = realpathOrUndefined(literalRoot) ?? literalRoot;
+
+  let existing = literal;
+  const missing: string[] = [];
+  let real = realpathOrUndefined(existing);
+  while (real === undefined) {
+    const parent = path.dirname(existing);
+    if (parent === existing) return true;
+    missing.unshift(path.basename(existing));
+    existing = parent;
+    real = realpathOrUndefined(existing);
+  }
+  return isInside(realRoot, path.join(real, ...missing));
 }

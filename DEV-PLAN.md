@@ -293,6 +293,16 @@ ltk_data	okenizers\`（路径来自 `provider-whisperx-local/src/program.ts` 的
 - 实现右侧抽屉：顶栏（状态、模型、用时、花费 / 上限、中止）、待办清单、markdown 逐字流式、工具调用折叠行、长输出折叠、错误红竖线、拦截琥珀竖线、结束卡
 - 实现熔断 / 中断横条 CMP-009
 
+**Task 拆分（2026-09-22）**，按序做，每个走 review→fix 循环：
+
+| Task | 内容 | 覆盖 | 状态 |
+|---|---|---|---|
+| 5.1 | 运行器核心：server 接入 SDK、会话配置（`settingSources: []`、cwd、预置 hypit skill、`bypassPermissions` + guard hook + 禁 `Agent`/`Task`）、`guard.ts` 拦截规则与宿主拦截日志、`prompts.ts` 复刻 / 变体 / 打回提示 | AC-007、guard 单测 | 进行中 |
+| 5.2 | 熔断与调度：墙钟、`maxBudgetUsd`、同命令连续失败、无消息卡死；订阅限流进等待额度并到点 resume；并发上限、排队、取消、中止、继续、重跑 | AC-008、AC-010 | |
+| 5.3 | 消息全量落 `agent_messages` + SSE + 刷新补发；`routes/agent-jobs.ts`；删模板先停 Agent 进程 | AC-009、AC-002 | |
+| 5.4 | 右侧抽屉：顶栏、待办、markdown 逐字流式、工具折叠行、长输出折叠、红 / 琥珀竖线、结束卡 | 设计稿 §A | |
+| 5.5 | 熔断 / 中断横条 CMP-009（继续 / 重跑） | CMP-009 | |
+
 **关键文件**：
 - `clone-studio/server/src/agent/runner.ts` — SDK 会话生命周期
 - `clone-studio/server/src/agent/guard.ts` — PreToolUse hook 的拦截规则（纯函数，可单测）

@@ -540,7 +540,7 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 
 **AI 护栏（绝不能做）：**
 - Agent 绝不能自己触发花钱的 build；最贵的错是失控循环出片，靠 `canUseTool` 拦截 + 后端独占 build + 双层限额防。
-- Agent 绝不能写工作目录与其 assets 之外的路径，绝不能改 `hypit-main/`。系统提示声明 + `canUseTool` 对写路径做前缀校验。
+- Agent 绝不能写工作目录与其 assets 之外的路径，绝不能改 `hypit-main/`。系统提示声明 + `PreToolUse` hook 对写路径做前缀校验（见 REQ-003）。
 - Agent 绝不能读取或输出 TokenDance / HypiHub 等生成服务 key；key 不进 Agent 进程环境。
 - 未经人工素材审核的联网图片绝不进入成片。
 

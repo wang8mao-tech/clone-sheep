@@ -1,8 +1,12 @@
 import type { InputHTMLAttributes, ReactNode, TextareaHTMLAttributes } from "react";
 import { useId } from "react";
 
+/**
+ * 字段底色用 bg（#0E0F11）而不是 surface：表单都放在 surface 卡片里，同色的话
+ * 输入框只剩一圈边框看得出来（设计稿「设置」「① 参考」两屏字段底色都是 #0E0F11）
+ */
 const FIELD =
-  "w-full rounded-md border bg-surface px-2 text-[13px] text-text placeholder:text-text-tertiary " +
+  "w-full rounded-md border bg-bg px-2.5 text-text placeholder:text-text-tertiary " +
   "transition-colors hover:bg-surface-raised disabled:pointer-events-none disabled:opacity-40";
 
 interface FieldShellProps {
@@ -16,9 +20,9 @@ interface FieldShellProps {
 
 function FieldShell({ label, hint, error, htmlFor, children }: FieldShellProps) {
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-1.5">
       {label ? (
-        <label htmlFor={htmlFor} className="text-caption text-text-secondary">
+        <label htmlFor={htmlFor} className="text-caption font-medium text-text-secondary">
           {label}
         </label>
       ) : null}
@@ -50,7 +54,12 @@ export function Input({ label, hint, error, mono = false, id, ...rest }: InputPr
         id={fieldId}
         {...rest}
         aria-invalid={error ? true : undefined}
-        className={[FIELD, "h-8", mono ? "font-mono" : "", error ? "border-danger" : "border-border"].join(" ")}
+        className={[
+          FIELD,
+          "h-8",
+          mono ? "font-mono text-[12px]" : "text-[13px]",
+          error ? "border-danger" : "border-border",
+        ].join(" ")}
       />
     </FieldShell>
   );
@@ -73,7 +82,12 @@ export function Textarea({ label, hint, error, mono = false, id, rows = 4, ...re
         rows={rows}
         {...rest}
         aria-invalid={error ? true : undefined}
-        className={[FIELD, "py-1.5", mono ? "font-mono" : "", error ? "border-danger" : "border-border"].join(" ")}
+        className={[
+          FIELD,
+          "py-1.5",
+          mono ? "font-mono text-[12px]" : "text-[13px]",
+          error ? "border-danger" : "border-border",
+        ].join(" ")}
       />
     </FieldShell>
   );

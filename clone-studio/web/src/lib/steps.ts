@@ -33,25 +33,27 @@ export interface Step {
 
 export interface StepInput {
   status: TemplateStatus;
-  /** 参考视频导入了没有。区分"在导入这一步失败"与"在复刻那一步失败"。 */
-  hasSource: boolean;
+  /**
+   * 证据准备（下载/探测/转写/抽帧）的整体状态，区分「倒在 ①参考」与「倒在 ②复刻」。
+   * 不能用源视频在不在判：下载成功后探测、转写、抽帧任一步失败，源视频已经落盘，
+   * 会被错算成 ②复刻 失败（Task 4.4 审查 HIGH，实测）。
+   */
+  evidenceStatus: "idle" | "running" | "done" | "failed";
 }
 
 /**
  * 从模板状态推导五步的状态。
  *
- * Phase 3 只有 templates.status 这一个信号（importing / cloning /
- * awaiting_review / approved / failed），所以推导是粗粒度的：
- * 子步骤进度（fetch → probe → transcribe → 抽帧）要等 Phase 4 才有数据。
- * 这里刻意不猜没有依据的中间态——宁可显示"进行中"，不编一个假的百分比。
+ * 信号是 templates.status（importing / cloning / awaiting_review / approved /
+ * failed）加上证据准备的整体状态。子步骤进度在 ①参考 的清单里看，步骤条只到
+ * 步骤一级——宁可显示"进行中"，不编一个假的百分比。
  *
- * `failed` 落在哪一步用 hasSource 判：没导进参考视频就是倒在 ①参考，
- * 导进去了就是倒在 ②复刻。这是现有字段能给出的最准的答案。
+ * `failed` 落在哪一步看证据准备：它没完成就是倒在 ①参考，完成了才是倒在 ②复刻。
  *
  * ④变体 与 ⑤成片 由同一道闸门控制：验货「通过」才解锁（REQ-004）。
  * 不看成片数——FLOW-002 的完成状态写明复刻片是在「已验货」那一刻才入库成片的。
  */
-export function deriveSteps({ status, hasSource }: StepInput): Step[] {
+export function deriveSteps({ status, evidenceStatus }: StepInput): Step[] {
   const state: Record<StepKey, StepState> = {
     reference: "done",
     clone: "locked",
@@ -62,7 +64,9 @@ export function deriveSteps({ status, hasSource }: StepInput): Step[] {
 
   switch (status) {
     case "importing":
-      state.reference = "running";
+      // 证据准备已经失败（如后端重启把跑着的步骤标了失败）就别再说「进行中」；
+      // 新建的模板也是 importing，还没提交视频时是「可进入」，不是「进行中」
+      state.reference = evidenceStatus === "failed" ? "failed" : evidenceStatus === "idle" ? "available" : "running";
       break;
     case "cloning":
       state.clone = "running";
@@ -82,10 +86,12 @@ export function deriveSteps({ status, hasSource }: StepInput): Step[] {
       state.outputs = "available";
       break;
     case "failed":
-      if (hasSource) {
+      // 证据准备过了才轮得到 ②复刻 失败；证据还在重跑（模板状态没来得及回到
+      // importing 的那一下）就显示 ①参考 进行中，而不是把失败记到 ② 头上
+      if (evidenceStatus === "done") {
         state.clone = "failed";
       } else {
-        state.reference = "failed";
+        state.reference = evidenceStatus === "running" ? "running" : "failed";
       }
       break;
   }

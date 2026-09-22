@@ -106,6 +106,10 @@ export function retryEvidence(templateId: string, step: EvidenceStep): EvidenceS
     throw new EvidenceError("STEP_NOT_RETRYABLE", `「${step}」这一步现在不是失败状态，不能重试。`, 409);
   }
 
+  // 与 startEvidence 一致：重跑期间模板回到 importing。留在 failed 的话，步骤条拿到
+  // 「模板失败 + 证据在跑」，会把失败记到 ②复刻 头上，还把进模板页的人送过去
+  // （Task 4.4 复审 HIGH，实测转写重试冷启动要跑 80 秒）
+  setTemplateStatus(templateId, "importing");
   void run({
     templateId,
     source: sourceOf(template),

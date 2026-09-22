@@ -36,7 +36,7 @@ export function useSse(topics: readonly string[], onEvent: (event: string, frame
     };
 
     source.onmessage = listener;
-    for (const name of ["archive", "template", "production", "job", "build", "settings"]) {
+    for (const name of ["archive", "template", "evidence", "production", "job", "build", "settings"]) {
       source.addEventListener(name, listener as EventListener);
     }
 

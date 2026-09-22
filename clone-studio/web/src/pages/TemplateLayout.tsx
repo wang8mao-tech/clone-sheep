@@ -43,7 +43,7 @@ export function TemplateLayout() {
   const template = detail.data;
   const steps = deriveSteps({
     status: template?.status ?? "importing",
-    hasSource: template?.hasSource ?? false,
+    evidenceStatus: template?.evidenceStatus ?? "idle",
   });
   const hrefFor = (key: StepKey): string => `/clients/${clientId}/templates/${templateId}/${key}`;
 
@@ -94,7 +94,7 @@ export function TemplateLayout() {
                 title="点一下改名"
                 disabled={!template}
                 onClick={() => template && beginEdit({ kind: "template", id: templateId, name: template.name })}
-                className="-mx-1 max-w-full truncate rounded-sm px-1 hover:bg-surface-raised"
+                className="-mx-1 max-w-[calc(100%+0.5rem)] truncate rounded-sm px-1 hover:bg-surface-raised"
               >
                 {template?.name ?? "　"}
               </button>

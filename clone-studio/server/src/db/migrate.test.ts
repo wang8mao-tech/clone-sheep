@@ -115,6 +115,39 @@ describe("migrate", () => {
     });
   });
 
+  it("重启时证据步骤停在 running：步骤标 failed 可重试，模板从 importing 改回 failed", async () => {
+    const m = await freshModules();
+    m.migrate();
+    const d = m.db();
+    const now = new Date().toISOString();
+    d.prepare("INSERT INTO clients (id, name, created_at) VALUES ('c1', 'C', ?)").run(now);
+    for (const id of ["t-run", "t-idle"]) {
+      d.prepare(
+        `INSERT INTO templates (id, client_id, name, status, created_at, updated_at)
+         VALUES (?, 'c1', ?, 'importing', ?, ?)`,
+      ).run(id, id, now, now);
+    }
+    d.prepare(
+      `INSERT INTO evidence_steps (id, template_id, step, status, created_at, updated_at)
+       VALUES ('e1', 't-run', 'fetch', 'running', ?, ?)`,
+    ).run(now, now);
+
+    const changed = m.markStaleRunningAsInterrupted();
+    expect(changed.evidence).toBe(1);
+    expect(d.prepare("SELECT status, error_code FROM evidence_steps WHERE id='e1'").get() as never).toMatchObject({
+      status: "failed",
+      error_code: "BACKEND_RESTART",
+    });
+    // 不改的话步骤条与侧栏都说「进行中」，清单里却是失败待重试（Task 4.4 复审第三轮）
+    expect(d.prepare("SELECT status FROM templates WHERE id='t-run'").get() as never).toMatchObject({
+      status: "failed",
+    });
+    // 没有步骤在跑的模板不动
+    expect(d.prepare("SELECT status FROM templates WHERE id='t-idle'").get() as never).toMatchObject({
+      status: "importing",
+    });
+  });
+
   it("删客户在库层级联到模板与出片单位；Agent 任务是多态 owner，库层不级联", async () => {
     const m = await freshModules();
     m.migrate();

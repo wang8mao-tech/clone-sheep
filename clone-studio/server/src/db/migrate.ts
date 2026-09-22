@@ -93,6 +93,14 @@ export function markStaleRunningAsInterrupted(): {
   // 所以照 builds 的做法标 failed + 一个能看懂的原因。不标的话，后端一重启，
   // 库里那行 running 会永远转圈，而重试又只放行 failed/timeout——用户被卡死，
   // 唯一出路是重新提交视频，界面上却没有任何东西这么告诉他
+  // 模板状态跟着改回 failed，必须在改步骤之前做（之后就认不出哪些模板刚才在跑）。
+  // 不改的话模板停在 importing，步骤条和侧栏都说「进行中」，清单里却已经是失败待重试
+  // （Task 4.4 复审第三轮实测）
+  d.prepare(
+    `UPDATE templates SET status = 'failed', updated_at = ?
+      WHERE status = 'importing'
+        AND id IN (SELECT template_id FROM evidence_steps WHERE status = 'running')`,
+  ).run(now);
   const evidence = d
     .prepare(
       `UPDATE evidence_steps SET status = 'failed', ended_at = COALESCE(ended_at, ?),

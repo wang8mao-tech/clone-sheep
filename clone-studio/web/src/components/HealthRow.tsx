@@ -42,7 +42,7 @@ export function HealthRow({ check }: { check: CheckResult }) {
   };
 
   return (
-    <div className="flex min-h-[var(--row-height)] items-center gap-3 border-b border-border py-1.5 last:border-b-0">
+    <div className="flex min-h-[var(--row-height)] items-center gap-3 border-b border-border py-1.5">
       <span className="flex w-4 shrink-0 justify-center">
         <Icon status={check.status} />
       </span>

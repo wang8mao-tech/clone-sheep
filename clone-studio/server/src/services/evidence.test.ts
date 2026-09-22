@@ -149,8 +149,16 @@ describe("编排：顺序与失败即停", () => {
     const cli = await import("../hypit/cli.js");
     vi.spyOn(cli, "runHypit").mockImplementation(healthy.impl as unknown as typeof cli.runHypit);
 
+    const { db } = await import("../db/index.js");
+    const statusOf = (): string =>
+      (db().prepare("SELECT status FROM templates WHERE id = ?").get(templateId) as { status: string }).status;
+    expect(statusOf()).toBe("failed");
+
     evidence.retryEvidence(templateId, "transcribe");
+    // 重跑期间模板回到 importing，步骤条才会把 ①参考 显示成进行中（Task 4.4 复审 HIGH）
+    expect(statusOf()).toBe("importing");
     await settle(evidence, templateId);
+    expect(statusOf()).toBe("cloning");
 
     // 只该有 transcribe 与 tiles，不该再出现 fetch 或 probe
     expect(healthy.calls.map((c) => (c[0] === "media" ? `${c[0]} ${c[1]}` : c[0]))).toEqual([

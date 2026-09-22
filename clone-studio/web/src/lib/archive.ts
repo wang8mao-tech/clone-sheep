@@ -61,6 +61,8 @@ export interface ClientDetail {
 export interface TemplateDetail extends Template {
   client: Client;
   stats: TemplateStats;
+  /** 证据准备的整体状态，步骤条靠它判断 failed 落在哪一步 */
+  evidenceStatus: "idle" | "running" | "done" | "failed";
 }
 
 /** 删除弹窗（CMP-012）要列的级联影响 */

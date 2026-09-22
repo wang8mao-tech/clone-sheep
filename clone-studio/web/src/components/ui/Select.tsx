@@ -23,9 +23,9 @@ export function Select({ label, hint, error, options, id, ...rest }: Props) {
   const generated = useId();
   const fieldId = id ?? generated;
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-1.5">
       {label ? (
-        <label htmlFor={fieldId} className="text-caption text-text-secondary">
+        <label htmlFor={fieldId} className="text-caption font-medium text-text-secondary">
           {label}
         </label>
       ) : null}
@@ -35,7 +35,7 @@ export function Select({ label, hint, error, options, id, ...rest }: Props) {
           {...rest}
           aria-invalid={error ? true : undefined}
           className={[
-            "h-8 w-full appearance-none rounded-md border bg-surface pr-7 pl-2 text-[13px] text-text",
+            "h-8 w-full appearance-none rounded-md border bg-bg pr-7 pl-2.5 text-[13px] text-text",
             "transition-colors hover:bg-surface-raised disabled:pointer-events-none disabled:opacity-40",
             error ? "border-danger" : "border-border",
           ].join(" ")}

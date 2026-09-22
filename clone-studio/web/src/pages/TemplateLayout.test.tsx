@@ -22,6 +22,7 @@ function detail(status: TemplateStatus, over: { hasSource?: boolean; outputs?: n
     sourceKind: null,
     sourceUrl: null,
     hasSource: over.hasSource ?? true,
+    evidenceStatus: status === "importing" ? "running" : "done",
     workspacePath: "C:/data/x",
     createdAt: "2026-09-20T04:10:35.093Z",
     updatedAt: "2026-09-20T04:10:35.093Z",

@@ -21,12 +21,14 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section id={id} className="flex scroll-mt-6 flex-col gap-3">
-      <div className="flex h-8 items-center justify-between">
-        <h2 className="text-heading-md">{title}</h2>
+    // 设计稿「设置」：每组是一张 surface 卡片，44px 标题行带下边线。字段用 bg 色底，
+    // 放在卡片里才分得出来（Task 4.4 把共用字段底色改成 bg 后，裸放会与页面同色）
+    <section id={id} className="flex scroll-mt-6 flex-col rounded-lg border border-border bg-surface">
+      <div className="flex h-11 items-center justify-between gap-2 border-b border-border px-4">
+        <h2 className="text-[14px] font-semibold">{title}</h2>
         {action}
       </div>
-      {children}
+      <div className="flex flex-col gap-3 px-4 pt-2 pb-3.5">{children}</div>
     </section>
   );
 }
@@ -172,7 +174,7 @@ export function SettingsPage() {
           </ul>
         </nav>
 
-        <div className="flex min-w-0 flex-1 flex-col gap-8 overflow-y-auto p-6">
+        <div className="flex min-w-0 flex-1 flex-col gap-3.5 overflow-y-auto p-6">
           <Section
             id="checks"
             title="环境体检"
@@ -191,18 +193,18 @@ export function SettingsPage() {
             ) : health.isError ? (
               <p className="font-mono text-caption text-danger">体检接口未响应</p>
             ) : (
-              <div className="rounded-md border border-border">
+              // 设计稿：体检项直接是卡片里的 36px 行，行间下边线，不再套一层框。
+              // 以前每行外面各包一个 div，HealthRow 的 last:border-b-0 对每行都生效，分隔线全没了
+              <div>
                 {health.data.checks.map((c) => (
-                  <div key={c.id} className="px-3">
-                    <HealthRow check={c} />
-                  </div>
+                  <HealthRow key={c.id} check={c} />
                 ))}
               </div>
             )}
           </Section>
 
           <Section id="services" title="生成服务">
-            <div className="flex flex-col gap-3 rounded-md border border-border p-4">
+            <div className="flex flex-col gap-3">
               <div className="flex items-end gap-3">
                 <div className="w-80">
                   <Input
@@ -250,7 +252,7 @@ export function SettingsPage() {
 
           <Section id="limits" title="限额与熔断 · 并发">
             {s ? (
-              <div className="flex flex-wrap gap-4 rounded-md border border-border p-4">
+              <div className="flex flex-wrap gap-4">
                 <NumberSetting
                   label="单条限额"
                   suffix="USD"
@@ -313,7 +315,7 @@ export function SettingsPage() {
 
           <Section id="paths" title="路径">
             {s ? (
-              <dl className="grid grid-cols-[120px_1fr] gap-x-4 gap-y-1 rounded-md border border-border p-4 text-[13px]">
+              <dl className="grid grid-cols-[120px_1fr] gap-x-4 gap-y-1 text-[13px]">
                 <dt className="text-text-secondary">数据根目录</dt>
                 <dd className="font-mono break-all">{s.paths.dataRoot}</dd>
                 <dt className="text-text-secondary">Hypit 内核</dt>

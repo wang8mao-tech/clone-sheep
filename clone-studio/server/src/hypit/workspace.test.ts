@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { buildRuntimeProfile } from "./workspace.js";
@@ -93,6 +102,63 @@ describe("createWorkspace", () => {
       }),
     };
   }
+
+  it("重跑前清 Agent 产物：宿主建的留下（证据、profile、选择、布局目录），其余顶层条目删光", async () => {
+    const { mod, created } = await make();
+    const dir = created.dir;
+    writeFileSync(path.join(dir, "references", "transcript.json"), "{}");
+    writeFileSync(path.join(dir, "assets", "user-replaced.png"), "png");
+    writeFileSync(path.join(dir, "ANALYSIS.md"), "x");
+    writeFileSync(path.join(dir, "reference.svrun"), "x");
+    mkdirSync(path.join(dir, "scratch", "deep"), { recursive: true });
+
+    expect(mod.resetAgentProducts(dir).sort()).toEqual(["ANALYSIS.md", "reference.svrun", "scratch"]);
+    for (const rel of [
+      "package.json",
+      "hypit.runtime.json",
+      ".hypit/runtime",
+      "references/transcript.json",
+      "references/src",
+      "assets/user-replaced.png",
+      "productions",
+    ]) {
+      expect(existsSync(path.join(dir, rel)), rel).toBe(true);
+    }
+    expect(existsSync(path.join(dir, "ANALYSIS.md"))).toBe(false);
+  });
+
+  it("清理前先验目录：不在数据根的 clients 下、或没有 profile 的，一个文件都不动（复审 S2-L2）", async () => {
+    const { mod } = await make();
+    // 位置不对，但 profile 齐全：只有位置检查能拦住它
+    const stray = path.join(dataRoot, "stray");
+    mkdirSync(stray, { recursive: true });
+    writeFileSync(path.join(stray, "hypit.runtime.json"), "{}");
+    writeFileSync(path.join(stray, "keep-me.txt"), "x");
+    expect(() => mod.resetAgentProducts(stray)).toThrow(/拒绝清理/);
+    const noProfile = path.join(dataRoot, "clients", "c9", "templates", "t9");
+    mkdirSync(noProfile, { recursive: true });
+    writeFileSync(path.join(noProfile, "keep-me.txt"), "x");
+    expect(() => mod.resetAgentProducts(noProfile)).toThrow(/拒绝清理/);
+    expect(existsSync(path.join(stray, "keep-me.txt"))).toBe(true);
+    expect(existsSync(path.join(noProfile, "keep-me.txt"))).toBe(true);
+  });
+
+  it("clients 下的 junction 指到外面：按真实路径判，照样拒绝清理（复审 S2-L6）", async () => {
+    const { mod } = await make();
+    // 工作目录 Agent 可写，它建个 junction 指到数据根外面，字面判断会放行
+    const outside = path.join(dataRoot, "outside");
+    mkdirSync(outside, { recursive: true });
+    writeFileSync(path.join(outside, "hypit.runtime.json"), "{}");
+    writeFileSync(path.join(outside, "keep-me.txt"), "x");
+    const link = path.join(dataRoot, "clients", "link");
+    symlinkSync(outside, link, "junction");
+    try {
+      expect(() => mod.resetAgentProducts(link)).toThrow(/拒绝清理/);
+      expect(existsSync(path.join(outside, "keep-me.txt"))).toBe(true);
+    } finally {
+      rmSync(link, { recursive: true, force: true });
+    }
+  });
 
   it("建出 hypit 认得的工程：package.json + profile + 参考视频目录", async () => {
     const { created } = await make();

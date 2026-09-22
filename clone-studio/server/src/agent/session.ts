@@ -26,6 +26,8 @@ export interface SessionInput {
   /** 续上已有会话（继续 / 打回） */
   resume?: string;
   abortController?: AbortController;
+  /** 由宿主自己 spawn Claude Code 进程，登记进 procs（runner.ts） */
+  spawnClaudeCodeProcess?: Options["spawnClaudeCodeProcess"];
   /** 每拦下一次调用一次：宿主自己的拦截日志（不读 SDK 的 permission_denials） */
   onIntercept: (denial: Denial & { tool: string; agentId?: string }) => void;
 }
@@ -188,6 +190,7 @@ export function buildSessionOptions(input: SessionInput): Options {
     ...(input.model ? { model: input.model } : {}),
     ...(input.resume ? { resume: input.resume } : {}),
     ...(input.abortController ? { abortController: input.abortController } : {}),
+    ...(input.spawnClaudeCodeProcess ? { spawnClaudeCodeProcess: input.spawnClaudeCodeProcess } : {}),
   };
   assertSessionOptions(options);
   return options;

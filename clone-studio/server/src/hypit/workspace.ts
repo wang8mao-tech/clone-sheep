@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { config } from "../config.js";
+import { isReallyInside } from "../lib/safe-path.js";
 import { WHISPERX_ENDPOINT_ID } from "./whisperx-service.js";
 
 /**
@@ -21,6 +22,9 @@ const PROFILE_FILENAME = "hypit.runtime.json";
 /**
  * 工作目录里必须存在的子目录。新建与存量迁移共用这一份清单——
  * 两边各写一份迟早会漂，而漂出来的差异只在存量模板上炸。
+ *
+ * **它同时是重跑时的保留清单**（resetAgentProducts）：往工作目录里加宿主自己产出的目录
+ * （比如 Phase 6 导出成片的 `output/`）时必须加到这里，否则第一次重跑就把它删了。
  */
 const WORKSPACE_DIRS = [["productions"], ["assets"], ["references", "src"]] as const;
 
@@ -246,6 +250,34 @@ function readSelection(dir: string): string | undefined {
     // 读不出来当作没选中，下一步会重写
     return undefined;
   }
+}
+
+/**
+ * 重跑前清掉 Agent 在工作目录里写的东西（Spec REQ-003「重跑：清空 Agent 产物重新来」）。
+ *
+ * 留下的只有宿主建的：package.json、Runtime Profile 与它的选择（.hypit）、布局里的目录——
+ * references（证据，重导要重新花时间转写）、productions（变体的数据）、assets（素材，可能有
+ * 用户替换过的，宁可留着也不误删）。清单和布局用同一份常量，布局加了目录这里自动跟上。
+ * 其余顶层条目（ANALYSIS.md、TIMELINE.md、reference.* 以及 Agent 自己建的任何文件）一律删。
+ */
+export function resetAgentProducts(dir: string): string[] {
+  // 先验再删：传错目录（比如 workspaceOf 查错了）时一个文件都不能动
+  // 比真实路径：工作目录里的 junction 指到外面时，字面判断会放行（Task 5.1 S1-M2 同一个坑）
+  if (!isReallyInside(path.join(config.dataRoot, "clients"), path.resolve(dir))) {
+    throw new Error(`不是模板工作目录，拒绝清理：${dir}`);
+  }
+  if (!existsSync(path.join(dir, PROFILE_FILENAME))) {
+    throw new Error(`工作目录缺少 ${PROFILE_FILENAME}，拒绝清理：${dir}`);
+  }
+  const keep = new Set<string>(["package.json", PROFILE_FILENAME, ".hypit", ...WORKSPACE_DIRS.map((rel) => rel[0])]);
+  const removed: string[] = [];
+  for (const name of readdirSync(dir)) {
+    if (keep.has(name)) continue;
+    rmSync(path.join(dir, name), { recursive: true, force: true });
+    removed.push(name);
+  }
+  ensureWorkspaceLayout(dir);
+  return removed;
 }
 
 export function workspaceDir(clientId: string, templateId: string): string {

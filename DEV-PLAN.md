@@ -289,8 +289,14 @@ ltk_data	okenizers\`（路径来自 `provider-whisperx-local/src/program.ts` 的
 - 拦截记录由宿主自己写，不读 SDK 的 `permission_denials`——用 `disallowedTools` 隐藏工具时该字段恒为空数组
 - 实现熔断：45 分钟墙钟、$5 等价花费、同命令连续失败 5 次、10 分钟无消息；订阅限流进"等待额度"并到点自动 resume。花费熔断用 SDK 原生的 `maxBudgetUsd` 选项 + `error_max_budget_usd` 结果子类型，不自己累加；读 `total_cost_usd` 只取最新一条 `result` 消息，resume 的会话会续上转录里保存的累计值（Phase 0 实测 0.0518 > 0.0479）
 - 实现调度器：Agent 并发上限（默认 2）、排队、取消、中止、继续（resume）、重跑（清 Agent 产物）
+- **停一个在跑的会话用 `interrupt()`，不用 AbortController**（2026-09-23 实测 `scripts/spike-interrupt-cost.mjs`）：
+  流式输入模式下 interrupt 立刻回一条带 `total_cost_usd` 的 result，Bash 起的子进程也被带走，1 秒后工作目录就能删；
+  直接 abort 要 7 秒才抛、拿不到 result（这次运行的花费就丢了），子进程还活到自己结束、一直攥着工作目录。
+  Claude Code 进程由宿主自己 spawn（SDK 的 `spawnClaudeCodeProcess`）并登记进 `procs`，后端退出时统一收尸；
+  interrupt 10 秒没回 result 就兜底硬停并连子孙一起强杀
 - 消息全量落 `agent_messages`，SSE 推送，刷新后补发历史
-- 实现右侧抽屉：顶栏（状态、模型、用时、花费 / 上限、中止）、待办清单、markdown 逐字流式、工具调用折叠行、长输出折叠、错误红竖线、拦截琥珀竖线、结束卡
+- 实现右侧抽屉：顶栏（状态、模型、用时、花费 / 上限、中止）。「用时」按本次运行算（继续 / 重跑各自重新计时），
+  不是从任务第一次开始算：库里的 `started_at` 保留的是第一次开始的时间，显示时以当前这段为准（Task 5.2 第四轮复审 S2-L12）、待办清单、markdown 逐字流式、工具调用折叠行、长输出折叠、错误红竖线、拦截琥珀竖线、结束卡
 - 实现熔断 / 中断横条 CMP-009
 
 **Task 拆分（2026-09-22）**，按序做，每个走 review→fix 循环：
@@ -298,7 +304,7 @@ ltk_data	okenizers\`（路径来自 `provider-whisperx-local/src/program.ts` 的
 | Task | 内容 | 覆盖 | 状态 |
 |---|---|---|---|
 | 5.1 | 运行器核心：server 接入 SDK、会话配置（`settingSources: []`、cwd、预置 hypit skill、`bypassPermissions` + guard hook + 禁 `Agent`/`Task`）、`guard.ts` 拦截规则与宿主拦截日志、`prompts.ts` 复刻 / 变体 / 打回提示 | AC-007、guard 单测 | ✅ 五轮 review→fix；AC-007 真机通过 |
-| 5.2 | 熔断与调度：墙钟、`maxBudgetUsd`、同命令连续失败、无消息卡死；订阅限流进等待额度并到点 resume；并发上限、排队、取消、中止、继续、重跑 | AC-008、AC-010 | |
+| 5.2 | 熔断与调度：墙钟、`maxBudgetUsd`、同命令连续失败、无消息卡死；订阅限流进等待额度并到点 resume；并发上限、排队、取消、中止、继续、重跑 | AC-008、AC-010 | ✅ 七轮 review→fix；限流 / 停止 / 收尸三处真机实测 |
 | 5.3 | 消息全量落 `agent_messages` + SSE + 刷新补发；`routes/agent-jobs.ts`；删模板先停 Agent 进程 | AC-009、AC-002 | |
 | 5.4 | 右侧抽屉：顶栏、待办、markdown 逐字流式、工具折叠行、长输出折叠、红 / 琥珀竖线、结束卡 | 设计稿 §A | |
 | 5.5 | 熔断 / 中断横条 CMP-009（继续 / 重跑） | CMP-009 | |
@@ -329,6 +335,8 @@ ltk_data	okenizers\`（路径来自 `provider-whisperx-local/src/program.ts` 的
 - **build 的实际花费拿不到**：Result 只有不含金额的 `receipt: { id, url? }`，全仓库无任何金额字段。生成侧花费一律按"请求数 × 自维护单价"记账并标"估"，界面不出现"实际账单"字样；有 `receipt.url` 时给链接让人去 Provider 侧查真账单
 - 判 build 成败看 `result.outcome` / `result.state`，**不能看 `work.state`**：Phase 0 实测失败的 build 也是 `work.state: "done"` 配 `result.outcome: "failed"`。`failure` 是一整段人类可读文本而非结构化错误码，界面原样展示
 - 出片前宿主重新生成工作目录的 `hypit.runtime.json` 与 `.hypit/runtime`，不信任 Agent 会话之后留下的版本（Spec REQ-003，Task 5.1 第三轮复审）
+- `get` 导出到 `output/` 时，要把 `output` 加进 `hypit/workspace.ts` 的 `WORKSPACE_DIRS`：那份常量同时是重跑时的保留清单，
+  不加的话第一次重跑就会把已经导出的成片删掉（Task 5.2 第四轮复审 S2-L11）
 - 实现出片执行器：`build --follow --json` + `activity --watch --jsonl` 取结构化进度，渲染并发上限（默认 1），`get` 导出到 `output/`，key 只注入 hypit 子进程环境
 - 实现估价 / 限额卡 CMP-006、出片进度 CMP-007、台账写入（`builds`、AgentJob 花费）
 
@@ -367,6 +375,10 @@ ltk_data	okenizers\`（路径来自 `provider-whisperx-local/src/program.ts` 的
 ## Phase 8: 批量变体与素材审核（REQ-005，设计稿"④ 变体队列""④ 素材审核"）
 
 **交付内容**：
+- 变体的"重跑"要清掉 Agent 下载的素材：`resetAgentProducts`（Task 5.2）对模板工作目录保留 `assets/`——那里可能有用户替换过的图。
+  变体的 Agent 产物主要就在 `assets/` 加 `SOURCES.json`，重跑时要按 `SOURCES.json` 或库里的"用户已替换"标记只删 Agent 抓来的那部分（Task 5.2 复审 S1-M4 记下）
+- 模板重跑与变体任务互斥：调度器的"一个对象一个任务"只管同一个 owner，模板重跑会删掉 `reference.svml` / `.svrun`，
+  而正在跑的变体 Agent 正读着它们。Phase 8 要在模板重跑前把该模板下的变体任务也算进"未结束任务"（Task 5.2 复审 S2-L7）
 - 实现批量提交：多行 brief 解析与校验（空行忽略、5-500 字、1-20 条）、批次记录、每条复制模板源文件到 `productions/<id>/` 并入队
 - 变体 Agent 提示：基于模板改台词 / 条目 / 提示词，联网找图并统一裁切，写 `SOURCES.json`，缺口显式标注，写到 check 通过
 - 实现变体状态机：排队 → Agent 写稿 → 素材待审 → 待确认花费 → 渲染中 → 完成 / 失败 / 已取消，接入 Phase 6 的闸门与出片；批次累计达限额后其余全部停在待确认

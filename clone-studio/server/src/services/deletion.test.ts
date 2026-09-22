@@ -234,7 +234,8 @@ describe("失败回滚", () => {
        VALUES ('p1', ?, 'variant', 'building', ?, ?)`,
     ).run(template.id, now, now);
     d.prepare(
-      `INSERT INTO agent_jobs (id, owner_kind, owner_id, status, created_at) VALUES ('j1', 'template', ?, 'running', ?)`,
+      `INSERT INTO agent_jobs (id, owner_kind, owner_id, status, resume_at, created_at)
+       VALUES ('j1', 'template', ?, 'awaiting_quota', '2026-09-23T10:00:00.000Z', ?)`,
     ).run(template.id, now);
     d.prepare(`INSERT INTO builds (id, production_id, status, created_at) VALUES ('b1', 'p1', 'running', ?)`).run(now);
     armDeleteFailure(d);
@@ -242,9 +243,11 @@ describe("失败回滚", () => {
     await expect(deletion.deleteClient(client.id)).rejects.toMatchObject({ code: "DB_DELETE_FAILED" });
 
     const one = (sql: string): Record<string, unknown> => d.prepare(sql).get() as Record<string, unknown>;
-    expect(one("SELECT status, stop_reason FROM agent_jobs WHERE id = 'j1'")).toEqual({
+    expect(one("SELECT status, stop_reason, resume_at FROM agent_jobs WHERE id = 'j1'")).toEqual({
       status: "interrupted",
       stop_reason: "delete_aborted",
+      // 进程都被杀了，留着续跑时间界面会说「将自动续跑」，但那个定时器早没了
+      resume_at: null,
     });
     expect(one("SELECT status FROM productions WHERE id = 'p1'")).toEqual({ status: "interrupted" });
     // builds 的状态表里没有 interrupted，按既有约定落到 failed 并带错误码

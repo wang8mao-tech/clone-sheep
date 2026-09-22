@@ -84,4 +84,29 @@ describe.skipIf(!live)("AC-007 真机：Agent 跑 hypit build 被宿主 hook 挡
     expect(outcome.result?.subtype).toBe("success");
     expect(outcome.result?.subtype === "success" ? outcome.result.result : "").toContain(expected);
   }, 180_000);
+
+  it("宿主停下正在跑长命令的会话：拿到带花费的 result，Agent 起的子进程被带走（Task 5.2 复审）", async () => {
+    const { runAgent } = await import("./runner.js");
+    const stop = new AbortController();
+    const stopWs = path.join(root, "stop-ws");
+    mkdirSync(stopWs, { recursive: true });
+    const sleeper = "node -e \"setTimeout(()=>console.log('done'),60000)\"";
+    const outcome = await runAgent({
+      workspace: stopWs,
+      model: "claude-haiku-4-5",
+      maxBudgetUsd: 0.5,
+      prompt: `用 Bash 在前台运行 \`${sleeper}\`（不要放后台），等它输出 done 后只回复 ok。`,
+      stopSignal: stop.signal,
+      onIntercept: () => {},
+      onMessage: (m) => {
+        // 命令真跑起来之后再停
+        if (m.type === "system" && m.subtype === "task_started") setTimeout(() => stop.abort(), 3000);
+      },
+    });
+    expect(outcome.aborted).toBe(true);
+    expect(outcome.result?.total_cost_usd).toBeGreaterThan(0);
+    await new Promise((r) => setTimeout(r, 1000));
+    // 子进程还活着的话，它以此为工作目录，删不掉（EPERM）
+    expect(() => rmSync(stopWs, { recursive: true, force: true })).not.toThrow();
+  }, 180_000);
 });

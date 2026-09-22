@@ -96,15 +96,25 @@ export async function runHypit<T = unknown>(
 
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   let timedOut = false;
+  // 自己超时或被中止时也要连子孙一起杀：Windows 上 SIGTERM 只结束 hypit 自己，
+  // 它起的 ffmpeg / Chromium 会继续攥着工作目录，之后删模板就撞 EPERM（Task 5.2 复审实测）。
+  // 代价：POSIX 上这条路变成直接 SIGKILL，hypit 来不及把 JSON 信封刷出来。v1 只跑 Windows
+  // （Spec OUT-002），真要上 POSIX 再按 procs.terminate 的做法补一段 SIGTERM 宽限
+  const stopTree = (): void => {
+    if (child.pid !== undefined) void procs.killTree(child.pid);
+    else child.kill("SIGTERM");
+  };
   const timer = setTimeout(() => {
     timedOut = true;
-    child.kill("SIGTERM");
+    stopTree();
   }, timeoutMs);
 
   const onAbort = (): void => {
-    child.kill("SIGTERM");
+    stopTree();
   };
-  options.signal?.addEventListener("abort", onAbort, { once: true });
+  // 已经 abort 过的信号不会再触发监听器：这种情况直接停，别让它跑满 10 分钟超时
+  if (options.signal?.aborted) onAbort();
+  else options.signal?.addEventListener("abort", onAbort, { once: true });
 
   const exitCode = await new Promise<number>((resolve, reject) => {
     child.once("error", reject);

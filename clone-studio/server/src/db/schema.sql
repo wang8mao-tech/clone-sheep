@@ -102,7 +102,12 @@ CREATE TABLE IF NOT EXISTS agent_jobs (
   stop_reason      TEXT,
   profile_name     TEXT,
   model_id         TEXT,
-  created_at       TEXT NOT NULL
+  -- 任务提示原文：重跑按它从头来（Task 5.2）
+  prompt           TEXT,
+  -- 等待额度时的自动续跑时间（订阅限流给的重置时间），供界面显示
+  resume_at        TEXT,
+  created_at       TEXT NOT NULL,
+  updated_at       TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_agent_jobs_owner ON agent_jobs (owner_kind, owner_id);
 CREATE INDEX IF NOT EXISTS idx_agent_jobs_status ON agent_jobs (status);

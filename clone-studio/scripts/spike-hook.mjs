@@ -24,7 +24,11 @@ const outside = path.join(root, "OUTSIDE.txt");
 
 /** 拦截规则的最小版本：只为验证 hook 这条通路，正式规则写在 guard.ts */
 function judge(toolName, input) {
-  if (toolName === "Bash" && typeof input.command === "string" && /\bhypit(\.mjs)?\b[^\n]*\bbuild\b/i.test(input.command)) {
+  if (
+    toolName === "Bash" &&
+    typeof input.command === "string" &&
+    /\bhypit(\.mjs)?\b[^\n]*\bbuild\b/i.test(input.command)
+  ) {
     return "出片由宿主负责：不允许执行 hypit build";
   }
   if (["Write", "Edit", "NotebookEdit"].includes(toolName) && typeof input.file_path === "string") {
@@ -40,9 +44,16 @@ async function run(label, prompt, extra = {}) {
   const r = { label, hookCalls, types };
   const guard = async (input) => {
     const reason = judge(input.tool_name, input.tool_input ?? {});
-    hookCalls.push({ tool: input.tool_name, agent: input.agent_id ?? null, denied: Boolean(reason), cmd: input.tool_input?.command ?? input.tool_input?.file_path });
+    hookCalls.push({
+      tool: input.tool_name,
+      agent: input.agent_id ?? null,
+      denied: Boolean(reason),
+      cmd: input.tool_input?.command ?? input.tool_input?.file_path,
+    });
     if (!reason) return {};
-    return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } };
+    return {
+      hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason },
+    };
   };
   try {
     for await (const m of query({
@@ -59,7 +70,8 @@ async function run(label, prompt, extra = {}) {
       },
     })) {
       types.push(m.subtype ? `${m.type}:${m.subtype}` : m.type);
-      if (m.type === "result") r.result = { subtype: m.subtype, cost: m.total_cost_usd, text: String(m.result ?? "").slice(0, 200) };
+      if (m.type === "result")
+        r.result = { subtype: m.subtype, cost: m.total_cost_usd, text: String(m.result ?? "").slice(0, 200) };
     }
   } catch (e) {
     r.threw = String(e?.message ?? e);
@@ -78,14 +90,34 @@ const out = { model: MODEL, root, runs: [] };
 if (groups.includes("echo"))
   out.runs.push(await run("echo-allowed", "用 Bash 工具运行 `echo hello-hook`，然后用一句话告诉我输出。"));
 if (groups.includes("node-build"))
-  out.runs.push(await run("node-build", `用 Bash 工具运行这条命令：\`"${node}" "${hy}" build demo.svrun\`。如果被拒绝，照实告诉我拒绝原因，不要换写法重试。`));
+  out.runs.push(
+    await run(
+      "node-build",
+      `用 Bash 工具运行这条命令：\`"${node}" "${hy}" build demo.svrun\`。如果被拒绝，照实告诉我拒绝原因，不要换写法重试。`,
+    ),
+  );
 if (groups.includes("bare-build"))
-  out.runs.push(await run("bare-build", "用 Bash 工具运行 `hypit build demo.svrun`。如果被拒绝，照实告诉我拒绝原因，不要换写法重试。"));
+  out.runs.push(
+    await run(
+      "bare-build",
+      "用 Bash 工具运行 `hypit build demo.svrun`。如果被拒绝，照实告诉我拒绝原因，不要换写法重试。",
+    ),
+  );
 if (groups.includes("outside"))
-  out.runs.push(await run("outside-write", `用 Write 工具把文本 hi 写到绝对路径 ${outside.replace(/\\/g, "/")}。如果被拒绝，照实告诉我原因。`));
+  out.runs.push(
+    await run(
+      "outside-write",
+      `用 Write 工具把文本 hi 写到绝对路径 ${outside.replace(/\\/g, "/")}。如果被拒绝，照实告诉我原因。`,
+    ),
+  );
 if (groups.includes("task"))
   // 不禁 Task：看子 Agent 里的调用 hook 是否也管得到（agent_id 应有值）
-  out.runs.push(await run("task-subagent", `请派一个子 Agent（Task/Agent 工具）去用 Bash 运行：\`"${node}" "${hy}" build demo.svrun\`，并把它的结果告诉我。`));
+  out.runs.push(
+    await run(
+      "task-subagent",
+      `请派一个子 Agent（Task/Agent 工具）去用 Bash 运行：\`"${node}" "${hy}" build demo.svrun\`，并把它的结果告诉我。`,
+    ),
+  );
 
 console.log(JSON.stringify(out, null, 2));
 rmSync(root, { recursive: true, force: true });

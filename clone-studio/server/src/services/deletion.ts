@@ -230,7 +230,7 @@ function markStoppedAsInterrupted(templateIds: readonly string[], productionIds:
   d.transaction(() => {
     d.prepare(
       `UPDATE agent_jobs SET status = 'interrupted', ended_at = COALESCE(ended_at, ?),
-              stop_reason = COALESCE(stop_reason, 'delete_aborted')
+              stop_reason = COALESCE(stop_reason, 'delete_aborted'), resume_at = NULL
         WHERE status IN (${marks(ACTIVE_JOB_STATUS.length)})
           AND ((owner_kind = 'template' AND owner_id IN (${marks(templateIds.length)}))
             OR (owner_kind = 'production' AND owner_id IN (${marks(productionIds.length)})))`,

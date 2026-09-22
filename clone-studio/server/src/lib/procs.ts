@@ -1,6 +1,9 @@
 import { spawnSync } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 
+/** Agent 会话进程的登记名：删对象时按它判定要不要连子孙一起杀 */
+export const AGENT_LABEL = "agent";
+
 /** 强杀后等 exit 事件的宽限，超过就不等了 */
 const FORCE_KILL_GRACE_MS = 2_000;
 
@@ -40,6 +43,19 @@ interface Entry {
   subject?: ProcSubject;
   startedAt: number;
 }
+
+/**
+ * 这里只按树杀，不维护「父进程还活着时记下的子孙 pid」那种名单。
+ *
+ * 宿主主动收尸的时刻（停任务、删对象、后端退出），父进程还在登记表里，`taskkill /T`
+ * 枚举得到整棵树。而会话正常结束时，Claude Code 会收掉它经 Bash 后台任务起的进程
+ * （2026-09-23 实测 scripts/spike-exit-children.mjs：close() 之后约 5 秒内那个进程就没了）。
+ *
+ * 残留风险，认了：会话正常结束之后登记表里就没有它了（exit 时删），这时若还有它没管住的
+ * 后代（Agent 自己 detach 出去的、或 Claude Code 崩溃留下的），宿主收不到——删目录会撞
+ * EPERM，报 DIRECTORY_BUSY 并回滚，用户重试即可。比存一份会过期的 pid 名单强：那份名单
+ * 在 pid 被系统复用之后会杀错无关进程。
+ */
 
 /**
  * 子进程登记表。
@@ -85,10 +101,17 @@ class ProcRegistry {
     return targets.length;
   }
 
-  /** 发 SIGTERM 等退出；超时未退就连子孙进程一起强杀 */
+  /**
+   * 停掉一个登记过的进程并等它退出。Windows 一律连子孙一起杀，POSIX 先 SIGTERM
+   * 再超时强杀。更体面的停法是调度器的 stopOwner（interrupt），这里是删对象时的兜底。
+   */
   private terminate(pid: number, entry: Entry, timeoutMs: number): Promise<void> {
     const { child } = entry;
     if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+    // Windows 上 SIGTERM 就是 TerminateProcess：父进程一瞬间没掉，之后 taskkill /T 找不到
+    // 任何子孙（实测「先 SIGTERM 再 /T」＝留孤儿，「先 /T」＝干净）。所以一律先连树杀，
+    // SIGTERM 那条只留给 POSIX——那里信号是可捕获的，值得给一次体面退出的机会
+    if (process.platform === "win32") return this.killTree(pid, timeoutMs).then(() => undefined);
 
     return new Promise<void>((resolve) => {
       let killTimer: NodeJS.Timeout | undefined;
@@ -127,6 +150,29 @@ class ProcRegistry {
   }
 
   /**
+   * 立刻连子孙一起强杀并等它退出（不先发 SIGTERM）。给 Agent 会话的兜底停止用：
+   * Windows 上 SIGTERM 只结束父进程，它一退 terminate 就返回了，Bash 起的孙进程
+   * 还攥着工作目录（Task 5.2 复审实测，scripts/spike-interrupt-cost.mjs）。
+   */
+  async killTree(pid: number, graceMs = FORCE_KILL_GRACE_MS): Promise<boolean> {
+    const entry = this.entries.get(pid);
+    if (!entry) return false;
+    const { child } = entry;
+    if (child.exitCode !== null || child.signalCode !== null) return true;
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(done, graceMs);
+      function done(): void {
+        clearTimeout(timer);
+        child.off("exit", done);
+        resolve();
+      }
+      child.once("exit", done);
+      forceKillTree(child, pid);
+    });
+    return true;
+  }
+
+  /**
    * 后端退出时收尸。必须连孙进程一起杀：渲染进程不会因为后端退出而自己停，
    * 只对直接子进程发 SIGTERM 会留下一堆孤儿接着吃 CPU 和显存
    * （DEV-PLAN Phase 13 验收要求「无孤儿子进程」）。
@@ -137,7 +183,9 @@ class ProcRegistry {
     if (this.shuttingDown) return;
     this.shuttingDown = true;
     for (const [pid, entry] of this.entries) {
-      entry.child.kill("SIGTERM");
+      // Windows 上先连树杀，父进程还在时 taskkill /T 才枚举得到子孙（复审 S2-M1 实测）；
+      // POSIX 上 SIGTERM 可捕获，先给一次体面退出的机会，再 SIGKILL
+      if (process.platform !== "win32") entry.child.kill("SIGTERM");
       forceKillTree(entry.child, pid);
     }
     this.entries.clear();

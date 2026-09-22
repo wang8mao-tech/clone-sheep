@@ -86,8 +86,8 @@ describe("migrate", () => {
        VALUES ('p1', 't1', 'variant', 'agent_running', ?, ?)`,
     ).run(now, now);
     d.prepare(
-      `INSERT INTO agent_jobs (id, owner_kind, owner_id, status, created_at)
-       VALUES ('j1', 'production', 'p1', 'running', ?)`,
+      `INSERT INTO agent_jobs (id, owner_kind, owner_id, status, resume_at, created_at)
+       VALUES ('j1', 'production', 'p1', 'awaiting_quota', '2026-09-23T10:00:00.000Z', ?)`,
     ).run(now);
     d.prepare(`INSERT INTO builds (id, production_id, status, created_at) VALUES ('b1', 'p1', 'running', ?)`).run(now);
     // 已完成的不该被动
@@ -99,9 +99,13 @@ describe("migrate", () => {
     const changed = m.markStaleRunningAsInterrupted();
     expect(changed).toEqual({ jobs: 1, productions: 1, builds: 1, evidence: 0 });
 
-    expect(d.prepare("SELECT status, stop_reason FROM agent_jobs WHERE id='j1'").get() as never).toMatchObject({
+    expect(
+      d.prepare("SELECT status, stop_reason, resume_at FROM agent_jobs WHERE id='j1'").get() as never,
+    ).toMatchObject({
       status: "interrupted",
       stop_reason: "backend_restart",
+      // 续跑的定时器随进程没了，留着时间界面会说「将自动续跑」，但永远不会到
+      resume_at: null,
     });
     expect(d.prepare("SELECT status FROM agent_jobs WHERE id='j2'").get() as never).toMatchObject({
       status: "done",
@@ -222,6 +226,35 @@ describe("加列迁移", () => {
 
     m.migrate();
     expect(columnsOf(d, "evidence_steps")).toContain("error_raw");
+  });
+
+  it("老库里的 agent_jobs 补上 prompt / resume_at / updated_at，已有记录原样保留（Task 5.2）", async () => {
+    const { db } = await import("./index.js");
+    const m = await import("./migrate.js");
+    const d = db();
+    m.migrate();
+
+    // Phase 1 当时的 agent_jobs：没有这三列，且已经有一条历史任务
+    d.exec("DROP TABLE agent_messages");
+    d.exec("DROP TABLE agent_jobs");
+    d.exec(`CREATE TABLE agent_jobs (
+      id TEXT PRIMARY KEY, owner_kind TEXT NOT NULL, owner_id TEXT NOT NULL, session_id TEXT,
+      status TEXT NOT NULL DEFAULT 'queued', started_at TEXT, ended_at TEXT,
+      cost_usd REAL NOT NULL DEFAULT 0, cost_is_estimate INTEGER NOT NULL DEFAULT 1,
+      stop_reason TEXT, profile_name TEXT, model_id TEXT, created_at TEXT NOT NULL)`);
+    d.prepare(
+      `INSERT INTO agent_jobs (id, owner_kind, owner_id, status, cost_usd, created_at)
+       VALUES ('old', 'template', 't1', 'done', 0.42, '2026-09-01T00:00:00.000Z')`,
+    ).run();
+    d.prepare("DELETE FROM schema_migrations WHERE version = 3").run();
+
+    m.migrate();
+    expect(columnsOf(d, "agent_jobs")).toEqual(expect.arrayContaining(["prompt", "resume_at", "updated_at"]));
+    expect(d.prepare("SELECT status, cost_usd, prompt FROM agent_jobs WHERE id = 'old'").get()).toEqual({
+      status: "done",
+      cost_usd: 0.42,
+      prompt: null,
+    });
   });
 
   it("跑第二遍不会重复加列", async () => {

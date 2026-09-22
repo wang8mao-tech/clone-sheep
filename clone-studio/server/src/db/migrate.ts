@@ -33,6 +33,17 @@ const STEPS: ReadonlyArray<{ version: number; run: (d: ReturnType<typeof db>) =>
       }
     },
   },
+  {
+    // Task 5.2 调度器：重跑要任务提示原文，等待额度要记续跑时间。agent_jobs 在 Phase 1 就建了
+    version: 3,
+    run: (d) => {
+      const columns = d.prepare("PRAGMA table_info(agent_jobs)").all() as Array<{ name: string }>;
+      const have = new Set(columns.map((c) => c.name));
+      for (const column of ["prompt", "resume_at", "updated_at"]) {
+        if (!have.has(column)) d.exec(`ALTER TABLE agent_jobs ADD COLUMN ${column} TEXT`);
+      }
+    },
+  },
 ];
 
 export function migrate(): void {
@@ -79,10 +90,12 @@ export function markStaleRunningAsInterrupted(): {
   const jobs = d
     .prepare(
       `UPDATE agent_jobs SET status = 'interrupted', ended_at = COALESCE(ended_at, ?),
-         stop_reason = COALESCE(stop_reason, 'backend_restart')
+         stop_reason = COALESCE(stop_reason, 'backend_restart'),
+         -- 续跑的定时器随进程没了，留着这个时间界面会显示「将在 … 自动续跑」，但永远不会到
+         resume_at = NULL, updated_at = ?
        WHERE status IN ('running', 'queued', 'awaiting_quota')`,
     )
-    .run(now).changes;
+    .run(now, now).changes;
   const productions = d
     .prepare(
       `UPDATE productions SET status = 'interrupted', updated_at = ?

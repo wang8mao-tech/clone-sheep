@@ -105,6 +105,17 @@ export function rejectPrompt(feedback: string, round: number): string {
   ].join("\n");
 }
 
+/**
+ * 继续（resume 同一会话）：熔断、中断、等待额度后续跑都用它。会话里原任务还在，
+ * 这里只提醒从已有产物接着做，别从头重写把已花的钱白花。
+ */
+export function continuePrompt(): string {
+  return [
+    "继续完成之前的任务：从上次停下的地方接着做，完成标准不变。",
+    "先看工作目录里已经写好的产物，在它们基础上补完，不要从头重写。不要出片。",
+  ].join("\n");
+}
+
 export interface VariantPromptInput {
   brief: string;
   templateSource: string;

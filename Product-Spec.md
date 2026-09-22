@@ -1,6 +1,6 @@
 # 产品需求规范：Clone Studio（暂定名）
 
-> 版本 v1.8 · 2026-09-22 · 内核：Hypit 0.2.6（本地副本 `hypit-main/`）· 技术调研见 `Hypit-Research.md`
+> 版本 v1.9 · 2026-09-22 · 内核：Hypit 0.2.6（本地副本 `hypit-main/`）· 技术调研见 `Hypit-Research.md`
 > Phase 0 先行验证结论见 `clone-studio/docs/spike-notes.md`，本版据其回写。
 
 ## 0. AI 使用说明
@@ -261,8 +261,8 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 **规则：**
 - MUST 传 `settingSources: []` 做会话隔离。实测不传会连用户本机 `~/.claude` 的权限规则与 hooks 一起继承（消息流里出现 `system:hook_started`），行为不可复现。
 - MUST 给 Agent 完整能力：Bash、文件读写、联网搜索与抓取，等同终端里的 Claude Code。
-- MUST 拦截花钱动作：主拦截手段是 `disallowedTools`，**任何禁用清单必须把 `Task` 一并禁掉**——实测只禁 `Bash` 时模型会派 Task 子 Agent 绕开并照样执行命令。`canUseTool` 只作补充：默认配置下它根本不会被调用（`sandbox.autoAllowBashIfSandboxed` 默认 `true`，沙箱内 Bash 自动放行）。系统提示里说明"出片由宿主负责，你写到 check 通过为止"。
-- MUST 拦截记录由宿主自己写，不读 SDK 的 `permission_denials`：用 `disallowedTools` 隐藏工具时该字段恒为空数组。
+- MUST 拦截花钱动作与越界写：主拦截手段是 SDK 的 `PreToolUse` hook——它先于一切权限检查执行，`bypassPermissions` 下照样生效，子 Agent 里的工具调用同样经过它（实测 `agent_id` 有值）。宿主在 hook 里解析命令与写入路径，命中 `hypit build` 等写操作（含 `node …/hypit.mjs build` 等任何写法）或写入路径不在工作目录前缀内即拒绝。不用 `disallowedTools` 作主手段：禁掉 `Bash` 会连带拿走 Agent 的完整能力，而 `Bash(hypit build *)` 这类按命令写的规则只匹配字面写法，换个写法就绕过。子 Agent 工具（现名 `Agent`，旧名 `Task`）另列入 `disallowedTools` 作第二道。系统提示里说明"出片由宿主负责，你写到 check 通过为止"。
+- MUST 拦截记录由宿主在 hook 里自己写，不读 SDK 的 `permission_denials`。
 - MUST 熔断：墙钟 45 分钟或等价花费 $5 先到先停；花费熔断用 SDK 的 `maxBudgetUsd` 选项 + `error_max_budget_usd` 结果子类型，不自己累加。设置页可改。
 - MUST 读 `total_cost_usd` 时只取最新一条 `result` 消息，不跨 result 累加——resume 的会话会续上转录里保存的累计值（实测 resume 组 0.0518 > 被 resume 组 0.0479）。
 - MUST 卡死检测：同一条命令连续失败 5 次，或 10 分钟无任何新消息 → 停并标"已熔断"。
@@ -274,7 +274,7 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 **状态：** 排队 / 运行中 / 等待额度 / 已熔断 / 中断 / 完成 / 已取消。
 
 **验收标准：**
-- [ ] AC-007: Given 运行中的 Agent 尝试执行 `hypit build`, when 该工具调用被宿主的 `disallowedTools`（含 `Task`）挡下, then 命令未执行，宿主自己的日志里有一条"已拦截"记录，生成模型花费为 0。
+- [ ] AC-007: Given 运行中的 Agent（或它派出的子 Agent）尝试执行 `hypit build`（任何写法）, when 该工具调用被宿主的 `PreToolUse` hook 挡下, then 命令未执行，宿主自己的日志里有一条"已拦截"记录，生成模型花费为 0。
 - [ ] AC-008: Given 熔断预算设为 $0.2, when 复刻任务花费超过它, then 任务停在"已熔断"，中间文件保留，"继续"按钮可 resume 同一会话。
 - [ ] AC-009: Given Agent 运行中, when 刷新浏览器, then 抽屉恢复历史消息并继续流式接收。
 - [ ] AC-010: Given 后端进程被杀后重启, when 打开该模板, then 任务显示"中断"并可"继续"。

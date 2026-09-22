@@ -1,5 +1,14 @@
 # 变更记录
 
+## [v1.9] - 2026-09-22
+> 本版改动来自 Phase 5 开工前的官方文档核对与真机实测，经用户拍板（2026-09-22「改用 hook，回写 Spec」）回写。
+
+### 修改
+- **REQ-003 规则 · 拦截手段**：主拦截手段从 `disallowedTools` 改为 SDK 的 `PreToolUse` hook；子 Agent 工具（`Agent` / `Task`）仍列入 `disallowedTools` 作第二道。拦截目标不变：`hypit build` 等写操作、写到工作目录之外。
+  - 起因：`disallowedTools` 要么把整个 `Bash` 从 Agent 手里拿走（与「MUST 给 Agent 完整能力」冲突），要么用 `Bash(hypit build *)` 这种按命令写的规则——官方文档注明它只匹配字面写法，`node …/hypit.mjs build` 就绕过去了。`canUseTool` 在多种配置下会被提前放行，也靠不住。hook 先于一切权限检查执行，`bypassPermissions` 下照样生效。
+  - 实测（SDK 0.3.278，订阅登录，临时目录 + 假 hypit，真被执行会留标记）：普通 Bash 放行；`node …/hypit.mjs build`、裸 `hypit build`、Write 写到工作目录外均被 hook 拦下且未执行；让它派子 Agent 去跑 build，子 Agent 里的那次 Bash 也被拦下（hook 输入带 `agent_id`）。子 Agent 工具现名为 `Agent`。
+- **AC-007**：「被 `disallowedTools`（含 `Task`）挡下」改为「被宿主的 `PreToolUse` hook 挡下」，并明确含子 Agent 发起的调用与任何写法。
+
 ## [v1.8] - 2026-09-22
 > 本版改动来自 Phase 4 Task 4.5 实测与审查：转写服务停着时的处理方式，代码与 Spec 分叉，经用户拍板（2026-09-22「自动拉起就行，Spec 按你改的来」）回写 Spec。
 

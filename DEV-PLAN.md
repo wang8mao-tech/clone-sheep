@@ -283,7 +283,8 @@ ltk_data	okenizers\`（路径来自 `provider-whisperx-local/src/program.ts` 的
 
 **交付内容**：
 - 实现运行器：Agent SDK `query()`，cwd = 工程目录，预置 `.claude/skills/hypit`（从 `hypit-main/skills/hypit` 复制），完整工具集，系统提示注入"出片由宿主负责"与当前可用生成能力清单
-- 实现硬拦截。**主手段是 `disallowedTools`，且任何禁用清单必须把 `Task` 一并禁掉**——Phase 0 实测只禁 `Bash` 时模型会派 Task 子 Agent 绕开、命令照样执行。`canUseTool` 只作补充：默认 `sandbox.autoAllowBashIfSandboxed` 为 true，沙箱内 Bash 自动放行，它根本不会被调用。拦截目标仍是两条：任何 `hypit build` / `hypit result` 写操作；写入路径不在工程目录前缀内
+- 实现硬拦截（Spec v1.9 改定）。**主手段是 `PreToolUse` hook**：先于一切权限检查执行、`bypassPermissions` 下照样生效、子 Agent 里的调用也经过它。会话用 `permissionMode: "bypassPermissions"`（+ `allowDangerouslySkipPermissions: true`）让 Bash 等完整能力在无头下直接可用，拦截全靠 hook。子 Agent 工具 `Agent`（旧名 `Task`）两个名字都列进 `disallowedTools` 作第二道。拦截目标仍是两条：任何 `hypit build` / `hypit result` 写操作（任何写法）；写入路径不在工程目录前缀内。
+  - 2026-09-22 实测（`scripts/spike-hook.mjs`）：普通 Bash 放行；`node …/hypit.mjs build`、裸 `hypit build`、Write 越界、子 Agent 里的 build 全部被拦且未执行。**不用** `disallowedTools` 作主手段：禁 `Bash` 拿走完整能力，`Bash(hypit build *)` 只匹配字面写法（官方文档注明）
 - 会话必须传 `settingSources: []`。不传会连用户本机 `~/.claude` 的权限规则与 hooks 一起继承，行为不可复现（Phase 0 实测消息流里出现 `system:hook_started`）
 - 拦截记录由宿主自己写，不读 SDK 的 `permission_denials`——用 `disallowedTools` 隐藏工具时该字段恒为空数组
 - 实现熔断：45 分钟墙钟、$5 等价花费、同命令连续失败 5 次、10 分钟无消息；订阅限流进"等待额度"并到点自动 resume。花费熔断用 SDK 原生的 `maxBudgetUsd` 选项 + `error_max_budget_usd` 结果子类型，不自己累加；读 `total_cost_usd` 只取最新一条 `result` 消息，resume 的会话会续上转录里保存的累计值（Phase 0 实测 0.0518 > 0.0479）
@@ -294,7 +295,7 @@ ltk_data	okenizers\`（路径来自 `provider-whisperx-local/src/program.ts` 的
 
 **关键文件**：
 - `clone-studio/server/src/agent/runner.ts` — SDK 会话生命周期
-- `clone-studio/server/src/agent/guard.ts` — canUseTool 拦截规则
+- `clone-studio/server/src/agent/guard.ts` — PreToolUse hook 的拦截规则（纯函数，可单测）
 - `clone-studio/server/src/agent/breaker.ts` — 熔断与卡死检测
 - `clone-studio/server/src/agent/prompts.ts` — 复刻 / 变体 / 打回的系统提示与任务提示
 - `clone-studio/server/src/agent/scheduler.ts`、`server/src/routes/agent-jobs.ts`
@@ -304,7 +305,7 @@ ltk_data	okenizers\`（路径来自 `provider-whisperx-local/src/program.ts` 的
 **验收标准**：
 - AC-007、AC-008、AC-009、AC-010、AC-002 通过
 - `guard.ts` 有单元测试覆盖：`hypit build`、`node …/hypit.mjs build`、PowerShell 与 bash 两种写法、越界写路径
-- 有一条测试钉住"禁用清单必须含 `Task`"：只禁 `Bash` 的配置必须被判为不合法
+- 有一条测试钉住会话配置：必须挂上 guard hook、`disallowedTools` 必须含 `Agent` 与 `Task`、不得禁 `Bash`（那会拿走完整能力）
 
 ---
 

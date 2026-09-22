@@ -227,6 +227,28 @@ Task 3.1 已落地的接口，前端直接照这个对接：
 ltk_data	okenizers\`（路径来自 `provider-whisperx-local/src/program.ts` 的 `join(stateRoot,"nltk_data")`，**不是** `resources.py` 默认的用户缓存）。`resources.py` 里 `prepare_punkt_tab` 会先 `assert_punkt_tab` 命中就直接 return，不碰网络。修复后 `programs up --endpoint whisperx.local` 返回 `ready: true`。这条要写进 Task 4.5 的体检修复指引。
 
 
+**进度与交接（2026-09-22）**
+
+| Task | 内容 | 状态 |
+|---|---|---|
+| 4.1 | 工作目录选中 Runtime Profile + references/src，含存量迁移 | ✅ 9080bff |
+| 4.2 | 证据流水线：取源 → probe → transcribe → tiles，单步重试、超时、SSE 推送 | ✅ 94af40e + 98ac492（审查 16 条修复） |
+| 4.3 | 上传（流式落盘）+ 带 Range 的播放接口 | ✅ 3fa71bd + 六轮 review→fix（见下） |
+| 4.4 | 前端 ① 参考页：导入表单 + 播放器 + 证据清单，SSE 驱动刷新 | 已写完待审 |
+| 4.5 | 体检加「WhisperX 本地转写」，缺 punkt_tab 给离线修复命令 | 已写完待审 |
+
+**Task 4.3 审查定下的上传约定**，改 `routes/media.ts` 前必读：
+- **不许给 `@fastify/multipart` 加 fields / files / parts 上限。** 插件触发任一上限都会 unpipe 请求并销毁文件流，请求挂死、半截文件留盘（实测）。parts 不写会被强塞默认 1000，所以显式写 `Infinity`。字段数由我们自己的循环数（`MAX_FIELDS = 100`）。
+- 所有 part 必须读完或排空；提前离开循环一律走 `abandonRequest`：响应写完后摘掉 busboy、排空剩余字节，`ABANDON_GRACE_MS`（2 秒）内收不完才销毁。**不能写完就 destroy，也不能带 `Connection: close`**——接收缓冲有未读数据时关 socket 会发 RST，客户端连错误响应都收不到（实测）。
+- `inject` 看不见 socket 层问题，连接/关停行为靠 `media-socket.test.ts` 的真端口用例守。
+- 路径判断一律走 `lib/safe-path.ts` 比真实路径（junction 能绕过字面比较，实测）。
+- `index.ts` 设了 `forceCloseConnections: true`：SSE 永不空闲，默认值下 SIGINT 会一直等。
+
+**Task 4.3 遗留（不挡 Phase 4）**：
+- 超过 500 MB 的文件要整个读完才回 413（插件截断后仍消费剩余字节）。4.4 前端选文件时就校验大小挡住；要彻底解决得在 truncated 时走 `abandonRequest`。
+- SIGINT 时正在传的上传被掐断，`process.exit` 可能抢在清理前，半截文件留在 uploads/，由启动时 `purgeStaleUploads`（>24 小时）兜底。
+- 大文件写盘途中失败（如 ENOSPC）且已开始解析的路径没有真端口用例；修复代码与字段超限共用，已由后者守住。
+
 **交付内容**：
 - 实现上传（≤500 MB，流式落盘）与链接导入（`hypit media prepare-fetch` / `fetch`）
 - 实现证据流水线：probe → 时长 3-180 秒校验 → transcribe（本地 WhisperX）→ tiles；每步状态与耗时经 SSE 推送，单步可重试，单步 10 分钟超时

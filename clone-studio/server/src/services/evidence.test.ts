@@ -320,6 +320,32 @@ describe("取源这一步的文件操作", () => {
     expect(existsSync(outside)).toBe(true);
   });
 
+  it("上传路径就是上传目录本身时拒绝，不把整个目录搬走（复审 #2）", async () => {
+    const fake = fakeHypit();
+    const { evidence, templateId } = await seed(fake);
+    const other = fakeUpload("someone-else.mp4");
+    const uploads = path.dirname(other);
+
+    await evidence.startEvidence({ templateId, source: { kind: "file", path: uploads }, language: "zh" });
+    const state = await settle(evidence, templateId);
+
+    expect(state.steps.find((s) => s.step === "fetch")?.errorCode).toBe("UPLOAD_OUTSIDE");
+    expect(existsSync(other)).toBe(true);
+  });
+
+  it("上传目录里的子目录也拒绝：只收文件", async () => {
+    const fake = fakeHypit();
+    const { evidence, templateId } = await seed(fake);
+    const dir = path.join(dataRoot, "uploads", "sub");
+    mkdirSync(dir, { recursive: true });
+
+    await evidence.startEvidence({ templateId, source: { kind: "file", path: dir }, language: "zh" });
+    const state = await settle(evidence, templateId);
+
+    expect(state.steps.find((s) => s.step === "fetch")?.errorCode).toBe("UPLOAD_OUTSIDE");
+    expect(existsSync(dir)).toBe(true);
+  });
+
   it("没有转写结果时 tiles 不带 --transcript", async () => {
     const fake = fakeHypit();
     const { evidence, templateId, workspace } = await seed(fake);

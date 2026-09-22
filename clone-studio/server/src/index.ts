@@ -3,6 +3,7 @@ import { config } from "./config.js";
 import { markStaleRunningAsInterrupted, migrate } from "./db/migrate.js";
 import { procs } from "./lib/procs.js";
 import { purgeTrash } from "./services/deletion.js";
+import { purgeStaleUploads } from "./services/uploads.js";
 import { migrateWorkspaces } from "./services/workspace-migration.js";
 import { clientRoutes } from "./routes/clients.js";
 import { settingsRoutes } from "./routes/settings.js";
@@ -19,12 +20,17 @@ const app = Fastify({
   // SSE 长连接不能被请求超时掐断
   connectionTimeout: 0,
   requestTimeout: 0,
+  // 关服务时掐掉所有连接。默认只收空闲连接：SSE 永远不空闲、在传的上传要等
+  // keepAliveTimeout（72 秒），SIGINT 后 app.close() 会一直等下去
+  forceCloseConnections: true,
 });
 
 async function main(): Promise<void> {
   migrate();
   const purged = purgeTrash();
   if (purged) app.log.info({ purged }, "清掉了上次删除残留在 .trash 的目录");
+  const staleUploads = purgeStaleUploads();
+  if (staleUploads) app.log.info({ staleUploads }, "清掉了放置超过一天、没被导入的上传文件");
 
   // Phase 2 建的工作目录缺 Runtime Profile 选中与 references/src，补齐存量
   const workspaces = migrateWorkspaces();

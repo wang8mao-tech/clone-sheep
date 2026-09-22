@@ -1,9 +1,10 @@
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { copyFile, mkdir, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import { config } from "../config.js";
 import { db } from "../db/index.js";
 import { runHypit } from "../hypit/cli.js";
+import { isReallyInside } from "../lib/safe-path.js";
 import { checkProbe, STEP_TIMEOUT_MS, transcribeNote, type EvidenceStep, type ProbeFacts } from "./evidence-rules.js";
 import { listSteps, markDone } from "./evidence-store.js";
 import { EvidenceError, type StartArgs } from "./evidence-types.js";
@@ -117,10 +118,15 @@ async function fetchSource(ctx: StepContext): Promise<unknown> {
  * 它会被 rename 进模板工作目录。后端只绑 127.0.0.1 不是不校验的理由。
  */
 function assertInsideUploads(from: string): void {
-  const root = path.resolve(config.dataRoot);
-  const uploads = path.resolve(root, "uploads");
-  const rel = path.relative(uploads, from);
-  if (rel.startsWith("..") || path.isAbsolute(rel)) {
+  const uploads = path.resolve(config.dataRoot, "uploads");
+  // 比真实路径：uploads 里放一个指向外面的 junction，字面上照样在目录里。
+  // 还得是 uploads 下的一个**文件**：传 uploads 目录本身进来的话，下面的 rename
+  // 会把整个目录（连同别人待导入的上传）搬进工作目录当 source.mp4（复审 #2）
+  const resolved = path.resolve(from);
+  // throwIfNoEntry：exists 与 stat 分两步会有一个删文件的空当，冒出带绝对路径的 ENOENT
+  const info = statSync(resolved, { throwIfNoEntry: false });
+  const notAFile = info !== undefined && !info.isFile();
+  if (resolved === uploads || notAFile || !isReallyInside(uploads, from)) {
     throw new EvidenceError("UPLOAD_OUTSIDE", "上传文件不在上传目录里，拒绝导入。", 400);
   }
 }

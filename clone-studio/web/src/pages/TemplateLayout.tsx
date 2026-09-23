@@ -5,6 +5,7 @@ import { Badge } from "../components/ui/Badge.js";
 import { QueryErrorState } from "../components/ui/QueryErrorState.js";
 import { InlineNameEditor } from "../components/ui/InlineNameEditor.js";
 import { Stepper } from "../components/Stepper.js";
+import { BreakerBar } from "../components/BreakerBar.js";
 import { archiveApi, archiveKeys } from "../lib/archive.js";
 import { formatUsd } from "../lib/format.js";
 import { defaultStep, deriveSteps, isStepKey, type StepKey } from "../lib/steps.js";
@@ -120,6 +121,9 @@ export function TemplateLayout() {
         loading={!template}
         hrefFor={hrefFor}
       />
+
+      {/* CMP-009：任务熔断 / 中断 / 失败 / 取消后给「继续」「重跑」，在步骤条下方、工作区上方 */}
+      <BreakerBar />
 
       <div className="flex flex-1 flex-col gap-5 overflow-y-auto px-6 py-5">
         {/* 不往 Outlet 里塞 context：现在没有任何消费方，而匿名对象字面量

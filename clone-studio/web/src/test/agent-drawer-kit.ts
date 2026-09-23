@@ -14,10 +14,21 @@ export interface DrawerDb {
   pageSize: number;
   budgetUsd: number;
   abortCalls: number;
+  continueCalls: number;
+  rerunCalls: number;
 }
 
 export function drawerBackend(init: Partial<DrawerDb> = {}, extra: Record<string, RouteStub | (() => RouteStub)> = {}) {
-  const db: DrawerDb = { job: agentJob(), messages: [], pageSize: 500, budgetUsd: 5, abortCalls: 0, ...init };
+  const db: DrawerDb = {
+    job: agentJob(),
+    messages: [],
+    pageSize: 500,
+    budgetUsd: 5,
+    abortCalls: 0,
+    continueCalls: 0,
+    rerunCalls: 0,
+    ...init,
+  };
   const lastSeq = () => db.messages.at(-1)?.seq ?? 0;
   const page = (list: AgentMessageView[], afterSeq: number, truncated: boolean, history = false): MessagePage => {
     const firstSeq = list[0]?.seq ?? 0;
@@ -58,6 +69,30 @@ export function drawerBackend(init: Partial<DrawerDb> = {}, extra: Record<string
       return { body: page(newer.slice(0, db.pageSize), after, newer.length > db.pageSize) };
     },
     "/api/settings": () => ({ body: { agentBudgetUsd: db.budgetUsd } }),
+    // 和真实后端一致：继续把同一个任务放回队列；重跑开一个新任务（新 id、更晚的 createdAt），旧消息不带过去
+    "POST /api/agent-jobs/:id/continue": () => {
+      db.continueCalls += 1;
+      if (!db.job) return { status: 404, body: { error: { message: "Agent 任务不存在" } } };
+      db.job = { ...db.job, status: "queued", stopReason: null, endedAt: null };
+      return { body: { job: db.job } };
+    },
+    "POST /api/agent-jobs/:id/rerun": () => {
+      db.rerunCalls += 1;
+      if (!db.job) return { status: 404, body: { error: { message: "Agent 任务不存在" } } };
+      db.job = {
+        ...db.job,
+        id: "job-2",
+        status: "queued",
+        stopReason: null,
+        endedAt: null,
+        costUsd: 0,
+        runElapsedMs: 0,
+        runStartedAt: null,
+        createdAt: "2026-09-23T12:00:00.000Z",
+      };
+      db.messages = [];
+      return { body: { job: db.job } };
+    },
     "POST /api/agent-jobs/:id/abort": () => {
       db.abortCalls += 1;
       if (!db.job) return { status: 404, body: { error: { message: "Agent 任务不存在" } } };

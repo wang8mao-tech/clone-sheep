@@ -70,6 +70,9 @@ export function isActive(status: AgentJobStatus): boolean {
 /** 中止要等会话停下来：interrupt 最多 10 秒没回就硬停，再加收尸，给足余量 */
 const ABORT_TIMEOUT_MS = 30_000;
 
+/** 重跑要先清掉工作目录里的 Agent 产物再排队，给足余量 */
+const RERUN_TIMEOUT_MS = 30_000;
+
 export const agentApi = {
   templateJob: (templateId: string) => api.get<TemplateJobSnapshot>(`/api/templates/${templateId}/agent-job`),
   job: (jobId: string) => api.get<JobHead>(`/api/agent-jobs/${jobId}`),
@@ -77,6 +80,11 @@ export const agentApi = {
     api.get<MessagePage>(`/api/agent-jobs/${jobId}/messages?afterSeq=${afterSeq}`),
   before: (jobId: string, beforeSeq: number) =>
     api.get<MessagePage>(`/api/agent-jobs/${jobId}/messages?beforeSeq=${beforeSeq}`),
+  /** 继续：resume 同一会话（熔断 / 中断 / 失败之后） */
+  continue: (jobId: string) => api.post<{ job: AgentJobView }>(`/api/agent-jobs/${jobId}/continue`),
+  /** 重跑：清掉 Agent 产物、按原任务提示开一个新任务；清目录可能要一会儿 */
+  rerun: (jobId: string) =>
+    api.post<{ job: AgentJobView }>(`/api/agent-jobs/${jobId}/rerun`, undefined, RERUN_TIMEOUT_MS),
   abort: (jobId: string) =>
     api.post<{ job: AgentJobView }>(`/api/agent-jobs/${jobId}/abort`, undefined, ABORT_TIMEOUT_MS),
 };

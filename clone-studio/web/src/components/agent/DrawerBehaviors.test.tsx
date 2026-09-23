@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, renderHook, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AgentDrawer } from "./AgentDrawer.js";
+import { AgentFeedProvider } from "../../lib/AgentFeedProvider.js";
 import { DrawerFrame } from "./DrawerFrame.js";
 import { ToolInput } from "./ToolInput.js";
 import { useTypewriter } from "./useTypewriter.js";
@@ -84,7 +85,11 @@ describe("AgentDrawer · 收起再展开 / 取数失败", () => {
   });
 
   async function mount(): Promise<ControlledEventSource> {
-    renderWithProviders(<AgentDrawer templateId={TPL} />);
+    renderWithProviders(
+      <AgentFeedProvider templateId={TPL}>
+        <AgentDrawer />
+      </AgentFeedProvider>,
+    );
     act(() => findSource(`template:${TPL}`)?.open());
     const s = await waitFor(() => {
       const found = findSource("job:job-1");
@@ -140,7 +145,11 @@ describe("AgentDrawer · 收起再展开 / 取数失败", () => {
               },
       },
     );
-    renderWithProviders(<AgentDrawer templateId={TPL} />);
+    renderWithProviders(
+      <AgentFeedProvider templateId={TPL}>
+        <AgentDrawer />
+      </AgentFeedProvider>,
+    );
     act(() => findSource(`template:${TPL}`)?.open());
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("读取 Agent 消息失败：数据库忙");

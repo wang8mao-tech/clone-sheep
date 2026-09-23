@@ -142,7 +142,8 @@ export function buildTimeline(messages: readonly AgentMessageView[]): TimelineIt
         fromResult: true,
       });
     }
-    prevAt = at;
+    // 思考时长从上一条看得见的活动算，模型思考时连推的进度消息不算（复审 S2-L4）
+    if (!isProgressOnly(m)) prevAt = at;
   }
   return items;
 }
@@ -180,6 +181,25 @@ function markStopped(items: TimelineItem[], seq: number, reason: string): void {
     }
   }
   items.push(stopped);
+}
+
+/**
+ * 「思考中 · Ns」从哪一刻算起：最后一条看得见的活动（Agent 回复、工具结果、宿主记录……）。
+ * SDK 在模型思考时会连续推 `system:thinking_tokens` 之类的进度消息，限流时推 `rate_limit_event`，
+ * 抽屉不画它们；拿它们当起点的话，计时每来一条就被拨回 0:00，模型想了半分钟也一直显示 0:00（真机实测）。
+ */
+export function lastActivityAt(messages: readonly AgentMessageView[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i];
+    if (m && !isProgressOnly(m)) return m.createdAt;
+  }
+  return null;
+}
+
+/** 看不见的进度消息：模型思考时的 `system:thinking_tokens` 之类、限流事件、流式分片。`system:init` 算活动 */
+function isProgressOnly(m: AgentMessageView): boolean {
+  if (m.type === "rate_limit_event" || m.type === "stream_event") return true;
+  return m.type === "system" && !(isRecord(m.payload) && m.payload.subtype === "init");
 }
 
 /** 待办清单：最近一次 TodoWrite 的入参就是当前全貌（它每次都整份重写） */

@@ -3,6 +3,7 @@ import { Outlet, useMatch } from "react-router";
 import { Sidebar } from "./Sidebar.js";
 import { DesktopOnlyGate } from "./DesktopOnlyGate.js";
 import { AgentDrawer } from "../components/agent/AgentDrawer.js";
+import { AgentFeedProvider } from "../lib/AgentFeedProvider.js";
 import { HealthBanner } from "../components/HealthBanner.js";
 import { api, TIMEOUT_MS, type Health } from "../lib/api.js";
 import { archiveApi, archiveKeys } from "../lib/archive.js";
@@ -49,23 +50,26 @@ export function Shell() {
 
   return (
     <DesktopOnlyGate>
-      <div className="flex h-full w-full overflow-hidden bg-bg">
-        <Sidebar
-          clients={clients.data?.clients ?? []}
-          loading={clients.isLoading}
-          error={sidebarError}
-          onRetry={() => {
-            void health.refetch();
-            void clients.refetch();
-          }}
-          healthOk={(checks.data?.blockingFailures.length ?? 0) === 0 && health.data?.ok === true}
-        />
-        <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <HealthBanner failures={checks.data?.blockingFailures ?? []} />
-          <Outlet />
-        </main>
-        <AgentDrawer templateId={templateId} />
-      </div>
+      {/* 模板的 Agent 任务全页一份：抽屉与工作区的熔断 / 中断横条（CMP-009）共用 */}
+      <AgentFeedProvider templateId={templateId}>
+        <div className="flex h-full w-full overflow-hidden bg-bg">
+          <Sidebar
+            clients={clients.data?.clients ?? []}
+            loading={clients.isLoading}
+            error={sidebarError}
+            onRetry={() => {
+              void health.refetch();
+              void clients.refetch();
+            }}
+            healthOk={(checks.data?.blockingFailures.length ?? 0) === 0 && health.data?.ok === true}
+          />
+          <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+            <HealthBanner failures={checks.data?.blockingFailures ?? []} />
+            <Outlet />
+          </main>
+          <AgentDrawer />
+        </div>
+      </AgentFeedProvider>
     </DesktopOnlyGate>
   );
 }

@@ -3,7 +3,7 @@
 > 本文件记录项目的开发阶段划分、当前进度和剩余工作。
 > 新 session 启动时应首先阅读此文件，了解项目状态后再继续开发。
 >
-> **当前进度（2026-09-22）**：Phase 0 ✅（带一项已知阻塞）· Phase 1 ✅ · Phase 2 ✅（带两项遗留）· Phase 3 ✅ · **Phase 4 ✅**（五个 Task 交付，4.3 过六轮、4.4 / 4.5 各过四轮 review→fix；AC-004 / AC-005 / AC-006 真机浏览器实跑通过，用户实测确认）· 下一步 Phase 5。
+> **当前进度（2026-09-22）**：Phase 0 ✅（带一项已知阻塞）· Phase 1 ✅ · Phase 2 ✅（带两项遗留）· Phase 3 ✅ · **Phase 4 ✅**（五个 Task 交付，4.3 过六轮、4.4 / 4.5 各过四轮 review→fix；AC-004 / AC-005 / AC-006 真机浏览器实跑通过，用户实测确认）· **Phase 5 ✅**（五个 Task，review→fix 共 5.1 五轮 / 5.2 七轮 / 5.3 七轮 / 5.4 四轮 / 5.5 两轮；AC-007～010 真机通过，AC-002 自动化通过、真机转 Phase 13）· 下一步 Phase 6（开工前先解「本机渲染不通」）。
 > 分支 `feat/clone-studio`。Phase 6 开工前必须先解「本机渲染不通」，见「已知风险」。
 >
 > 依据：Product-Spec.md v1.5、Design-Brief.md v1.0、设计稿 https://claude.ai/artifact/7DWGBWDbka6Wm71vV6TBbH（7 屏，UI 以设计稿为准）、Hypit-Research.md、用户提供的《Codex 生图配置说明》（不随仓库分发，要点已写入 Spec REQ-011）。
@@ -350,7 +350,7 @@ ltk_data	okenizers\`（路径来自 `provider-whisperx-local/src/program.ts` 的
 | 5.2 | 熔断与调度：墙钟、`maxBudgetUsd`、同命令连续失败、无消息卡死；订阅限流进等待额度并到点 resume；并发上限、排队、取消、中止、继续、重跑 | AC-008、AC-010 | ✅ 七轮 review→fix；限流 / 停止 / 收尸三处真机实测 |
 | 5.3 | 消息全量落 `agent_messages` + SSE + 刷新补发；`routes/agent-jobs.ts`；删模板先停 Agent 进程 | AC-009、AC-002 | ✅ 七轮 review→fix 两阶段 PASS；第七轮的修复只经全量矩阵 + 变异测试自验，第八轮复审被中止未出结果 |
 | 5.4 | 右侧抽屉：顶栏、待办、markdown 逐字流式、工具折叠行、长输出折叠、红 / 琥珀竖线、结束卡 | 设计稿 §A | ✅ 四轮 review→fix，第四轮两阶段 PASS（只剩 LOW，见下）；真机（隔离数据根 + 真服务端与调度器 + 脚本化假会话，零花费）验过逐字流式、折叠展开、中止、刷新补历史、540 条长历史往前翻、已取消结束卡、宿主停下的中性线、拖宽不压滚动条 |
-| 5.5 | 熔断 / 中断横条 CMP-009（继续 / 重跑） | CMP-009 | |
+| 5.5 | 熔断 / 中断横条 CMP-009（继续 / 重跑） | CMP-009 | ✅ 两轮 review→fix，第二轮两阶段 PASS（只剩 LOW，见「给 Phase 6 的交接」）；AC-008 / AC-009 / AC-010 真机通过（真 Agent，等价花费 $0.477）；AC-002 真机转 Phase 13 |
 
 **给 5.5 的交接（Task 5.4）**：
 - 横条上的动作照 `web/src/lib/agent-status.ts` 的 `nextActions(status)` 给：熔断 / 中断 / 失败 = 继续 + 重跑，已取消只给重跑，
@@ -360,6 +360,36 @@ ltk_data	okenizers\`（路径来自 `provider-whisperx-local/src/program.ts` 的
 - 第四轮复审留下的 LOW（不影响功能，择机处理）：≥1600 宽屏时抽屉左侧那 14px 空隙露出应用底色，横贯主区的边线在那里断开；
   拖动区右半压在抽屉最左 14px 上，带竖线的工具行最左侧那点按下去是拖宽不是展开；收起后的窄轨约 45px 宽、显示状态点，
   Design-Brief §2.1 写的是「32px 窄轨显示运行中任务数」；前端 JS 单包 764KB（highlight.js 常用语言全集，可改成只注册用到的语言）
+
+**Task 5.5 的实现与真机验收（2026-09-23）**：
+- 横条 `web/src/components/BreakerBar.tsx`（CMP-009）挂在模板页步骤条下方、工作区上方（`TemplateLayout`），只在任务已熔断 /
+  失败（红）、中断 / 已取消（灰）时出现；动作照 `nextActions`，重跑走普通二次确认（新 `ui/ConfirmDialog.tsx`，§6.1），
+  写明会删掉 Agent 在工作目录顶层写出的文件，references / assets / productions 三个目录整个保留（与 `resetAgentProducts`
+  只清顶层的实际行为一致——Agent 若往这三个目录里写过东西，重跑也不会清掉）
+- 横条与抽屉共用一份任务数据：`lib/AgentFeedProvider.tsx` 挂在外壳上，`useTemplateAgent()` 取；全页只有一个任务取数、一条任务主题 SSE
+- 真机验收（隔离数据根 + 真服务端 + 真 Agent，订阅登录、未设 API key；等价花费合计 $0.477，未超 $0.5）：
+  AC-008 分两个任务证明（复审 S1-M2）：任务 A（Opus，预算 $0.2）真熔断在 $0.27，点横条「继续」接回同一会话（会话 id 不变）——
+  但它在第一个工具执行前就熔断了，没有写出过中间文件；「熔断后中间文件保留」由任务 B（Haiku，预算 $0.05）证明：
+  写出 notes.md 后熔断，继续后 Agent 读回了它。两个性质都在真机上成立，只是没在同一次 $0.2 运行里同时出现；
+  AC-010 强杀后端再重启 → 任务标「中断 · 后端重启」、用时「—」，点「继续」接着跑、会话 id 不变，Claude Code 子进程随后端一起退出、
+  没有孤儿进程（当场按进程树核过）；AC-009 运行中刷新，历史补回、之后的消息继续推送进来；
+  AC-007 本轮没能在真机上复现（两次都在执行到 build 那一步之前熔断），拦截的自动化测试已复核，真机结论沿用 5.1；
+  **AC-002 没有端到端真机证据**：5.3 当时只有自动化测试（先前写「沿用 5.3 真机结论」有误，复审 S1-M1 指出）。
+  本轮补跑一次：任务运行时删除影响接口如实报「1 个运行中的任务」，但 Agent 在删除前自己跑完了，
+  「运行中删除 → 进程先停 → 再删目录」这一步没测成；花费已到上限，没有再跑。现有证据是删除流程与停进程的自动化测试
+  （deletion / scheduler-stop / Sidebar 确认框）加 5.3 spike（中止后 1 秒工作目录即可删除）。Phase 13 端到端验收时补真机
+- 真机顺带发现并修掉：SDK 思考时连推 `system:thinking_tokens`，「思考中 · Ns」原来拿最后一条消息计时、被拨回 0:00，
+  改为从最后一条看得见的活动算（`lastActivityAt`）
+
+**给 Phase 6 的交接（Task 5.5）**：
+- ② 复刻页直接沿用 `BreakerBar`（它已经挂在模板页工作区上方，所有步骤都看得到），不另做一个；
+  任务数据用 `useTemplateAgent()`，不要在页面里再开一份 `useAgentFeed`
+- 复刻任务由导入完成后自动启动：现在界面上没有发起任务的入口，真机验收用的是临时启动器里的一个入队路由
+- 真机上 Opus 一轮调用的等价花费约 $0.04～0.27（首轮带系统提示与 skill 最贵），熔断上限太低会在工具执行前就停下
+- 5.5 第二轮复审留下的 LOW（不影响功能，择机处理）：同一任务「同状态再停下」且客户端没看到中间的运行态时，横条的
+  请求状态 key（id + status）不变，旧的「继续失败」原文会留着——key 加上 `endedAt` 即可；忙碌时按钮禁用与原因提示没有测试钉住；
+  重跑确认框是 role=status 横条的子节点，读屏可能把整个对话框内容当状态播报，挪成兄弟节点更干净；
+  `ConfirmDialog` 与 `ConfirmDangerDialog` 的 dialog 外壳重复，可抽公共外壳
 
 **给 Phase 7 的交接（Task 5.4）**：「打回并写意见」要在 `host_prompt` 里分出单独的 kind（如 `rework`，现在只有
 start / continue / auto_resume，`continueJob(jobId, note)` 区分不了打回和普通继续），抽屉按它画「打回意见 #n」
@@ -375,7 +405,7 @@ start / continue / auto_resume，`continueJob(jobId, note)` 区分不了打回�
 - `clone-studio/web/src/components/BreakerBar.tsx`（CMP-009）
 
 **验收标准**：
-- AC-007、AC-008、AC-009、AC-010、AC-002 通过
+- AC-007、AC-008、AC-009、AC-010 通过；AC-002 自动化通过，真机转 Phase 13（见 Task 5.5 的真机验收说明）
 - `guard.ts` 有单元测试覆盖：`hypit build`、`node …/hypit.mjs build`、PowerShell 与 bash 两种写法、越界写路径
 - 有一条测试钉住会话配置：必须挂上 guard hook、`disallowedTools` 必须含 `Agent` 与 `Task`、不得禁 `Bash`（那会拿走完整能力）
 
@@ -479,6 +509,8 @@ start / continue / auto_resume，`continueJob(jobId, note)` 区分不了打回�
 - 运行器按档案给 SDK 会话注入 `ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_MODEL` 及三档默认模型映射；不同任务互不串环境
 - 实现"测试连接"（声明支持看图时带一张测试图）；无原生搜索的档案在系统提示里改用 Bash / WebFetch 找图
 - 复刻任务拦截不支持看图的档案；resume 沿用原档案，重跑可重选；AgentJob 存档案名与模型 id 快照；$ 熔断按档案单价折算
+  - 交接（Task 5.5）：「重跑可重选模型」（CMP-009）这次没做——现在只有内置订阅档案。做档案时给 `POST /api/agent-jobs/:id/rerun`
+    加可选的档案参数，`BreakerBar` 的重跑确认框里放 CMP-010 选择器，默认选原档案
 - 设置页"Agent 模型"分区与添加面板；①参考 与 ④变体 的模型下拉 CMP-010 接入真实档案
 
 **关键文件**：
@@ -541,6 +573,10 @@ start / continue / auto_resume，`continueJob(jobId, note)` 区分不了打回�
 
 **交付内容**：
 - 崩溃恢复全链路复测：杀后端、断电式重启后任务标"中断"可继续，无孤儿子进程
+- AC-002 真机补验（Phase 3 延到 Phase 5、Phase 5 再延到这里，别再漏）：任务运行中删除模板 → 确认框写「将中止 1 个任务」→
+  Agent 进程已结束再删目录。Agent 的活要用挪不到后台的前台负载（如 1 秒一次 echo 循环 120 次）——Claude Code 会拒绝
+  单独的 `sleep`，Agent 会改成后台任务 + Monitor 然后收尾，删除时任务已结束；同时核对 Agent 起的后台任务（local_bash）
+  随 Claude Code 进程一起结束
 - 补齐各页六态（加载骨架、空、错误原文、禁用原因）、键盘可达与焦点环、`prefers-reduced-motion`
 - 生产模式：`pnpm build` 后由后端托管前端，`pnpm start` 单命令启动；写 `clone-studio/README.md`（安装、启动、LiteLLM 起法、常见体检问题）
 - 按 Spec §9 跑端到端验收样本：一条排行榜参考视频 → 复刻 → 验货 → 3 条变体 → 素材审核 → 出片 → 下载
@@ -553,6 +589,7 @@ start / continue / auto_resume，`continueJob(jobId, note)` 区分不了打回�
 
 **验收标准**：
 - Spec §9 完成定义全部勾选，e2e-report.md 附每步证据
+- AC-002 真机通过（运行中删除、进程先停再删目录、后台任务不残留）
 
 ---
 

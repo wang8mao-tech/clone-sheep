@@ -3,9 +3,9 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api.js";
 import { isActive, type AgentJobView } from "../../lib/agent.js";
 import { isEnded } from "../../lib/agent-status.js";
-import { buildTimeline, latestTodos } from "../../lib/agent-timeline.js";
+import { buildTimeline, lastActivityAt, latestTodos } from "../../lib/agent-timeline.js";
 import type { Settings } from "../../lib/types.js";
-import { useAgentFeed } from "../../lib/useAgentFeed.js";
+import { useTemplateAgent } from "../../lib/agent-feed-context.js";
 import { DrawerFrame } from "./DrawerFrame.js";
 import { EndCard } from "./EndCard.js";
 import { JobHeader } from "./JobHeader.js";
@@ -18,8 +18,8 @@ import { TodoList } from "./TodoList.js";
  *
  * 在模板页之外没有任务可看，只留外壳。开合：用户动过就听用户的；没动过时有任务就展开。
  */
-export function AgentDrawer({ templateId }: { templateId: string | undefined }) {
-  const { state, feed } = useAgentFeed(templateId);
+export function AgentDrawer() {
+  const { templateId, state, feed } = useTemplateAgent();
   const [pinned, setPinned] = useState<boolean | null>(null);
   const job = state.job;
   // 取数失败也展开：收着的话「读不到」这件事没人看得见，在跑的任务就这么隐形了
@@ -36,7 +36,8 @@ export function AgentDrawer({ templateId }: { templateId: string | undefined }) 
 
   const items = useMemo(() => buildTimeline(state.messages), [state.messages]);
   const todos = useMemo(() => latestTodos(state.messages), [state.messages]);
-  const lastAt = state.messages.at(-1)?.createdAt ?? job?.runStartedAt ?? null;
+  const lastActivity = useMemo(() => lastActivityAt(state.messages), [state.messages]);
+  const lastAt = lastActivity ?? job?.runStartedAt ?? null;
 
   const header = job ? (
     <JobHeader

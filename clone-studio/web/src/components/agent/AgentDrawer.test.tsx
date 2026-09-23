@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AgentDrawer } from "./AgentDrawer.js";
+import { AgentFeedProvider } from "../../lib/AgentFeedProvider.js";
 import { renderWithProviders } from "../../test/harness.js";
 import { installEventSource, type ControlledEventSource } from "../../test/fake-event-source.js";
 import { agentJob, agentMessages as m } from "../../test/agent-fixtures.js";
@@ -15,7 +16,11 @@ beforeEach(() => {
 
 /** 渲染抽屉并让模板主题那条 SSE 连上（取数只在连上之后开始） */
 async function mount(): Promise<ControlledEventSource> {
-  renderWithProviders(<AgentDrawer templateId={TPL} />);
+  renderWithProviders(
+    <AgentFeedProvider templateId={TPL}>
+      <AgentDrawer />
+    </AgentFeedProvider>,
+  );
   const es = findSource(`template:${TPL}`);
   if (!es) throw new Error("抽屉没有订阅模板主题");
   act(() => es.open());
@@ -34,7 +39,11 @@ const LONG = "这是一段比较长的 Agent 回复，用来看逐字流式。".
 describe("AgentDrawer · 取数顺序与流式", () => {
   it("先订阅再拉：连上之前一个请求都不发；连上后拉快照，拿到任务后订阅 job 主题并对 seq", async () => {
     const { calls } = drawerBackend({ messages: [m.init(1), m.assistant(2, [{ type: "text", text: LONG }])] });
-    renderWithProviders(<AgentDrawer templateId={TPL} />);
+    renderWithProviders(
+      <AgentFeedProvider templateId={TPL}>
+        <AgentDrawer />
+      </AgentFeedProvider>,
+    );
     const es = findSource(`template:${TPL}`) as ControlledEventSource;
     expect(calls).toEqual([]);
     act(() => es.open());
@@ -145,6 +154,28 @@ describe("AgentDrawer · 顶栏", () => {
   });
 });
 
+describe("AgentDrawer · 思考中计时（复审 S2-L3）", () => {
+  it("模型思考时连推 thinking_tokens：「思考中」从最后一条看得见的活动算，不被拨回 0:00", async () => {
+    const ago = (s: number) => new Date(Date.now() - s * 1000).toISOString();
+    drawerBackend({
+      job: agentJob({ status: "running", runStartedAt: ago(60) }),
+      messages: [
+        m.init(1, ago(40)),
+        m.assistant(2, [{ type: "text", text: "我先想一下" }], ago(30)),
+        {
+          seq: 3,
+          role: null,
+          type: "system",
+          payload: { type: "system", subtype: "thinking_tokens" },
+          createdAt: ago(1),
+        },
+      ],
+    });
+    await mount();
+    expect(await screen.findByText(/^思考中 · 0:(29|3\d)$/)).toBeInTheDocument();
+  });
+});
+
 describe("AgentDrawer · 结束卡与空态", () => {
   it("已取消：只说能重跑，不说能继续", async () => {
     drawerBackend({ job: agentJob({ status: "cancelled", stopReason: "user_cancel", runStartedAt: null }) });
@@ -175,7 +206,11 @@ describe("AgentDrawer · 结束卡与空态", () => {
   it("模板没有任务：抽屉收着；展开后说明没有任务，不发任务请求", async () => {
     const user = userEvent.setup();
     const { calls } = drawerBackend({ job: null });
-    renderWithProviders(<AgentDrawer templateId={TPL} />);
+    renderWithProviders(
+      <AgentFeedProvider templateId={TPL}>
+        <AgentDrawer />
+      </AgentFeedProvider>,
+    );
     act(() => findSource(`template:${TPL}`)?.open());
     await waitFor(() => expect(calls).toEqual(["snapshot"]));
     await user.click(screen.getByRole("button", { name: "展开 Agent 过程抽屉" }));
@@ -186,7 +221,11 @@ describe("AgentDrawer · 结束卡与空态", () => {
   it("模板页之外：只有外壳，不订阅也不请求", async () => {
     const user = userEvent.setup();
     const { calls } = drawerBackend();
-    renderWithProviders(<AgentDrawer templateId={undefined} />);
+    renderWithProviders(
+      <AgentFeedProvider templateId={undefined}>
+        <AgentDrawer />
+      </AgentFeedProvider>,
+    );
     await user.click(screen.getByRole("button", { name: "展开 Agent 过程抽屉" }));
     expect(screen.getByText("打开一个模板，这里显示它的 Agent 过程。")).toBeInTheDocument();
     expect(calls).toEqual([]);

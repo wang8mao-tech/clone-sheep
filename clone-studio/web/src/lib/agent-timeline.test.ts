@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { buildTimeline, latestTodos, summarizeInput, toneOf, type TimelineItem } from "./agent-timeline.js";
+import {
+  buildTimeline,
+  lastActivityAt,
+  latestTodos,
+  summarizeInput,
+  toneOf,
+  type TimelineItem,
+} from "./agent-timeline.js";
 import type { AgentMessageView } from "./agent.js";
 import { agentMessages as m } from "../test/agent-fixtures.js";
 
@@ -29,6 +36,21 @@ describe("buildTimeline", () => {
     const items = buildTimeline([
       m.init(1, "2026-09-23T10:00:00.000Z"),
       m.assistant(2, [{ type: "thinking", thinking: "嗯" }], "2026-09-23T10:00:08.000Z"),
+    ]);
+    expect(items[0]).toMatchObject({ kind: "thinking", seconds: 8 });
+  });
+
+  it("思考秒数不被中间连推的进度消息（thinking_tokens）拨短（复审 S2-L4）", () => {
+    const items = buildTimeline([
+      m.init(1, "2026-09-23T10:00:00.000Z"),
+      {
+        seq: 2,
+        role: null,
+        type: "system",
+        payload: { type: "system", subtype: "thinking_tokens" },
+        createdAt: "2026-09-23T10:00:07.000Z",
+      },
+      m.assistant(3, [{ type: "thinking", thinking: "嗯" }], "2026-09-23T10:00:08.000Z"),
     ]);
     expect(items[0]).toMatchObject({ kind: "thinking", seconds: 8 });
   });
@@ -166,6 +188,34 @@ describe("toneOf：红 / 琥珀竖线", () => {
     expect(byKey((i) => i.kind === "intercept")).toBe("warning");
     expect(byKey((i) => i.kind === "error")).toBe("danger");
     expect(byKey((i) => i.kind === "text")).toBeNull();
+  });
+});
+
+describe("lastActivityAt：「思考中」的计时起点", () => {
+  it("跳过 thinking_tokens、rate_limit_event 这类看不见的进度消息；init 算一次活动", () => {
+    const progress = (seq: number, createdAt: string): AgentMessageView => ({
+      seq,
+      role: null,
+      type: "system",
+      payload: { type: "system", subtype: "thinking_tokens" },
+      createdAt,
+    });
+    const msgs: AgentMessageView[] = [
+      m.assistant(1, [{ type: "text", text: "先看目录" }], "2026-09-23T10:00:00.000Z"),
+      m.init(2, "2026-09-23T10:00:05.000Z"),
+      progress(3, "2026-09-23T10:00:20.000Z"),
+      {
+        seq: 4,
+        role: null,
+        type: "rate_limit_event",
+        payload: { type: "rate_limit_event" },
+        createdAt: "2026-09-23T10:00:25.000Z",
+      },
+      progress(5, "2026-09-23T10:00:30.000Z"),
+    ];
+    expect(lastActivityAt(msgs)).toBe("2026-09-23T10:00:05.000Z");
+    expect(lastActivityAt(msgs.slice(0, 1))).toBe("2026-09-23T10:00:00.000Z");
+    expect(lastActivityAt([progress(1, "x")])).toBeNull();
   });
 });
 

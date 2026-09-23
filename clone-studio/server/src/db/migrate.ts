@@ -36,15 +36,29 @@ const STEPS: ReadonlyArray<{ version: number; run: (d: ReturnType<typeof db>) =>
   {
     // Task 5.2 调度器：重跑要任务提示原文，等待额度要记续跑时间。agent_jobs 在 Phase 1 就建了
     version: 3,
-    run: (d) => {
-      const columns = d.prepare("PRAGMA table_info(agent_jobs)").all() as Array<{ name: string }>;
-      const have = new Set(columns.map((c) => c.name));
-      for (const column of ["prompt", "resume_at", "updated_at"]) {
-        if (!have.has(column)) d.exec(`ALTER TABLE agent_jobs ADD COLUMN ${column} TEXT`);
-      }
-    },
+    run: (d) => addAgentJobColumns(d, ["prompt", "resume_at", "updated_at"]),
+  },
+  {
+    /**
+     * Task 5.3 抽屉要「本次运行的起点」。**必须是新的一步**：version 3 在 Task 5.2 就记进
+     * schema_migrations 了，往它的列清单里加一列，对所有已经跑过 3 的库都是空操作——
+     * 新库因为 schema.sql 里有这列而看不出问题，老库则是每次开跑都 no such column。
+     * 加列只能加新版本号，这条是本项目第二次踩（第一次是 evidence_steps.error_raw）。
+     */
+    version: 4,
+    run: (d) => addAgentJobColumns(d, ["run_started_at"]),
   },
 ];
+
+/** agent_jobs 补列：老库里那张表已经存在，schema.sql 的 CREATE TABLE IF NOT EXISTS 不会给它加列 */
+function addAgentJobColumns(d: ReturnType<typeof db>, columns: readonly string[]): void {
+  const have = new Set(
+    (d.prepare("PRAGMA table_info(agent_jobs)").all() as Array<{ name: string }>).map((c) => c.name),
+  );
+  for (const column of columns) {
+    if (!have.has(column)) d.exec(`ALTER TABLE agent_jobs ADD COLUMN ${column} TEXT`);
+  }
+}
 
 export function migrate(): void {
   const d = db();

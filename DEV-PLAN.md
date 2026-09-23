@@ -295,7 +295,11 @@ ltk_data	okenizers\`（路径来自 `provider-whisperx-local/src/program.ts` 的
   Claude Code 进程由宿主自己 spawn（SDK 的 `spawnClaudeCodeProcess`）并登记进 `procs`，后端退出时统一收尸；
   interrupt 10 秒没回 result 就兜底硬停并连子孙一起强杀
 - 消息全量落 `agent_messages`，SSE 推送，刷新后补发历史
-- 实现右侧抽屉：顶栏（状态、模型、用时、花费 / 上限、中止）。「用时」按本次运行算（继续 / 重跑各自重新计时），
+- 抽屉取数按 `routes/agent-jobs.ts` 文件头写的顺序：**先订阅 SSE 再拉快照**，且**每次连上**（含自动重连）都重拉一次
+  `GET /api/agent-jobs/:jobId` 对 seq、再按 `afterSeq` 补齐——`agent-message` 事件不进重放缓冲，断线期间的消息没人会再通知
+- 分页两个方向分开看：`hasNewer` 用 `afterSeq` 往后拉，`hasOlder` 用 `beforeSeq` 往前翻（Task 5.3 复审 S1-M1）
+- 删除失败回滚后，还没起会话就被停掉的任务是「已取消」而不是「中断」（没有会话可 resume），界面上只给「重跑」（Task 5.3 复审 S1-L1）
+- 实现右侧抽屉：顶栏（状态、模型、用时、花费 / 上限、中止）。「用时」按本次运行算（继续 / 重跑各自重新计时，等额度续跑算同一次），
   不是从任务第一次开始算：库里的 `started_at` 保留的是第一次开始的时间，显示时以当前这段为准（Task 5.2 第四轮复审 S2-L12）、待办清单、markdown 逐字流式、工具调用折叠行、长输出折叠、错误红竖线、拦截琥珀竖线、结束卡
 - 实现熔断 / 中断横条 CMP-009
 
@@ -305,7 +309,7 @@ ltk_data	okenizers\`（路径来自 `provider-whisperx-local/src/program.ts` 的
 |---|---|---|---|
 | 5.1 | 运行器核心：server 接入 SDK、会话配置（`settingSources: []`、cwd、预置 hypit skill、`bypassPermissions` + guard hook + 禁 `Agent`/`Task`）、`guard.ts` 拦截规则与宿主拦截日志、`prompts.ts` 复刻 / 变体 / 打回提示 | AC-007、guard 单测 | ✅ 五轮 review→fix；AC-007 真机通过 |
 | 5.2 | 熔断与调度：墙钟、`maxBudgetUsd`、同命令连续失败、无消息卡死；订阅限流进等待额度并到点 resume；并发上限、排队、取消、中止、继续、重跑 | AC-008、AC-010 | ✅ 七轮 review→fix；限流 / 停止 / 收尸三处真机实测 |
-| 5.3 | 消息全量落 `agent_messages` + SSE + 刷新补发；`routes/agent-jobs.ts`；删模板先停 Agent 进程 | AC-009、AC-002 | |
+| 5.3 | 消息全量落 `agent_messages` + SSE + 刷新补发；`routes/agent-jobs.ts`；删模板先停 Agent 进程 | AC-009、AC-002 | 进行中 |
 | 5.4 | 右侧抽屉：顶栏、待办、markdown 逐字流式、工具折叠行、长输出折叠、红 / 琥珀竖线、结束卡 | 设计稿 §A | |
 | 5.5 | 熔断 / 中断横条 CMP-009（继续 / 重跑） | CMP-009 | |
 

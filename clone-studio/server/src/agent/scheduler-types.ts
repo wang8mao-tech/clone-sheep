@@ -41,6 +41,12 @@ export interface Pending {
   wallMs: number;
   /** 设置里的总时长，熔断原因里显示它（自动续跑时 wallMs 只是剩下的） */
   totalWallMs: number;
+  /**
+   * 这一次运行的起点。等额度之后的自动续跑属于同一次运行（墙钟和花费都接着算），
+   * 所以要把原来的起点带过去，抽屉上的「用时」才不会归零重来。
+   * 由人发起的开始 / 继续 / 重跑不带，execute 会记当下的时间。
+   */
+  runStartedAt?: string;
 }
 
 export interface Running {

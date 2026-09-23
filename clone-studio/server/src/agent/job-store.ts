@@ -26,6 +26,8 @@ export interface AgentJobRow {
   model_id: string | null;
   prompt: string | null;
   resume_at: string | null;
+  /** 本次运行的起点（继续 / 重跑各自重新计时）；started_at 是任务第一次开始的时间 */
+  run_started_at: string | null;
   created_at: string;
   updated_at: string | null;
 }
@@ -60,9 +62,20 @@ export function findJob(id: string): AgentJobRow | undefined {
   return db().prepare("SELECT * FROM agent_jobs WHERE id = ?").get(id) as AgentJobRow | undefined;
 }
 
+/** 任务不存在。单独一个类型：接口层靠它给 404，不靠匹配中文文案 */
+export class JobNotFoundError extends Error {
+  readonly code = "JOB_NOT_FOUND";
+  readonly status = 404;
+
+  constructor(id: string) {
+    super(`Agent 任务不存在：${id}`);
+    this.name = "JobNotFoundError";
+  }
+}
+
 export function requireJob(id: string): AgentJobRow {
   const job = findJob(id);
-  if (!job) throw new Error(`Agent 任务不存在：${id}`);
+  if (!job) throw new JobNotFoundError(id);
   return job;
 }
 
@@ -88,13 +101,17 @@ export function latestJobOf(ownerKind: OwnerKind, ownerId: string): AgentJobRow 
 }
 
 type Patch = Partial<
-  Pick<AgentJobRow, "status" | "session_id" | "started_at" | "ended_at" | "cost_usd" | "stop_reason" | "resume_at">
+  Pick<
+    AgentJobRow,
+    "status" | "session_id" | "started_at" | "run_started_at" | "ended_at" | "cost_usd" | "stop_reason" | "resume_at"
+  >
 >;
 
 const PATCHABLE = new Set<keyof Patch>([
   "status",
   "session_id",
   "started_at",
+  "run_started_at",
   "ended_at",
   "cost_usd",
   "stop_reason",

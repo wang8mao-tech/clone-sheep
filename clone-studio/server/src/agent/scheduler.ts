@@ -91,22 +91,30 @@ export class Scheduler {
 
   /** 取消：排队中、等待额度、运行中都行，结果是「已取消」。运行中的等进程真正结束才返回 */
   cancel(jobId: string): Promise<AgentJobRow> {
-    return stopJob(this.stopContext(), jobId, "cancel");
+    return this.stop(jobId, "cancel");
   }
 
   /** 中止（抽屉上的按钮）：停下来标「中断」，之后可以继续；从没跑起来过的等于取消 */
   abort(jobId: string): Promise<AgentJobRow> {
-    return stopJob(this.stopContext(), jobId, "abort");
+    return this.stop(jobId, "abort");
   }
 
-  /** 删对象前调用：取消它所有没结束的任务，等进程都退出（AC-002）。返回停了几个 */
-  async stopOwner(ownerKind: OwnerKind, ownerId: string): Promise<number> {
+  private stop(jobId: string, action: "cancel" | "abort"): Promise<AgentJobRow> {
+    return stopJob(this.stopContext(), jobId, action);
+  }
+
+  /**
+   * 删对象前调用：停掉它所有没结束的任务，等进程都退出（AC-002）。返回停了几个。
+   * 默认用「中止」：删除失败回滚时对象还在，任务标成中断，用户还能点继续接着跑；
+   * 标成已取消的话就只剩重跑，白扔掉已经花钱跑出来的半成品。
+   */
+  async stopOwner(ownerKind: OwnerKind, ownerId: string, action: "cancel" | "abort" = "abort"): Promise<number> {
     const jobs = activeJobsOf(ownerKind, ownerId);
     // 列出来之后、取消之前自己结束了的不算错；真停不下来必须往上报，
     // 否则调用方以为进程停了就去删目录（AC-002）
     await Promise.all(
       jobs.map((job) =>
-        this.cancel(job.id).catch((error: unknown) => {
+        (action === "abort" ? this.abort(job.id) : this.cancel(job.id)).catch((error: unknown) => {
           if (!(error instanceof SchedulerError && error.code === "NOT_ACTIVE")) throw error;
         }),
       ),
@@ -172,9 +180,14 @@ export class Scheduler {
 
   private async execute(pending: Pending, entry: Running): Promise<void> {
     const before = requireJob(pending.jobId);
+    const now = new Date().toISOString();
+    // started_at 记任务第一次开始；run_started_at 记这一次运行——等额度续跑是同一次运行，
+    // 带着原来的起点，抽屉的「用时」不归零（复审 S1-M3）
+    const runStartedAt = pending.runStartedAt ?? now;
     const job = this.patch(pending.jobId, {
       status: "running",
-      started_at: before.started_at ?? new Date().toISOString(),
+      started_at: before.started_at ?? now,
+      run_started_at: runStartedAt,
       ended_at: null,
       resume_at: null,
     });
@@ -257,7 +270,7 @@ export class Scheduler {
   /** 订阅限流：进「等待额度」，到点用剩下的墙钟与花费自动续跑（算法在 quota.ts） */
   private awaitQuota(pending: Pending, resumeAt: Date, spend: Spend): void {
     const job = requireJob(pending.jobId);
-    const plan = planQuotaResume(job, pending, spend);
+    const plan = planQuotaResume(job, pending, spend, job.run_started_at ?? undefined);
     if (plan.kind === "trip") {
       const ended = { cost_usd: spend.cost, ended_at: new Date().toISOString() };
       this.patch(job.id, { status: "tripped", stop_reason: plan.reason, ...ended });

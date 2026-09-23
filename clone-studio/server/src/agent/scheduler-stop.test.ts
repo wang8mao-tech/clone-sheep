@@ -49,6 +49,26 @@ describe("订阅限流：等待额度并到点自动续跑", () => {
     expect(store.requireJob(j.id).stop_reason).toMatch(/^timeout/);
   });
 
+  it("等额度续跑是同一次运行：用时不归零重算（复审 S1-M3）", async () => {
+    const { scheduler, store, calls, clock } = await setup();
+    const j = scheduler.enqueue(job("t1"));
+    calls[0]!.emit(init("s-1"));
+    const runStartedAt = store.requireJob(j.id).run_started_at;
+    expect(runStartedAt).toBeTruthy();
+
+    for (let i = 0; i < 20; i++) {
+      clock.advance(60_000);
+      calls[0]!.emit({ type: "tool_progress" }); // 心跳：不然 10 分钟无消息先熔断了
+    }
+    calls[0]!.emit({ type: "rate_limit_event", rate_limit_info: { status: "rejected" } });
+    await flush();
+    clock.advance(60 * 60_000); // 到点自动续跑
+
+    expect(calls).toHaveLength(2);
+    // 起点还是原来那个：抽屉的「用时」接着走，不从 0 开始
+    expect(store.requireJob(j.id).run_started_at).toBe(runStartedAt);
+  });
+
   it("等待额度不占并发名额", async () => {
     const { scheduler, calls } = await setup({ concurrency: 1 });
     scheduler.enqueue(job("t1"));
@@ -101,7 +121,7 @@ describe("取消、中止、删除前停任务", () => {
     scheduler.enqueue(job("t1"));
     calls[0]!.emit(init("s-1"));
     // 取消这一步真失败（库写不进去之类）：stopOwner 不能把它当成「已经停了」
-    vi.spyOn(scheduler, "cancel").mockRejectedValue(new Error("database is locked"));
+    vi.spyOn(scheduler, "abort").mockRejectedValue(new Error("database is locked"));
     await expect(scheduler.stopOwner("template", "t1")).rejects.toThrow(/database is locked/);
   });
 
@@ -160,6 +180,14 @@ describe("取消、中止、删除前停任务", () => {
     expect(store.requireJob(j.id).status).toBe("interrupted");
   });
 
+  it("stopOwner 可以要「已取消」那种停法", async () => {
+    const { scheduler, store, calls } = await setup();
+    const j = scheduler.enqueue(job("t1"));
+    calls[0]!.emit(init("s-1"));
+    expect(await scheduler.stopOwner("template", "t1", "cancel")).toBe(1);
+    expect(store.requireJob(j.id).status).toBe("cancelled");
+  });
+
   it("停一个已经结束的任务：报 NOT_ACTIVE，接口能分清「没做事」和「停下了」", async () => {
     const { scheduler, calls } = await setup();
     const j = scheduler.enqueue(job("t1"));
@@ -194,7 +222,8 @@ describe("取消、中止、删除前停任务", () => {
     const other = scheduler.enqueue(job("t2"));
     expect(await scheduler.stopOwner("template", "t1")).toBe(1);
     expect(calls[0]!.input.stopSignal?.aborted).toBe(true);
-    expect(store.requireJob(a.id).status).toBe("cancelled");
+    // 默认「中止」：删失败回滚之后这个任务还能继续
+    expect(store.requireJob(a.id).status).toBe("interrupted");
     await flush();
     // 名额空出来，别的对象的任务接着跑
     expect(store.requireJob(other.id).status).toBe("running");

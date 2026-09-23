@@ -257,6 +257,44 @@ describe("加列迁移", () => {
     });
   });
 
+  /**
+   * 这条钉的是 Task 5.3 复审抓到的 HIGH：run_started_at 被加进了 version 3 的列清单，
+   * 而 version 3 在 Task 5.2 就记进用户的库了——于是所有老库永远不会补上这列，
+   * 每次开跑都 no such column，而新库因为 schema.sql 有这列，测试全绿看不出来。
+   * 从「老库 + 已应用到 3」这个前提跑迁移，才测得到升级路径。
+   */
+  it("已经应用到 version 3 的老库：补得上 run_started_at（Task 5.3 复审 S1-H1）", async () => {
+    const { db } = await import("./index.js");
+    const m = await import("./migrate.js");
+    const d = db();
+    m.migrate();
+
+    // 造一张 Task 5.2 当时的表：有 prompt / resume_at / updated_at，没有 run_started_at
+    d.exec("DROP TABLE agent_messages");
+    d.exec("DROP TABLE agent_jobs");
+    d.exec(`CREATE TABLE agent_jobs (
+      id TEXT PRIMARY KEY, owner_kind TEXT NOT NULL, owner_id TEXT NOT NULL, session_id TEXT,
+      status TEXT NOT NULL DEFAULT 'queued', started_at TEXT, ended_at TEXT,
+      cost_usd REAL NOT NULL DEFAULT 0, cost_is_estimate INTEGER NOT NULL DEFAULT 1,
+      stop_reason TEXT, profile_name TEXT, model_id TEXT, prompt TEXT, resume_at TEXT,
+      created_at TEXT NOT NULL, updated_at TEXT)`);
+    d.prepare(
+      `INSERT INTO agent_jobs (id, owner_kind, owner_id, status, created_at)
+       VALUES ('old', 'template', 't1', 'interrupted', '2026-09-01T00:00:00.000Z')`,
+    ).run();
+    d.prepare("DELETE FROM schema_migrations WHERE version > 3").run();
+    expect(columnsOf(d, "agent_jobs")).not.toContain("run_started_at");
+
+    m.migrate();
+    expect(columnsOf(d, "agent_jobs")).toContain("run_started_at");
+    // 补列不该动已有数据
+    expect(d.prepare("SELECT status FROM agent_jobs WHERE id = 'old'").get()).toEqual({ status: "interrupted" });
+    // 补完就能按它开跑
+    expect(() =>
+      d.prepare("UPDATE agent_jobs SET run_started_at = ? WHERE id = 'old'").run(new Date().toISOString()),
+    ).not.toThrow();
+  });
+
   it("跑第二遍不会重复加列", async () => {
     const { db } = await import("./index.js");
     const m = await import("./migrate.js");

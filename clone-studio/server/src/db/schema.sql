@@ -106,6 +106,8 @@ CREATE TABLE IF NOT EXISTS agent_jobs (
   prompt           TEXT,
   -- 等待额度时的自动续跑时间（订阅限流给的重置时间），供界面显示
   resume_at        TEXT,
+  -- 本次运行的起点：继续 / 重跑各自重新计时，抽屉的「用时」按它算（started_at 是第一次开始）
+  run_started_at   TEXT,
   created_at       TEXT NOT NULL,
   updated_at       TEXT
 );

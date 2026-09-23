@@ -132,6 +132,40 @@ describe("删除模板", () => {
 });
 
 describe("删除前中止关联任务（AC-002 的可验部分）", () => {
+  it("先停 Agent 会话再删目录：停的时候目录还在，返回时任务已结束", async () => {
+    const mods = await freshModules();
+    const stopper = await import("./agent-stopper.js");
+    const { archive, deletion } = mods;
+    const client = archive.createClient("客户 A");
+    const template = archive.createTemplate(client.id, "足球榜");
+    const ws = template.workspace_path as string;
+    mkdirSync(ws, { recursive: true });
+    writeFileSync(path.join(ws, "ANALYSIS.md"), "x");
+
+    const seen: { owners: string[]; dirExisted: boolean }[] = [];
+    stopper.setAgentStopper((owners) => {
+      // 停任务这一步必须发生在删目录之前：会话还在写这个目录
+      seen.push({ owners: owners.map((o) => `${o.kind}:${o.id}`), dirExisted: existsSync(ws) });
+      return Promise.resolve(owners.length);
+    });
+    try {
+      await deletion.deleteTemplate(template.id);
+    } finally {
+      stopper.setAgentStopper(undefined);
+    }
+
+    expect(seen).toEqual([{ owners: [`template:${template.id}`], dirExisted: true }]);
+    expect(existsSync(ws)).toBe(false);
+  });
+
+  it("没注册停止函数时照常能删（Agent 还没接进来的场合）", async () => {
+    const { archive, deletion } = await freshModules();
+    const client = archive.createClient("客户 B");
+    const template = archive.createTemplate(client.id, "篮球榜");
+    mkdirSync(template.workspace_path as string, { recursive: true });
+    await expect(deletion.deleteTemplate(template.id)).resolves.toMatchObject({ kind: "template" });
+  });
+
   it("impact 统计运行中的 Agent 会话与出片", async () => {
     const { archive, deletion, db } = await freshModules();
     const client = archive.createClient("客户 A");
@@ -221,6 +255,62 @@ describe("失败回滚", () => {
     expect(count("SELECT COUNT(*) AS n FROM hypit_calls")).toBe(1);
     const trash = path.join(dataRoot, ".trash");
     expect(existsSync(trash) ? readdirSync(trash) : []).toEqual([]);
+  });
+
+  it("删除失败 + 停止函数已注册（生产的样子）：任务仍是中断，用户还能继续（复审 M-2）", async () => {
+    const mods = await freshModules();
+    const stopper = await import("./agent-stopper.js");
+    const { archive, deletion, db } = mods;
+    const client = archive.createClient("客户 A");
+    const template = archive.createTemplate(client.id, "足球榜");
+    mkdirSync(template.workspace_path as string, { recursive: true });
+    const now = new Date().toISOString();
+    const d = db();
+    d.prepare(
+      `INSERT INTO agent_jobs (id, owner_kind, owner_id, status, session_id, created_at)
+       VALUES ('j1', 'template', ?, 'running', 's-1', ?)`,
+    ).run(template.id, now);
+    // 真实现停完是「中断」（scheduler.stopOwner 默认 abort）
+    stopper.setAgentStopper((owners) => {
+      d.prepare(`UPDATE agent_jobs SET status = 'interrupted', stop_reason = 'user_abort' WHERE owner_id = ?`).run(
+        owners[0]!.id,
+      );
+      return Promise.resolve(owners.length);
+    });
+    armDeleteFailure(d); // 触发器拦的是删客户那一步
+    try {
+      await expect(deletion.deleteClient(client.id)).rejects.toMatchObject({ code: "DB_DELETE_FAILED" });
+    } finally {
+      stopper.setAgentStopper(undefined);
+    }
+
+    // 中断才能「继续」；写成 cancelled 的话用户只剩重跑，白扔掉已经花钱跑出来的半成品
+    const row = d.prepare("SELECT status FROM agent_jobs WHERE id = 'j1'").get() as { status: string };
+    expect(row.status).toBe("interrupted");
+  });
+
+  it("停任务本身失败（比如停止超时）：不删目录，错误照实往上报（复审：AC-002 fail closed）", async () => {
+    const mods = await freshModules();
+    const stopper = await import("./agent-stopper.js");
+    const { archive, deletion } = mods;
+    const client = archive.createClient("客户 A");
+    const template = archive.createTemplate(client.id, "足球榜");
+    const ws = template.workspace_path as string;
+    mkdirSync(ws, { recursive: true });
+    writeFileSync(path.join(ws, "ANALYSIS.md"), "x");
+
+    stopper.setAgentStopper(() =>
+      Promise.reject(Object.assign(new Error("Agent 会话没能在预期时间内停下"), { code: "STOP_TIMEOUT", status: 504 })),
+    );
+    try {
+      await expect(deletion.deleteTemplate(template.id)).rejects.toMatchObject({ code: "STOP_TIMEOUT" });
+    } finally {
+      stopper.setAgentStopper(undefined);
+    }
+
+    // 进程可能还攥着目录：一个文件都不能动，对象也还在
+    expect(existsSync(path.join(ws, "ANALYSIS.md"))).toBe(true);
+    expect(mods.archive.findTemplate(template.id)).toBeDefined();
   });
 
   it("删除失败后，运行中的任务被写成中断而不是已取消——进程真被杀了，但对象还在", async () => {

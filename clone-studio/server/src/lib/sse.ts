@@ -60,11 +60,18 @@ export class SseHub {
     return close;
   }
 
-  publish(topic: string, event: string, data: unknown): SseEvent {
+  /**
+   * `buffer: false` 的事件不进重放缓冲。给 Agent 消息用：它每条消息一个事件，量大，
+   * 而且本来就能按 seq 从库里补回来；进了缓冲只会把别的主题（侧栏、证据流水线）
+   * 需要重放的事件挤掉（Task 5.3 复审 M-6）。
+   */
+  publish(topic: string, event: string, data: unknown, options?: { buffer?: boolean }): SseEvent {
     this.seq += 1;
     const evt: SseEvent = { id: this.seq, topic, event, data };
-    this.buffer.push(evt);
-    if (this.buffer.length > this.bufferSize) this.buffer.shift();
+    if (options?.buffer !== false) {
+      this.buffer.push(evt);
+      if (this.buffer.length > this.bufferSize) this.buffer.shift();
+    }
     for (const sub of this.subscribers) {
       if (sub.topics.has(topic)) this.write(sub, evt);
     }

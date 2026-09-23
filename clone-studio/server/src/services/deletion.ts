@@ -3,6 +3,7 @@ import { config } from "../config.js";
 import { db } from "../db/index.js";
 import { workspaceDir } from "../hypit/workspace.js";
 import { procs } from "../lib/procs.js";
+import { stopAgentsFor } from "./agent-stopper.js";
 import { requireClient, requireTemplate } from "./archive.js";
 import { removeWithRollback } from "./trash.js";
 
@@ -209,6 +210,13 @@ async function stopProcesses(templateIds: readonly string[], productionIds: read
   if (templateIds.length === 0) return;
   const templateSet = new Set(templateIds);
   const productionSet = new Set(productionIds);
+
+  // 先让调度器停 Agent 会话：它走 interrupt，会话能体面收尾、子进程也被带走，
+  // 并且等到真的结束才返回。之后的 killBySubject 是兜底（hypit 调用、以及没停干净的）
+  await stopAgentsFor([
+    ...templateIds.map((id) => ({ kind: "template" as const, id })),
+    ...productionIds.map((id) => ({ kind: "production" as const, id })),
+  ]);
 
   await procs.killBySubject((subject) =>
     subject.kind === "template"

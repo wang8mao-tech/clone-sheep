@@ -14,7 +14,7 @@ export interface Spend {
   elapsedMs: number;
 }
 
-export function planQuotaResume(job: AgentJobRow, pending: Pending, spend: Spend): QuotaPlan {
+export function planQuotaResume(job: AgentJobRow, pending: Pending, spend: Spend, runStartedAt?: string): QuotaPlan {
   // maxBudgetUsd 只算本次 query() 起的花费，所以续跑要传剩余额度；等额度的时间不算运行时间
   const budgetUsd = pending.budgetUsd - Math.max(0, spend.cost - spend.costBefore);
   const wallMs = pending.wallMs - spend.elapsedMs;
@@ -23,7 +23,14 @@ export function planQuotaResume(job: AgentJobRow, pending: Pending, spend: Spend
 
   // 会话还没起来就被限流的，没有可 resume 的会话：原样重发任务
   const resume = job.session_id ?? pending.resume;
-  const rest = { jobId: job.id, budgetUsd, wallMs, totalWallMs: pending.totalWallMs };
+  // 续跑是同一次运行：把起点带过去（复审 S1-M3）
+  const rest = {
+    jobId: job.id,
+    budgetUsd,
+    wallMs,
+    totalWallMs: pending.totalWallMs,
+    ...(runStartedAt ? { runStartedAt } : {}),
+  };
   return {
     kind: "wait",
     next: resume ? { ...rest, prompt: continuePrompt(), resume } : { ...rest, prompt: pending.prompt },

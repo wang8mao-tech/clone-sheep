@@ -60,6 +60,25 @@ export class AgentFeed {
     return () => this.listeners.delete(listener);
   };
 
+  /**
+   * 模板主题上、不属于任务与消息流的事件（复刻判据结论 `clone` 等）：由同一条 SSE 带进来，
+   * 页面在这里订阅，不再各开一条连接（浏览器同主机 6 条连接的池子，两个标签页就能占满）
+   */
+  private readonly eventListeners = new Map<string, Set<(data: unknown) => void>>();
+
+  onTemplateEvent(event: string, listener: (data: unknown) => void): () => void {
+    const set = this.eventListeners.get(event) ?? new Set();
+    set.add(listener);
+    this.eventListeners.set(event, set);
+    return () => {
+      set.delete(listener);
+    };
+  }
+
+  templateEvent(event: string, data: unknown): void {
+    for (const listener of this.eventListeners.get(event) ?? []) listener(data);
+  }
+
   get jobId(): string | null {
     return this.state.job?.id ?? null;
   }

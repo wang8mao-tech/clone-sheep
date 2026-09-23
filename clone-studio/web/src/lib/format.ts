@@ -31,3 +31,11 @@ export function formatActivityTime(iso: string, now: number = Date.now()): strin
   const md = `${d.getMonth() + 1} 月 ${d.getDate()} 日`;
   return sameYear ? md : `${d.getFullYear()} 年 ${md}`;
 }
+
+/** 等额度的预计恢复时间（HH:mm）；时间戳坏了给 null，别显示「NaN:NaN」 */
+export function formatResumeTime(resumeAt: string | null): string | null {
+  const at = resumeAt ? new Date(resumeAt) : null;
+  return at && !Number.isNaN(at.getTime())
+    ? at.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
+    : null;
+}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api.js";
 import { isActive, type AgentJobView } from "../../lib/agent.js";
@@ -10,7 +10,9 @@ import { DrawerFrame } from "./DrawerFrame.js";
 import { EndCard } from "./EndCard.js";
 import { JobHeader } from "./JobHeader.js";
 import { MessageStream } from "./MessageStream.js";
+import { QuotaBar } from "./QuotaBar.js";
 import { TodoList } from "./TodoList.js";
+import { useNow } from "../../lib/useNow.js";
 
 /**
  * 右侧 Agent 过程抽屉（REQ-003，Design-Brief §A）：只读观察窗。
@@ -52,7 +54,7 @@ export function AgentDrawer() {
 
   return (
     <DrawerFrame open={open} onOpenChange={setPinned} header={header} railBadge={job ? <RailBadge job={job} /> : null}>
-      {job?.status === "awaiting_quota" ? <QuotaBar job={job} /> : null}
+      {job?.status === "awaiting_quota" ? <QuotaBar job={job} compact /> : null}
       {todos && todos.length > 0 ? <TodoList todos={todos} running={running} /> : null}
       {state.error ? (
         <div
@@ -107,18 +109,6 @@ function RailBadge({ job }: { job: AgentJobView }) {
   );
 }
 
-/** 等待额度：顶栏下蓝灰条（Design-Brief §A.3） */
-function QuotaBar({ job }: { job: AgentJobView }) {
-  const at = job.resumeAt ? new Date(job.resumeAt) : null;
-  const time =
-    at && !Number.isNaN(at.getTime()) ? at.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) : null;
-  return (
-    <div role="status" className="border-b border-border bg-info/15 px-3 py-1.5 text-caption text-info">
-      额度受限{time ? ` · 预计 ${time} 恢复后自动继续` : " · 恢复后自动继续"}
-    </div>
-  );
-}
-
 function Empty({ text }: { text: string }) {
   return <p className="px-3 py-3 text-caption text-text-tertiary">{text}</p>;
 }
@@ -131,20 +121,4 @@ function Skeleton() {
       ))}
     </div>
   );
-}
-
-/** 秒级时钟：只在有东西要走表时跳，其余时候不白白重渲染 */
-function useNow(ticking: boolean): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!ticking) return;
-    // 开始走表那一刻先对一次：不对的话要用挂载时的旧时间撑一秒，「用时」「思考中」会先显示成 0
-    const first = setTimeout(() => setNow(Date.now()), 0);
-    const timer = setInterval(() => setNow(Date.now()), 1_000);
-    return () => {
-      clearTimeout(first);
-      clearInterval(timer);
-    };
-  }, [ticking]);
-  return now;
 }

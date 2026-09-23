@@ -28,7 +28,7 @@ export function BreakerBar() {
   // 请求状态（进行中、失败原文）与确认框只属于「这一个任务的这一次停下」：换了模板、换了任务、
   // 任务状态变了，都整个重来。不然 A 模板「继续失败」的原文会挂到 B 模板的横条上（复审 S2-M1），
   // 开着的确认框也会在任务再次停下时自己弹出来（S2-L1）
-  return <BarBody key={`${job.id}:${job.status}`} job={job} feed={feed} />;
+  return <BarBody key={`${job.id}:${job.status}:${job.endedAt ?? ""}`} job={job} feed={feed} />;
 }
 
 function BarBody({ job, feed }: { job: EndedJob; feed: AgentFeed | null }) {

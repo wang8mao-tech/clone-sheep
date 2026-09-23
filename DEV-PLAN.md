@@ -432,7 +432,7 @@ start / continue / auto_resume，`continueJob(jobId, note)` 区分不了打回�
 | Task | 内容 | 覆盖 | 状态 |
 |---|---|---|---|
 | 6.1 | 复刻编排与完成判据（server）：证据准备**新完成**时自动建复刻任务（已有模板不补跑，配测试）；任务完成后宿主自己验完成判据（`reference.svrun` / `ANALYSIS.md` / `TIMELINE.md` 存在 + `hypit check --json` 通过），结果落库；判据不过标失败并给原因；建 replica production；`GET /api/templates/:id/clone` 给 ② 页的文件与 check 结果、`POST` 同路径给从没有过任务的模板手动开始；复刻任务运行中拒绝换参考视频；可用能力清单进系统提示（REQ-006，Phase 5 已实现，`prompts.ts` `capabilitySection`） | REQ-004 行为、FLOW-002 步骤 3-4 | ✅ 四轮 review→fix，第四轮两阶段 PASS（只剩 1 条 LOW，转 6.4）。变异自检 27 条全杀（独立拷贝里跑）；真机：审查员用真实库备份起当前代码，3 个停在复刻中的老模板没有被补跑 |
-| 6.2 | ② 复刻页（web）：左 60% 分析摘要 / 时间线（时间码点击联动参考播放器）/ 校验结果三个折叠区，随文件产生逐个出现；右 40% 参考视频小播放器 + 估价卡位；运行中「复刻进行中」+ 用时 / 花费 / 模型；熔断沿用 `BreakerBar`、任务数据用 `useTemplateAgent()`；加载 / 空 / 错误态 | SCREEN-004 | |
+| 6.2 | ② 复刻页（web）：左 60% 分析摘要 / 时间线（时间码点击联动参考播放器）/ 校验结果三个折叠区，随文件产生逐个出现；右 40% 参考视频小播放器 + 估价卡位；运行中「复刻进行中」+ 用时 / 花费 / 模型；熔断沿用 `BreakerBar`、任务数据用 `useTemplateAgent()`；加载 / 空 / 错误态 | SCREEN-004 | ✅ 两轮 review→fix，第二轮两阶段 PASS（6 条 LOW，5 条已修）。审查员在独立端口起服务按设计稿逐值比对（1440 / 1280 + 抽屉）；变异自检 33 条全杀（独立拷贝） |
 | 6.3 | 估价与花钱闸门：费率表（能力 → 单价，设置页可编辑）；`plan` / `pricing` 解析成估价（needs 字段 × 单价、请求数）；`gate.ts` 纯函数判定单条 / 批次限额，估价拿不到按超限、未解析请求直接失败；估价卡 CMP-006（明细、价格页链接、「将自动出片」或「确认出片 $x.xx」）；确认出片接口 | REQ-006 估价与规则、AC-017 / 018 / 019 | |
 | 6.4 | 出片执行器与台账：出片前重生 Runtime Profile；`build --follow --json` + `activity --watch --jsonl` 结构化进度；判成败看 `result.outcome`；`get` 导出到 `output/`（`output` 进 `WORKSPACE_DIRS`）；key 只进 hypit 子进程；全局渲染并发默认 1、`hyperframes.local` workers 默认改 1（Spec 同步 + 存量迁移）；失败原文完整展示、「重试出片」、失败时记可用内存；台账（builds 估价 / build-id / receipt、Agent 花费）标「估」；出片进度 CMP-007；出片进行中拒绝换参考视频（6.1 只作废未出片的复刻片，渲染中的那条要这里保护）；复刻片出片完成后模板从 `cloning` 置 `awaiting_review`（6.1 判据通过时模板仍留在 `cloning`，没有别的 Task 管这次转换）；模板卡「成片数」只数变体与已验货的复刻片（`archive.ts` `templateStats` 现在数全部 done，复刻片出完会被提前计入，与 REQ-004「通过验货时作为第一条成片」冲突） | REQ-006 出片、REQ-009、AC-020（mp4 部分） | |
 | 6.5 | Phase 6 真机验收与收口：一条真实参考视频导入 → 复刻完成 → 三个区块与估价卡；出片得 mp4 并 ffprobe；限额内自动出片与超限待确认各走一次；Phase 四步验证 | Phase 6 验收标准 | |
@@ -450,7 +450,10 @@ start / continue / auto_resume，`continueJob(jobId, note)` 区分不了打回�
 - `clone-studio/server/src/services/gate.ts` — 估价与限额判定（纯函数 + 单元测试）
 - `clone-studio/server/src/services/build.ts` — build、进度、导出、取消
 - `clone-studio/server/src/services/ledger.ts` — 花费记账
-- `clone-studio/web/src/pages/template/CloneStep.tsx`、`web/src/components/EstimateCard.tsx`、`web/src/components/BuildProgress.tsx`
+- `clone-studio/web/src/pages/steps/CloneStep.tsx`（② 复刻页：取数、刷新、参考播放器、「开始复刻」）、`web/src/components/clone/CloneSections.tsx`（三个折叠区块）、`web/src/lib/clone.ts`（数据层 + TIMELINE / ANALYSIS 解析）；`web/src/components/EstimateCard.tsx`、`web/src/components/BuildProgress.tsx`（6.3 / 6.4）
+  Agent 写文件没有事件：任务在跑时 ② 页每 3 秒重拉，任务一结束立刻补拉一次，判据结论出来靠 `clone` 事件失效；右栏按设计稿 300px，1280 宽 + 抽屉时按 40% 收窄、最窄 220（6.2 审查实测 1280 下右栏比左栏还宽）；时间码列 112px 不换行（设计稿画的 84px 装 `00:00-00:03`，Agent 按提示写的 `mm:ss.s` 起止压掉 `.0` 后最长 `00:00-00:03.5` 装不下），偏差备案；等待额度复用抽屉的 `QuotaBar`（工作区一张独立蓝灰横条）；判据结论的 `clone` 事件走抽屉那条 SSE（AgentFeed.onTemplateEvent），页面不另开连接；熔断横条的请求状态按「任务 + 状态 + 结束时刻」重置（6.1 首轮 L7）；「手动开始复刻」与 ① 的「开始复刻」提交按钮区分开
+  6.2 留给后面的 LOW：Agent 快照读失败后「重试」期间按钮无进行中反馈、`new Error(agent.error)` 丢了状态码（模板已删也显示不出「不存在」），要 FeedState 带原始错误对象；审查员在无头 Chrome 里发现每个模板页 3 条 SSE（global、template、加上 job 后重开的 template+job），导航离开后旧 socket 会挂 15–45 秒，Chrome 同主机 6 条上限一满，`/agent-job` 就 5 秒超时（页面已有错误态 + 重试）。属 Phase 5 的 SSE 层，6.5 真机在普通 Chrome 里核一次；可能的修法是 jobId 变化时不重开模板那条 EventSource
+
 
 **验收标准**：
 - 一条真实参考视频走到复刻完成，三个区块与估价卡出现

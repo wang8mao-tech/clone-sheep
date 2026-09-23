@@ -12,6 +12,9 @@ const IDLE: FeedState = {
   liveAfterSeq: 0,
 };
 
+/** 同一条 SSE 上顺带转给页面的模板事件（server/src/services/clone.ts 的 `clone`） */
+const TEMPLATE_EVENTS = ["clone"] as const;
+
 /**
  * 模板的 Agent 任务 + 消息流。取数顺序见 AgentFeed 的说明：
  * 先开 SSE，`open`（含每一次自动重连）之后才去拉，所以快照和补齐永远发生在订阅之后。
@@ -39,9 +42,13 @@ export function useAgentFeed(templateId: string | undefined): { state: FeedState
       if (data && typeof data.seq === "number") void feed.messageArrived(data.jobId, data.seq);
     };
 
+    // 模板主题上的其它事件走同一条连接（server 往 template:<id> 推的 clone 等）
+    const onTemplateEvent = (e: MessageEvent<string>): void => feed.templateEvent(e.type, frameData(e));
+
     source.addEventListener("open", onOpen);
     source.addEventListener("agent-job", onJob as EventListener);
     source.addEventListener("agent-message", onMessage as EventListener);
+    for (const name of TEMPLATE_EVENTS) source.addEventListener(name, onTemplateEvent as EventListener);
     return () => source.close();
   }, [feed, templateId, jobId]);
 

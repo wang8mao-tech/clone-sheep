@@ -259,4 +259,33 @@ describe("请求状态只属于这一个任务的这一次停下（复审 S2-M1 
     expect(within(bar2).queryByText(/继续失败/)).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
   });
+
+  it("复刻判据两次都没过（状态都是失败，只是结束时刻变了）：上一次「继续失败」的原文不留在新横条上", async () => {
+    const user = userEvent.setup();
+    drawerBackend(
+      {
+        job: agentJob({
+          status: "failed",
+          stopReason: "复刻未达完成判据：缺少 ANALYSIS.md",
+          endedAt: "2026-09-23T10:00:00.000Z",
+        }),
+      },
+      { "POST /api/agent-jobs/:id/continue": () => ({ status: 504, body: { error: { message: "后端未响应" } } }) },
+    );
+    await mount();
+    const bar1 = await screen.findByRole("status", { name: "任务失败" });
+    await user.click(within(bar1).getByRole("button", { name: "继续" }));
+    expect(await within(bar1).findByText("继续失败：后端未响应")).toBeInTheDocument();
+
+    // 中间「运行中」那条事件没赶上，直接收到下一次完成后又判不过的状态
+    const next = agentJob({
+      status: "failed",
+      stopReason: "复刻未达完成判据：缺少 TIMELINE.md",
+      endedAt: "2026-09-23T10:20:00.000Z",
+    });
+    act(() => findSource("job:job-1")?.emit("agent-job", `template:${TPL}`, next));
+    const bar2 = await screen.findByRole("status", { name: "任务失败" });
+    await waitFor(() => expect(bar2).toHaveTextContent("缺少 TIMELINE.md"));
+    expect(within(bar2).queryByText(/继续失败/)).toBeNull();
+  });
 });

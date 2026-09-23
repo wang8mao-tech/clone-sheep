@@ -72,6 +72,8 @@ export default tseslint.config(
       "@typescript-eslint/no-unsafe-argument": "off",
       "@typescript-eslint/no-unsafe-call": "off",
       "@typescript-eslint/no-unsafe-return": "off",
+      // 测试底座不走 vite 热更新，组件和函数放一个文件里没有 fast refresh 的问题
+      "react-refresh/only-export-components": "off",
     },
   },
 

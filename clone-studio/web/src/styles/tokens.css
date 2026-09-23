@@ -173,6 +173,15 @@ body {
   }
   .agent-md table {
     border-collapse: collapse;
+    /* 窄栏里表格只横向滚自己，不把卡片撑破、也不把每格挤成一个字 */
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+  .agent-md th,
+  .agent-md td {
+    /* 表格太宽时横向滚，不把每格挤成一个字一行 */
+    white-space: nowrap;
   }
   .agent-md th,
   .agent-md td {

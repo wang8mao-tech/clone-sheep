@@ -106,8 +106,11 @@ CREATE TABLE IF NOT EXISTS agent_jobs (
   prompt           TEXT,
   -- 等待额度时的自动续跑时间（订阅限流给的重置时间），供界面显示
   resume_at        TEXT,
-  -- 本次运行的起点：继续 / 重跑各自重新计时，抽屉的「用时」按它算（started_at 是第一次开始）
+  -- 本次运行这一段的起点（只在「运行中」有意义）
   run_started_at   TEXT,
+  -- 本次运行在此之前已经跑掉的毫秒数。抽屉的「用时」=
+  -- run_elapsed_ms + (运行中 ? now - run_started_at : 0)——等额度、排队都不计时
+  run_elapsed_ms   INTEGER NOT NULL DEFAULT 0,
   created_at       TEXT NOT NULL,
   updated_at       TEXT
 );

@@ -77,7 +77,7 @@ describe("agent_messages 落库与重放", () => {
     expect(m.listMessages("j1", 3).messages).toEqual([]);
   });
 
-  it("条数超一页：hasMore 为真，按 lastSeq 接着拉，不会悄悄少一段", async () => {
+  it("条数超一页：hasNewer 为真，按 nextSeq 接着拉，不会悄悄少一段", async () => {
     const m = await load();
     for (let i = 0; i < 5; i++) m.appendMessage("j1", assistant(`第 ${i}`));
     const first = m.listMessages("j1", 0, 2);
@@ -140,6 +140,66 @@ describe("agent_messages 落库与重放", () => {
     expect(oldest.messages.map((r) => r.seq)).toEqual([1, 2]);
     expect(oldest.hasOlder).toBe(false);
   });
+
+  it("空页把传进来的 afterSeq 原样还回（nextSeq），不倒回开头（复审 S1-M4 / S2-M1）", async () => {
+    const m = await load();
+    for (let i = 0; i < 3; i++) m.appendMessage("j1", assistant(`第 ${i}`));
+    const caughtUp = m.listMessages("j1", 3);
+    expect(caughtUp.messages).toEqual([]);
+    expect(caughtUp.nextSeq).toBe(3); // 游标原地不动
+    expect(caughtUp.lastSeq).toBe(0); // 本页最后一条：没有
+    expect(caughtUp.jobLastSeq).toBe(3); // 库里最后一条：只用来判断追平没有，不是游标
+  });
+
+  it("往前翻的页不给往后拉的游标：nextSeq 恒 0（复审 S1-L1）", async () => {
+    const m = await load();
+    for (let i = 1; i <= 6; i++) m.appendMessage("j1", assistant(`第 ${i}`));
+    const older = m.listMessagesBefore("j1", 5, 2);
+    expect(older.messages.map((r) => r.seq)).toEqual([3, 4]);
+    // 拿它当游标会把游标倒回早就看过的地方
+    expect(older.nextSeq).toBe(0);
+    // 往前翻到头的空页也照实说「库里还有更新的」
+    expect(m.listMessagesBefore("j1", 1)).toMatchObject({ messages: [], nextSeq: 0, hasNewer: true });
+  });
+
+  it("beforeSeq 到头（0 或 1）：给空页，不报错（复审 S1-L3）", async () => {
+    const m = await load();
+    m.appendMessage("j1", assistant("唯一一条"));
+    for (const before of [0, 1]) {
+      expect(m.listMessagesBefore("j1", before)).toMatchObject({ messages: [], hasOlder: false, jobLastSeq: 1 });
+    }
+  });
+
+  /**
+   * 这条测的是「字节预算真的挡住了内存」，不是「返回的条数少」——上一版用 .all() 先把
+   * 一整页连 payload 读进内存再算预算，返回值看起来一样，内存却已经吃掉了（复审 S2-M1）。
+   */
+  it("超大消息：读的过程本身也不吃内存，不是读完再截（复审 S2-M1）", async () => {
+    const m = await load();
+    const chunk = "z".repeat(3 * 1024 * 1024);
+    for (let i = 0; i < 20; i++) m.appendMessage("j1", assistant(chunk));
+
+    global.gc?.();
+    const before = process.memoryUsage().heapUsed;
+    const page = m.listMessages("j1", 0, 500);
+    const used = process.memoryUsage().heapUsed - before;
+
+    expect(page.messages.length).toBeLessThanOrEqual(2);
+    expect(page.hasNewer).toBe(true);
+    // 库里放了 60MB：流式读只该吃到预算那个量级，读完再截会是几十 MB
+    expect(used).toBeLessThan(40 * 1024 * 1024);
+  }, 30_000);
+
+  it("字节预算按 UTF-8 算，不是按 UTF-16 单元（中文差三倍，复审 S2-L1）", async () => {
+    const m = await load();
+    // 每条中文 payload 的 UTF-8 字节约是 .length 的 3 倍
+    const chinese = "复".repeat(Math.ceil(m.PAGE_BYTE_BUDGET / 3));
+    for (let i = 0; i < 3; i++) m.appendMessage("j1", assistant(chinese));
+    const page = m.listMessages("j1", 0, 500);
+    // 按字节算一条就顶满预算；按 .length（UTF-16 单元）算的话这三条差不多刚好压线，能装两条
+    expect(page.messages.length).toBe(1);
+    expect(page.hasNewer).toBe(true);
+  }, 20_000);
 
   it("任务被删掉时消息跟着删（外键级联）", async () => {
     const m = await load();

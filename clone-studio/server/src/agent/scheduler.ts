@@ -1,20 +1,12 @@
 import { Breaker, systemClock, type Clock, type Verdict } from "./breaker.js";
-import {
-  activeJobsOf,
-  createJob,
-  requireJob,
-  updateJob,
-  type AgentJobRow,
-  type NewJob,
-  type OwnerKind,
-} from "./job-store.js";
+import { createJob, requireJob, updateJob, type AgentJobRow, type NewJob, type OwnerKind } from "./job-store.js";
 import { assertContinuable, assertLatest, assertOwnerFree, assertRerunnable } from "./job-guards.js";
 import { settle } from "./outcome.js";
 import { planQuotaResume, type Spend } from "./quota.js";
 import { continuePrompt } from "./prompts.js";
 import type { RunOutcome } from "./runner.js";
 import { SchedulerError, type Pending, type Running, type SchedulerDeps } from "./scheduler-types.js";
-import { stopJob, type StopContext } from "./stop-job.js";
+import { stopJob, stopOwnerJobs, type StopContext } from "./stop-job.js";
 
 export { SchedulerError, type SchedulerDeps } from "./scheduler-types.js";
 export { STOP_TIMEOUT_MS } from "./stop-job.js";
@@ -103,23 +95,9 @@ export class Scheduler {
     return stopJob(this.stopContext(), jobId, action);
   }
 
-  /**
-   * 删对象前调用：停掉它所有没结束的任务，等进程都退出（AC-002）。返回停了几个。
-   * 默认用「中止」：删除失败回滚时对象还在，任务标成中断，用户还能点继续接着跑；
-   * 标成已取消的话就只剩重跑，白扔掉已经花钱跑出来的半成品。
-   */
-  async stopOwner(ownerKind: OwnerKind, ownerId: string, action: "cancel" | "abort" = "abort"): Promise<number> {
-    const jobs = activeJobsOf(ownerKind, ownerId);
-    // 列出来之后、取消之前自己结束了的不算错；真停不下来必须往上报，
-    // 否则调用方以为进程停了就去删目录（AC-002）
-    await Promise.all(
-      jobs.map((job) =>
-        (action === "abort" ? this.abort(job.id) : this.cancel(job.id)).catch((error: unknown) => {
-          if (!(error instanceof SchedulerError && error.code === "NOT_ACTIVE")) throw error;
-        }),
-      ),
-    );
-    return jobs.length;
+  /** 删对象前调用：停掉它所有没结束的任务，等进程都退出（AC-002）。返回停了几个 */
+  stopOwner(ownerKind: OwnerKind, ownerId: string, action: "cancel" | "abort" = "abort"): Promise<number> {
+    return stopOwnerJobs(ownerKind, ownerId, (jobId) => (action === "abort" ? this.abort(jobId) : this.cancel(jobId)));
   }
 
   private stopContext(): StopContext {
@@ -181,13 +159,16 @@ export class Scheduler {
   private async execute(pending: Pending, entry: Running): Promise<void> {
     const before = requireJob(pending.jobId);
     const now = new Date().toISOString();
-    // started_at 记任务第一次开始；run_started_at 记这一次运行——等额度续跑是同一次运行，
-    // 带着原来的起点，抽屉的「用时」不归零（复审 S1-M3）
-    const runStartedAt = pending.runStartedAt ?? now;
+    // started_at 记任务第一次开始；run_started_at 记**这一段**的起点，run_elapsed_ms 记这次运行
+    // 在此之前已经跑掉的时间。由人发起的运行（开始 / 继续 / 重跑）从 0 起算，等额度续跑接着算——
+    // 这样「用时」在等额度、排队时自然冻住，也永远不会出现未来时间或负数（复审 S1-M1(r6)）
     const job = this.patch(pending.jobId, {
       status: "running",
       started_at: before.started_at ?? now,
-      run_started_at: runStartedAt,
+      // 这一段的起点走注入的时钟：用时的另一半（run_elapsed_ms）也是它算出来的，
+      // 两半必须同一个时间源，否则加起来就是两把尺子量出的数
+      run_started_at: new Date(this.clock.now()).toISOString(),
+      run_elapsed_ms: pending.elapsedMs ?? 0,
       ended_at: null,
       resume_at: null,
     });
@@ -254,14 +235,17 @@ export class Scheduler {
     // 已经被丢弃（stop 超时）：任务早标了失败，可能已经又跑起了新一轮，这里不能再写库
     if (!this.isCurrent(pending.jobId, entry)) return;
     const settlement = settle(outcome, verdict, entry.action);
+    // 这一段跑完了：把它的时长并进累计值。之后不管是停下还是等额度，用时都不再往前走
+    const ranMs = job.run_elapsed_ms + spend.elapsedMs;
     if (settlement.kind === "quota") {
-      this.awaitQuota(pending, settlement.resumeAt, spend);
+      this.awaitQuota({ ...pending, elapsedMs: ranMs }, settlement.resumeAt, spend);
       return;
     }
     this.patch(pending.jobId, {
       status: settlement.status,
       stop_reason: settlement.stopReason,
       cost_usd: spend.cost,
+      run_elapsed_ms: ranMs,
       ended_at: new Date().toISOString(),
       resume_at: null,
     });
@@ -270,14 +254,24 @@ export class Scheduler {
   /** 订阅限流：进「等待额度」，到点用剩下的墙钟与花费自动续跑（算法在 quota.ts） */
   private awaitQuota(pending: Pending, resumeAt: Date, spend: Spend): void {
     const job = requireJob(pending.jobId);
-    const plan = planQuotaResume(job, pending, spend, job.run_started_at ?? undefined);
+    const plan = planQuotaResume(job, pending, spend);
     if (plan.kind === "trip") {
+      // 这里也是终态：额度用光不再续跑，这一段跑掉的时间同样要落库。少写这一笔，
+      // 界面就会出现「原因：运行时间用完 / 用时 0 秒」这种自相矛盾的行（复审 S1-M1(r7)）
       const ended = { cost_usd: spend.cost, ended_at: new Date().toISOString() };
-      this.patch(job.id, { status: "tripped", stop_reason: plan.reason, ...ended });
+      const elapsed = pending.elapsedMs ?? job.run_elapsed_ms;
+      this.patch(job.id, { status: "tripped", stop_reason: plan.reason, run_elapsed_ms: elapsed, ...ended });
       return;
     }
     const next = plan.next;
-    this.patch(job.id, { status: "awaiting_quota", cost_usd: spend.cost, resume_at: resumeAt.toISOString() });
+    // 等额度期间「用时」冻在已经跑掉的那些：累计值上一步已经并好，这里落库即可。
+    // 不动 run_started_at——它只在运行中有意义，往前挪会虚高、往后挪会变成未来时间（复审 S1-M1(r6)）
+    this.patch(job.id, {
+      status: "awaiting_quota",
+      cost_usd: spend.cost,
+      run_elapsed_ms: next.elapsedMs ?? 0,
+      resume_at: resumeAt.toISOString(),
+    });
     const timer = this.clock.setTimeout(
       () => {
         this.waiting.delete(job.id);

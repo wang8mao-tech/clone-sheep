@@ -48,6 +48,18 @@ const STEPS: ReadonlyArray<{ version: number; run: (d: ReturnType<typeof db>) =>
     version: 4,
     run: (d) => addAgentJobColumns(d, ["run_started_at"]),
   },
+  {
+    // Task 5.3 复审：单个时间戳表达不了「等额度期间用时冻住」，改成累计毫秒数
+    version: 5,
+    run: (d) => {
+      const have = new Set(
+        (d.prepare("PRAGMA table_info(agent_jobs)").all() as Array<{ name: string }>).map((c) => c.name),
+      );
+      if (!have.has("run_elapsed_ms")) {
+        d.exec("ALTER TABLE agent_jobs ADD COLUMN run_elapsed_ms INTEGER NOT NULL DEFAULT 0");
+      }
+    },
+  },
 ];
 
 /** agent_jobs 补列：老库里那张表已经存在，schema.sql 的 CREATE TABLE IF NOT EXISTS 不会给它加列 */

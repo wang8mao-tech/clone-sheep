@@ -146,14 +146,13 @@ describe("SSE 推送", () => {
   });
 
   it("Agent 消息不进 SSE 重放缓冲：它能按 seq 补，不该把别的主题挤掉（复审 M-6）", async () => {
-    const { service } = await load();
+    await load();
     const { SseHub } = await import("../lib/sse.js");
     const hub = new SseHub(3);
     hub.publish("global", "archive", { a: 1 });
     for (let i = 0; i < 5; i++) hub.publish("job:j1", "agent-message", { seq: i }, { buffer: false });
     // 缓冲里还留着那条 archive：没被 Agent 消息挤掉
     expect(replayed(hub, ["global"], 0)).toEqual([{ event: "archive", data: { a: 1 } }]);
-    void service;
   });
 });
 
@@ -198,6 +197,7 @@ describe("present", () => {
       status: "running" as const,
       started_at: "2026-09-23T10:00:00.000Z",
       run_started_at: "2026-09-23T10:30:00.000Z",
+      run_elapsed_ms: 90_000,
       ended_at: null,
       cost_usd: 0.42,
       cost_is_estimate: 1,
@@ -216,9 +216,11 @@ describe("present", () => {
       costUsd: 0.42,
       costIsEstimate: true,
       modelId: "claude-opus-5",
-      // 抽屉的「用时」按本次运行算，不是从任务第一次开始算（复审 M-10）
+      // 抽屉的「用时」按本次运行算，不是从任务第一次开始算（复审 M-10）：
+      // runElapsedMs 是之前几段跑掉的，runStartedAt 是当前这段的起点，两个都得给（复审 S1-M1(r6)）
       startedAt: "2026-09-23T10:00:00.000Z",
       runStartedAt: "2026-09-23T10:30:00.000Z",
+      runElapsedMs: 90_000,
     });
     // 任务提示不进界面：它可能很长，而且抽屉里已经有消息流了
     expect(service.present(row)).not.toHaveProperty("prompt");

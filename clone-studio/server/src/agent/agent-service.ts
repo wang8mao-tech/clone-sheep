@@ -111,8 +111,15 @@ export interface AgentJobView {
   sessionId: string | null;
   /** 任务第一次开始的时间 */
   startedAt: string | null;
-  /** 本次运行的起点：抽屉的「用时」按它算，继续 / 重跑都重新计时 */
+  /**
+   * 本次运行**当前这一段**的起点，只在 status 为 running 时有意义。
+   * 「用时」用一条公式算，所有状态都成立：
+   * `runElapsedMs + (status === "running" ? now - runStartedAt : 0)`。
+   * 等额度、排队时它自然冻住，既不会虚高，也不会出现负数。
+   */
   runStartedAt: string | null;
+  /** 本次运行在此之前已经跑掉的毫秒数；继续 / 重跑是新的一次运行，从 0 起算 */
+  runElapsedMs: number;
   endedAt: string | null;
   costUsd: number;
   costIsEstimate: boolean;
@@ -133,6 +140,7 @@ export function present(job: AgentJobRow): AgentJobView {
     sessionId: job.session_id,
     startedAt: job.started_at,
     runStartedAt: job.run_started_at,
+    runElapsedMs: job.run_elapsed_ms,
     endedAt: job.ended_at,
     costUsd: job.cost_usd,
     costIsEstimate: job.cost_is_estimate === 1,

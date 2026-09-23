@@ -26,8 +26,10 @@ export interface AgentJobRow {
   model_id: string | null;
   prompt: string | null;
   resume_at: string | null;
-  /** 本次运行的起点（继续 / 重跑各自重新计时）；started_at 是任务第一次开始的时间 */
+  /** 本次运行**这一段**的起点（只在运行中有意义）；started_at 是任务第一次开始的时间 */
   run_started_at: string | null;
+  /** 本次运行在此之前已经跑掉的毫秒数（等额度、排队都不算），见 AgentJobView.runElapsedMs */
+  run_elapsed_ms: number;
   created_at: string;
   updated_at: string | null;
 }
@@ -103,7 +105,15 @@ export function latestJobOf(ownerKind: OwnerKind, ownerId: string): AgentJobRow 
 type Patch = Partial<
   Pick<
     AgentJobRow,
-    "status" | "session_id" | "started_at" | "run_started_at" | "ended_at" | "cost_usd" | "stop_reason" | "resume_at"
+    | "status"
+    | "session_id"
+    | "started_at"
+    | "run_started_at"
+    | "run_elapsed_ms"
+    | "ended_at"
+    | "cost_usd"
+    | "stop_reason"
+    | "resume_at"
   >
 >;
 
@@ -112,6 +122,7 @@ const PATCHABLE = new Set<keyof Patch>([
   "session_id",
   "started_at",
   "run_started_at",
+  "run_elapsed_ms",
   "ended_at",
   "cost_usd",
   "stop_reason",

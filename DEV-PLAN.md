@@ -297,10 +297,25 @@ ltk_data	okenizers\`（路径来自 `provider-whisperx-local/src/program.ts` 的
 - 消息全量落 `agent_messages`，SSE 推送，刷新后补发历史
 - 抽屉取数按 `routes/agent-jobs.ts` 文件头写的顺序：**先订阅 SSE 再拉快照**，且**每次连上**（含自动重连）都重拉一次
   `GET /api/agent-jobs/:jobId` 对 seq、再按 `afterSeq` 补齐——`agent-message` 事件不进重放缓冲，断线期间的消息没人会再通知
-- 分页两个方向分开看：`hasNewer` 用 `afterSeq` 往后拉，`hasOlder` 用 `beforeSeq` 往前翻（Task 5.3 复审 S1-M1）
+- 分页两个方向分开看：`hasNewer` 用 `afterSeq = nextSeq` 往后拉，`hasOlder` 用 `beforeSeq = firstSeq` 往前翻；
+  游标只认 `nextSeq`（空页时它原样还回你传的值；往前翻的页恒为 0，那种页不能推游标），`jobLastSeq` 只用来判断追平没有——拿它当游标会跳过被截短的那段
+  （Task 5.3 复审 S1-M1 / S1-M7，`routes/agent-jobs.ts` 文件头有可照抄的循环）
+- 「用时」只认一条公式，所有状态都成立：`runElapsedMs + (status === "running" ? now - runStartedAt : 0)`。
+  `runElapsedMs` 是这次运行之前几段已经跑掉的毫秒数，`runStartedAt` 只表示**当前这一段**的起点、永不挪动；
+  等额度和排队都不在 running 状态，用时自然冻住，既不虚高也不会出现负数（Task 5.3 复审 S1-M3 / S1-M8 / S1-M1(r6)）。
+  一个时间戳表达不了「冻住」——不挪一路虚高，按计划预先挪就变成未来时间、用时显示负数，所以落成了累计列
+  `agent_jobs.run_elapsed_ms`（迁移 version 5）。5.4 照抄这条公式即可，别自己用 `now - runStartedAt`。
+  两个注意：服务端时间戳配浏览器 `now`，客户端时钟慢的话 running 那段会算出负数，外面套一层 `Math.max(0, …)`；
+  后端崩溃留下的「运行中」被重启标成中断时，那一段的时长无从得知、只会记成 0，终态行上 `runElapsedMs === 0`
+  但 `runStartedAt` 非空时显示「—」比「0 秒」诚实（Task 5.3 复审 S1-L1(r7)）
+- 一次拉一页的内存上限是「4MB 预算 + 最后那一条」：单条消息本身不截断（Spec 要求全量存），
+  所以一条几百 MB 的工具输出仍会整条进内存，真遇到要在写入侧限（Task 5.3 复审 S2-L10）
+- 没有「取消任务」的 HTTP 接口：抽屉只给「中止」，删对象走删除流程；Phase 8 的变体队列要「取消排队中的变体」
+  （Spec 第 167 行）时再加回来（Task 5.3 复审 S2-L3）
 - 删除失败回滚后，还没起会话就被停掉的任务是「已取消」而不是「中断」（没有会话可 resume），界面上只给「重跑」（Task 5.3 复审 S1-L1）
 - 实现右侧抽屉：顶栏（状态、模型、用时、花费 / 上限、中止）。「用时」按本次运行算（继续 / 重跑各自重新计时，等额度续跑算同一次），
-  不是从任务第一次开始算：库里的 `started_at` 保留的是第一次开始的时间，显示时以当前这段为准（Task 5.2 第四轮复审 S2-L12）、待办清单、markdown 逐字流式、工具调用折叠行、长输出折叠、错误红竖线、拦截琥珀竖线、结束卡
+  不是从任务第一次开始算：库里的 `started_at` 保留的是第一次开始的时间，显示时以当前这次运行为准
+  （Task 5.2 第四轮复审 S2-L12），算法照上面那条公式，别自己拿 `runStartedAt` 减、待办清单、markdown 逐字流式、工具调用折叠行、长输出折叠、错误红竖线、拦截琥珀竖线、结束卡
 - 实现熔断 / 中断横条 CMP-009
 
 **Task 拆分（2026-09-22）**，按序做，每个走 review→fix 循环：
@@ -309,7 +324,7 @@ ltk_data	okenizers\`（路径来自 `provider-whisperx-local/src/program.ts` 的
 |---|---|---|---|
 | 5.1 | 运行器核心：server 接入 SDK、会话配置（`settingSources: []`、cwd、预置 hypit skill、`bypassPermissions` + guard hook + 禁 `Agent`/`Task`）、`guard.ts` 拦截规则与宿主拦截日志、`prompts.ts` 复刻 / 变体 / 打回提示 | AC-007、guard 单测 | ✅ 五轮 review→fix；AC-007 真机通过 |
 | 5.2 | 熔断与调度：墙钟、`maxBudgetUsd`、同命令连续失败、无消息卡死；订阅限流进等待额度并到点 resume；并发上限、排队、取消、中止、继续、重跑 | AC-008、AC-010 | ✅ 七轮 review→fix；限流 / 停止 / 收尸三处真机实测 |
-| 5.3 | 消息全量落 `agent_messages` + SSE + 刷新补发；`routes/agent-jobs.ts`；删模板先停 Agent 进程 | AC-009、AC-002 | 进行中 |
+| 5.3 | 消息全量落 `agent_messages` + SSE + 刷新补发；`routes/agent-jobs.ts`；删模板先停 Agent 进程 | AC-009、AC-002 | ✅ 七轮 review→fix 两阶段 PASS；第七轮的修复只经全量矩阵 + 变异测试自验，第八轮复审被中止未出结果 |
 | 5.4 | 右侧抽屉：顶栏、待办、markdown 逐字流式、工具折叠行、长输出折叠、红 / 琥珀竖线、结束卡 | 设计稿 §A | |
 | 5.5 | 熔断 / 中断横条 CMP-009（继续 / 重跑） | CMP-009 | |
 

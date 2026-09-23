@@ -1,82 +1,25 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import type { FastifyInstance } from "fastify";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { RunInput, RunOutcome } from "../agent/runner.js";
+import { describe, expect, it, vi } from "vitest";
+import { assistant, boot } from "./agent-jobs-test-kit.js";
 
-/**
- * Agent 任务接口（Spec REQ-003，AC-009）。会话换成手动控制的假 run：验的是
- * 「消息落库 → SSE 通知 → 按 seq 拉增量」这条路，不开真会话。
- */
-let dataRoot: string;
-let app: FastifyInstance | undefined;
-let closeDb: (() => void) | undefined;
-
-interface Call {
-  input: RunInput;
-  emit(message: Record<string, unknown>): void;
-  finish(outcome: RunOutcome): void;
-}
-
-async function boot() {
-  process.env.CLONE_STUDIO_DATA_ROOT = dataRoot;
-  vi.resetModules();
-  const dbMod = await import("../db/index.js");
-  (await import("../db/migrate.js")).migrate();
-  closeDb = dbMod.closeDb;
-
-  const archive = await import("../services/archive.js");
-  const client = archive.createClient("客户");
-  const template = archive.createTemplate(client.id, "模板");
-  // 工作目录要真存在：重跑会往里面写
-  mkdirSync(template.workspace_path ?? "", { recursive: true });
-  writeFileSync(path.join(template.workspace_path ?? "", "hypit.runtime.json"), "{}");
-
-  const calls: Call[] = [];
-  const run = (input: RunInput) =>
-    new Promise<RunOutcome>((resolve) => {
-      input.stopSignal?.addEventListener("abort", () => {
-        const result = { type: "result", subtype: "error_during_execution", total_cost_usd: 0.1, errors: [] };
-        input.onMessage(result as never);
-        resolve({ aborted: true, result: result as never });
-      });
-      calls.push({ input, emit: (m) => input.onMessage(m as never), finish: resolve });
-    });
-
-  const service = await import("../agent/agent-service.js");
-  service.resetAgentScheduler();
-  const scheduler = service.agentScheduler({ overrides: { run } });
-  const { agentJobRoutes } = await import("./agent-jobs.js");
-  const Fastify = (await import("fastify")).default;
-  app = Fastify({ logger: false });
-  await app.register(agentJobRoutes);
-  await app.ready();
-  return { app, scheduler, calls, template, service, sse: (await import("../lib/sse.js")).sseHub };
-}
-
-beforeEach(() => {
-  dataRoot = mkdtempSync(path.join(tmpdir(), "cs-agent-api-"));
-});
-
-afterEach(async () => {
-  await app?.close();
-  app = undefined;
-  closeDb?.();
-  closeDb = undefined;
-  rmSync(dataRoot, { recursive: true, force: true });
-  delete process.env.CLONE_STUDIO_DATA_ROOT;
-});
-
-const assistant = (text: string) =>
-  ({ type: "assistant", message: { content: [{ type: "text", text }] } }) as Record<string, unknown>;
+/** Agent 任务接口（Spec REQ-003，AC-009）：快照、增量、SSE、中止 / 继续 / 重跑 */
 
 describe("GET /api/templates/:id/agent-job", () => {
   it("没有任务时给 null，不是 404", async () => {
     const { app: a, template } = await boot();
     const res = await a.inject({ url: `/api/templates/${template.id}/agent-job` });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ job: null, messages: [], hasOlder: false, hasNewer: false, firstSeq: 0, lastSeq: 0 });
+    expect(res.json()).toEqual({
+      job: null,
+      messages: [],
+      hasOlder: false,
+      hasNewer: false,
+      firstSeq: 0,
+      lastSeq: 0,
+      nextSeq: 0,
+      jobLastSeq: 0,
+    });
   });
 
   it("模板不存在：404 TEMPLATE_NOT_FOUND", async () => {

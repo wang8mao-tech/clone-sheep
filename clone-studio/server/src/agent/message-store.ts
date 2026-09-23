@@ -26,7 +26,8 @@ export interface AgentMessageView {
 /**
  * 一页消息。两个方向分开说，别用一个 hasMore 混着讲（复审 S1-M1）：
  * - `hasOlder`：这一页之前还有，用 `beforeSeq = firstSeq` 往前翻
- * - `hasNewer`：这一页之后还有，用 `afterSeq = lastSeq` 往后拉
+ * - `hasNewer`：这一页之后还有，用 `afterSeq = nextSeq` 再拉一次
+ *
  * 合成一个布尔值的话，「尾页被字节预算截短了、后面还有没拿到的」会被前端当成「前面还有」，
  * 于是它一直往前翻，而缺的恰恰是最后一条 result。
  */
@@ -34,14 +35,33 @@ export interface MessagePage {
   messages: AgentMessageView[];
   hasOlder: boolean;
   hasNewer: boolean;
+  /** 本页第一条 / 最后一条的 seq；空页是 0 */
   firstSeq: number;
   lastSeq: number;
+  /**
+   * **往后拉的游标就用它**：下次带 `afterSeq = nextSeq`。
+   *
+   * 它等于本页最后一条的 seq；本页是空的（已经追平）时等于你这次传进来的 `afterSeq`，
+   * 所以照抄它永远不会让游标倒退、也永远不会跳过中间没拿到的消息。
+   * 别拿 `lastSeq` 当游标（空页是 0，游标会倒回开头），也别拿 `jobLastSeq`
+   * （那是库里最后一条，页被截短时中间那些就永远拉不到了，复审 S1-M4 / S1-M7）。
+   *
+   * 往前翻（`beforeSeq`）拿到的页恒为 0：那种页只用来显示历史，拿它当游标会把游标
+   * 倒回你早就看过的地方（复审 S1-L1）。
+   */
+  nextSeq: number;
+  /** 这个任务当前最后一条的 seq。只用来判断「追平了没有」，不是游标 */
+  jobLastSeq: number;
 }
 
 /** 一页最多几条 */
 export const PAGE_LIMIT = 500;
 
-/** 一条消息最大多少字节还算「能一次拉走」：抽屉一屏放不下几百 KB 的工具输出 */
+/**
+ * 一页最多多少字节（不是一条）。单条消息按 Spec 全量存、不截断，所以读一页的内存峰值是
+ * 「这个预算 + 正在看的那一条」——真要防住几百 MB 的单条工具输出，只能在写入侧限
+ * （复审 S2-L4 / S2-L10）。
+ */
 export const PAGE_BYTE_BUDGET = 4 * 1024 * 1024;
 
 export interface InterceptRecord extends Denial {
@@ -62,53 +82,87 @@ export function appendIntercept(jobId: string, denial: InterceptRecord): { seq: 
 
 /**
  * 增量：`afterSeq` 之后的消息，按 seq 升序。SSE 只带 seq，前端收到就拿它来补（AC-009）。
- *
- * 两道上限，缺一不可：条数挡住「一次拉一万条」，字节数挡住「两千条里每条都是几百 KB 的
- * 工具输出」——后者不挡的话，刷新一次抽屉就能让后端申请几百 MB 内存。截断了就把 `hasMore`
- * 置真，前端按 `lastSeq` 接着拉，不会悄悄少一段。
+ * 截断时 `hasNewer` 为真，按 `nextSeq` 接着拉，不会悄悄少一段（复审 S1-L2）。
  */
 export function listMessages(jobId: string, afterSeq = 0, limit = PAGE_LIMIT): MessagePage {
-  const rows = db()
-    .prepare(
-      `SELECT seq, role, type, payload, created_at FROM agent_messages
-       WHERE job_id = ? AND seq > ? ORDER BY seq LIMIT ?`,
-    )
-    .all(jobId, afterSeq, limit + 1) as RawRow[];
-  // 从旧往新收：截断的是「更新的那些」，所以 hasNewer
-  const kept = take(rows.slice(0, limit), "forward");
-  return finish(jobId, kept, afterSeq, rows.length > limit || kept.length < Math.min(rows.length, limit));
+  const rows = stream(
+    `SELECT seq, role, type, payload, created_at FROM agent_messages
+     WHERE job_id = ? AND seq > ? ORDER BY seq`,
+    [jobId, afterSeq],
+    limit,
+  );
+  // 从旧往新收：预算不够时没拿到的是「更新的那些」
+  return finish(jobId, rows.messages, afterSeq, rows.truncated);
 }
 
-/** 往前翻：`beforeSeq` 之前的一页（抽屉往上滚时用） */
+/** 往前翻：`beforeSeq` 之前的一页（抽屉往上滚）。`beforeSeq <= 1` 时前面没有了，给空页 */
 export function listMessagesBefore(jobId: string, beforeSeq: number, limit = PAGE_LIMIT): MessagePage {
-  const rows = db()
-    .prepare(
-      `SELECT seq, role, type, payload, created_at FROM agent_messages
-       WHERE job_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?`,
-    )
-    .all(jobId, beforeSeq, limit + 1) as RawRow[];
-  rows.reverse();
-  const window = rows.length > limit ? rows.slice(1) : rows;
-  // 从新往旧收：截断的是「更旧的那些」
-  return finish(jobId, take(window, "backward"), 0, false);
+  return tail(jobId, limit, beforeSeq);
 }
 
 /**
- * 最近的一页：抽屉一打开看的是对话的末尾，不是三小时前的开头。刷新恢复走这条
- * （AC-009），再往前翻用 listMessages 的 afterSeq。
+ * 最近的一页：抽屉一打开看的是对话的末尾，不是三小时前的开头（AC-009 的刷新恢复走这条）。
+ * 再往前翻用 `listMessagesBefore(jobId, page.firstSeq)`。
  */
 export function listRecentMessages(jobId: string, limit = PAGE_LIMIT): MessagePage {
-  const rows = db()
-    .prepare(
-      `SELECT seq, role, type, payload, created_at FROM agent_messages
-       WHERE job_id = ? ORDER BY seq DESC LIMIT ?`,
-    )
-    .all(jobId, limit + 1) as RawRow[];
-  rows.reverse();
-  // 多拿的那一条在最前面：去掉它，它只是用来说明「前面还有」
-  const window = rows.length > limit ? rows.slice(1) : rows;
-  // 尾页从**新**往旧收：预算不够时丢掉的必须是更旧的那些，最后一条 result 一定在页里（复审 S1-M1）
-  return finish(jobId, take(window, "backward"), 0, false);
+  return tail(jobId, limit);
+}
+
+/**
+ * 从末尾（或 `beforeSeq` 之前）往回取一页。倒着查、倒着收：预算不够时丢掉的必须是更旧的
+ * 那些，最后一条（通常是 result）一定在页里（复审 S1-M1）。
+ */
+function tail(jobId: string, limit: number, beforeSeq?: number): MessagePage {
+  const history = beforeSeq !== undefined;
+  if (history && beforeSeq <= 1) return finish(jobId, [], 0, false, { history });
+  const where = beforeSeq === undefined ? "" : " AND seq < ?";
+  const params = beforeSeq === undefined ? [jobId] : [jobId, beforeSeq];
+  const rows = stream(
+    `SELECT seq, role, type, payload, created_at FROM agent_messages
+     WHERE job_id = ?${where} ORDER BY seq DESC`,
+    params,
+    limit,
+  );
+  rows.messages.reverse();
+  // 这里故意不用 rows.truncated：倒着取时被截掉的是更旧的那些，而「前面还不还有」由 finish
+  // 按库里的 COUNT 算，比流式截断的标记更准（复审 S2-L1：别把它接到 forcedNewer 上）
+  return finish(jobId, rows.messages, 0, false, { history });
+}
+
+/**
+ * 逐行取，取够一页（条数或字节）就停。
+ *
+ * **必须是 iterate 不能是 all**：`all` 会先把 limit+1 行连同 payload 全部读进内存，
+ * 字节预算再怎么算也是事后的——实测 500 行 × 3MB 的 all 一次就多占 60 多 MB，而这条
+ * 预算的存在理由正是不让它发生（复审 S2-M1）。
+ * 一条都放不下时至少给一条：宁可超预算，也不要给空页让前端以为到头了。
+ */
+function stream(sql: string, params: unknown[], limit: number): { messages: AgentMessageView[]; truncated: boolean } {
+  const messages: AgentMessageView[] = [];
+  let bytes = 0;
+  let truncated = false;
+  for (const raw of db()
+    .prepare(sql)
+    .iterate(...params) as Iterable<RawRow>) {
+    if (messages.length >= limit) {
+      truncated = true;
+      break;
+    }
+    // payload 存的是 UTF-8，.length 数的是 UTF-16 单元：中文会差三倍，按字节算才对得上预算名
+    bytes += Buffer.byteLength(raw.payload);
+    if (bytes > PAGE_BYTE_BUDGET && messages.length > 0) {
+      truncated = true;
+      break;
+    }
+    messages.push({
+      seq: raw.seq,
+      role: raw.role,
+      type: raw.type,
+      payload: parse(raw.payload),
+      createdAt: raw.created_at,
+    });
+  }
+  return { messages, truncated };
 }
 
 interface RawRow {
@@ -120,39 +174,29 @@ interface RawRow {
 }
 
 /**
- * 按字节预算收下一页。`forward` 从旧往新收（丢更新的），`backward` 从新往旧收（丢更旧的）。
- * 一条都放不下时至少给一条：宁可超预算，也不要返回空页让前端以为到头了。
+ * 两个方向各自判断还有没有：前面看第一条之前有没有，后面看最后一条是不是全库最后一条。
+ * `options.history` 标的是「这是往前翻拿到的页」：那种页不给往后拉的游标（`nextSeq` 恒 0），
+ * `hasNewer` 也只表示「库里还有更新的」——调用方多半已经有了（复审 S1-L1 / S1-L3 / S1-L4）。
  */
-function take(rows: RawRow[], direction: "forward" | "backward"): AgentMessageView[] {
-  const order = direction === "forward" ? rows : [...rows].reverse();
-  const kept: AgentMessageView[] = [];
-  let bytes = 0;
-  for (const row of order) {
-    bytes += row.payload.length;
-    if (bytes > PAGE_BYTE_BUDGET && kept.length > 0) break;
-    kept.push({
-      seq: row.seq,
-      role: row.role,
-      type: row.type,
-      payload: parse(row.payload),
-      createdAt: row.created_at,
-    });
-  }
-  return direction === "forward" ? kept : kept.reverse();
-}
-
-/** 两个方向各自判断还有没有：前面看第一条之前有没有，后面看最后一条是不是全库最后一条 */
-function finish(jobId: string, messages: AgentMessageView[], afterSeq: number, forcedNewer: boolean): MessagePage {
+function finish(
+  jobId: string,
+  messages: AgentMessageView[],
+  afterSeq: number,
+  forcedNewer: boolean,
+  options: { history?: boolean } = {},
+): MessagePage {
   const firstSeq = messages[0]?.seq ?? 0;
-  const lastSeq_ = messages.at(-1)?.seq ?? 0;
+  const pageLast = messages.at(-1)?.seq ?? 0;
   const before = firstSeq > 0 ? countBefore(jobId, firstSeq) : 0;
-  const total = lastSeq(jobId);
+  const jobLastSeq = lastSeq(jobId);
   return {
     messages,
     hasOlder: before > 0 && firstSeq > afterSeq + 1,
-    hasNewer: forcedNewer || (lastSeq_ > 0 && lastSeq_ < total),
+    hasNewer: options.history ? pageLast < jobLastSeq : forcedNewer || (pageLast > 0 && pageLast < jobLastSeq),
     firstSeq,
-    lastSeq: lastSeq_,
+    lastSeq: pageLast,
+    nextSeq: options.history ? 0 : pageLast > 0 ? pageLast : afterSeq,
+    jobLastSeq,
   };
 }
 

@@ -9,6 +9,12 @@ export function formatUsd(value: number): string {
   return `$${value.toFixed(2)}`;
 }
 
+/** 费率表的单价：按秒计价常常不到一分钱（$0.056/s），两位小数会把它显示成别的数；最多留 4 位，去掉末尾的 0 */
+export function formatUnitUsd(value: number): string {
+  const fixed = value.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+  return `$${fixed.includes(".") ? fixed : `${fixed}.00`}`;
+}
+
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;

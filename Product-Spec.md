@@ -1,6 +1,6 @@
 # 产品需求规范：Clone Studio（暂定名）
 
-> 版本 v1.9.2 · 2026-09-23 · 内核：Hypit 0.2.6（本地副本 `hypit-main/`）· 技术调研见 `Hypit-Research.md`
+> 版本 v1.9.3 · 2026-09-23 · 内核：Hypit 0.2.6（本地副本 `hypit-main/`）· 技术调研见 `Hypit-Research.md`
 > Phase 0 先行验证结论见 `clone-studio/docs/spike-notes.md`，本版据其回写。
 
 ## 0. AI 使用说明
@@ -349,6 +349,8 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 - MUST Clone Studio 自己维护一张"能力/模型 → 单价"费率表（随设置页可编辑），用 `plan --json` 的 `needs[].summary.fields`（宽高、`startFrame`/`endFrameExclusive`、帧率、采样率）与 `providerRequestCount` 自行计算估价。
 - MUST 闸门界面同时展示 `providers[].pricing.url` 价格页链接，供人工核对费率表是否过期。
 - MUST 费率表缺该能力的单价 → 按"估价拿不到"处理。
+- 费率表一行 = 能力（可再限定 Endpoint）+ 计价单位（每次请求 / 每秒）+ 单价 USD。按秒计价的时长取 `needs[].summary.fields` 的帧数 ÷ 帧率（或 `duration`），拿不到时长也按"估价拿不到"。`pricing.kind = local` 的能力默认 $0；费率表里写了就按写的算（把本机渲染也记成本）。
+- 估价在出片单位排上队时自动跑（plan / pricing 不花钱），结论落库并绑到出片单位；改费率表后可对未出片的重新估价。`pricing --json` 只读联网、失败不影响估价。
 
 **规则：**
 - MUST 估价 ≤ 单条限额 且 批次已花+估价 ≤ 批次限额 → 自动放行；否则停在"待确认花费"显示明细，人点确认才 build。
@@ -572,6 +574,8 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 | VideoChannel | 生视频通道配置 | id, kind(tokendance/minimax_cloud/minimax_comfyui/jimeng_cli), enabled, config(地址等，凭据存 secrets.json), verified_at, is_default |
 | Build | 一次 hypit build | id, production_id, video_channel, video_model, hypit_build_id, estimate_usd, actual_usd, status, error_code, error_message, output_path |
 | Asset | 变体条目素材 | id, production_id, file_path, source_url, replaced_by_user |
+| PricingRate | 费率表一行（REQ-006） | id, capability, endpoint(可空), unit(request/second), usd, note |
+| Estimate | 一次估价与闸门结论 | id, production_id, kind(ok/blocked), total_usd(可空=拿不到), lines, reason, decision(auto/confirm/blocked), reasons, confirmed_at |
 | Settings | 单例配置 | 见 REQ-008 |
 
 ### 6.2 实体关系

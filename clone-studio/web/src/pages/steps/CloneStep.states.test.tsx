@@ -11,7 +11,9 @@ import {
   EVIDENCE_FETCHING,
   file,
   mount,
+  pushTemplateEvent,
   source,
+  stubEstimate,
   stubSnapshotFailure,
   TPL,
   setupCloneStep,
@@ -89,6 +91,47 @@ describe("其它状态", () => {
     // tpl-2 正常打开（有它自己的「手动开始复刻」），且没有 tpl-1 的错误原文
     expect(await screen.findByRole("button", { name: "手动开始复刻" })).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
+describe("估价卡（CMP-006）", () => {
+  const REPLICA = { id: "prod-1", version: 1, status: "queued", updatedAt: "" };
+  const ESTIMATE = {
+    id: "e1",
+    productionId: "prod-1",
+    kind: "ok",
+    totalUsd: 0,
+    lines: [],
+    reason: null,
+    decision: "auto",
+    reasons: [],
+    confirmedAt: null,
+    error: null,
+    pricingUrls: [],
+    createdAt: "",
+  };
+
+  it("判据通过、复刻片排上队：右栏出估价卡；没有复刻片时不出", async () => {
+    backend({ job: agentJob({ status: "done" }), clone: { ...EMPTY, analysis: file("分析") } });
+    await mount();
+    await screen.findByRole("region", { name: "分析摘要" });
+    expect(screen.queryByRole("region", { name: "出片估价" })).toBeNull();
+  });
+
+  it("有复刻片：估价卡出现，结论到了显示金额；estimate 事件让它重拉", async () => {
+    const { state } = backend({
+      job: agentJob({ status: "done" }),
+      clone: { ...EMPTY, analysis: file("分析"), replica: REPLICA },
+    });
+    await mount();
+    expect(await screen.findByRole("region", { name: "出片估价" })).toBeTruthy();
+    expect(await screen.findByText(/正在估价/)).toBeTruthy();
+    const reads = state.estimateReads;
+    // 现在改成有结论了；后端推 estimate 事件
+    stubEstimate(ESTIMATE);
+    pushTemplateEvent("estimate", { productionId: "prod-1", estimateId: "e1", decision: "auto" });
+    expect(await screen.findByText("限额内，将自动出片")).toBeTruthy();
+    expect(state.estimateReads).toBeGreaterThan(reads);
   });
 });
 

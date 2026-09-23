@@ -17,7 +17,7 @@ import { WHISPERX_ENDPOINT_ID } from "./whisperx-service.js";
  * - TokenDance 的 seedance/seedream/minimax-h3  packages/provider-tokendance/README.md
  */
 
-const PROFILE_FILENAME = "hypit.runtime.json";
+export const PROFILE_FILENAME = "hypit.runtime.json";
 
 /**
  * 工作目录里必须存在的子目录。新建与存量迁移共用这一份清单——
@@ -190,6 +190,17 @@ function writeWorkspaceFiles(dir: string, args: CreateWorkspaceArgs): CreatedWor
   ensureWorkspaceLayout(dir);
 
   return { dir, profilePath };
+}
+
+/**
+ * 出片（以及估价用的 plan）前重写 Runtime Profile（Spec REQ-003 / REQ-006）：Agent 会话之后目录里那份
+ * 可能被改过路由，宿主不信任它，按当前设置重新生成。写完保证仍被选中。
+ */
+export function refreshRuntimeProfile(dir: string, services: WorkspaceServices): string {
+  const profilePath = path.join(dir, PROFILE_FILENAME);
+  writeFileSync(profilePath, `${JSON.stringify(buildRuntimeProfile(services), null, 2)}\n`, "utf8");
+  ensureRuntimeSelected(dir);
+  return profilePath;
 }
 
 /** hypit 记录选择的地方。内容是 profile 文件名，相对该项目目录。 */

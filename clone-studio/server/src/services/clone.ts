@@ -10,6 +10,7 @@ import { findTemplate, requireTemplate } from "./archive.js";
 import { setCloneStarter } from "./clone-starter.js";
 import { saveVerdict, verdictFor, type CloneVerdict } from "./clone-verdicts.js";
 import { cancelOpenReplicas, ensureReplica } from "./replicas.js";
+import { estimateProduction, unestimatedQueued } from "./estimate-run.js";
 
 export { latestReplica, type ReplicaRow } from "./replicas.js";
 
@@ -39,6 +40,7 @@ const verified = new Set<string>();
 
 /** 启动时调用一次：接上证据流水线的自动启动，订阅任务完成去核判据，并补核重启前没核完的 */
 export function registerCloneFlow(log: Log = silent): () => void {
+  flowLog = log;
   setCloneStarter((templateId) => {
     try {
       if (!startClone(templateId)) log.info?.({ templateId }, "证据准备做完了，但模板不在复刻中或已有任务，没起新任务");
@@ -57,6 +59,8 @@ export function registerCloneFlow(log: Log = silent): () => void {
   // 进程在核的那几秒里退出：任务停在「完成」却没有结论，既不能继续也不能重跑。启动时补核一次。
   // 这不是「补跑」：不起任何 Agent 任务，只核已经完成的那一次
   for (const job of unverifiedFinishedJobs()) check(job);
+  // 同理：排队中还没估过价的出片单位补估一次（plan / pricing 不花钱）
+  for (const id of unestimatedQueued()) requestEstimate(id, log);
   return () => {
     unsubscribe();
     setCloneStarter(undefined);
@@ -107,7 +111,16 @@ export async function verifyClone(job: AgentJobRow): Promise<CloneVerdict> {
   })();
   if (!verdict.ok) failFinishedJob(job.id, failureReason(verdict), job.ended_at);
   notify(`template:${job.owner_id}`, "clone", verdict);
+  // 判据过了、这个模板的复刻片排上了：接着估价（REQ-006），结论出来页面的估价卡自己更新
+  for (const id of unestimatedQueued(job.owner_id)) requestEstimate(id, flowLog);
   return verdict;
+}
+
+let flowLog: Log = silent;
+
+/** 估价在后台跑：判据核完不等它；跑不起来只记日志，出片单位留在排队里等下一次（重启补估） */
+function requestEstimate(productionId: string, log: Log): void {
+  estimateProduction(productionId).catch((error: unknown) => log.error({ productionId, error }, "估价没跑起来"));
 }
 
 async function judge(job: AgentJobRow): Promise<Judgement> {

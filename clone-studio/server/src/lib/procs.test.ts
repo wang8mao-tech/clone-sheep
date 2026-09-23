@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -18,8 +18,10 @@ const started: Array<{ dir: string; child: ChildProcess }> = [];
 /** 起一棵「父进程 + 占着临时目录的 detached 孙进程」 */
 function spawnTree(): { dir: string; child: ChildProcess } {
   const dir = mkdtempSync(path.join(tmpdir(), "cs-procs-"));
+  // 孙进程起来后先在自己的工作目录里写一个 ready 标记：用例靠它等「孙进程已经占着目录」，
+  // 不再靠固定睡眠（机器负载高时 800ms 不够，用例就在前提断言上抖）
   const grandchild =
-    `require("child_process").spawn(process.execPath, ["-e", "setTimeout(()=>{}, 60000)"], ` +
+    `require("child_process").spawn(process.execPath, ["-e", "require('fs').writeFileSync('ready','1'); setTimeout(()=>{}, 60000)"], ` +
     `{ cwd: ${JSON.stringify(dir)}, stdio: "ignore", detached: true }); setTimeout(()=>{}, 60000);`;
   const child = spawn(process.execPath, ["-e", grandchild], { stdio: "ignore", windowsHide: true });
   const tree = { dir, child };
@@ -28,6 +30,15 @@ function spawnTree(): { dir: string; child: ChildProcess } {
 }
 
 const settle = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** 等到条件成立，最多 timeoutMs；到点了就把最后一次结果交给断言去报 */
+async function waitUntil(check: () => boolean, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!check() && Date.now() < deadline) await settle(100);
+}
+
+/** 孙进程已经在目录里跑起来了（它写了 ready 标记） */
+const occupied = (dir: string) => existsSync(path.join(dir, "ready"));
 
 /** 目录删不掉就说明还有进程以它为工作目录 */
 function removable(dir: string): string {
@@ -56,12 +67,14 @@ describe.runIf(process.platform === "win32")("procs：连子孙一起收尸", ()
   it("killTree：孙进程占着的工作目录，杀完就能删", async () => {
     const { dir, child } = spawnTree();
     procs.register(child, AGENT_LABEL);
-    await settle(800);
+    await waitUntil(() => occupied(dir), 10_000);
     expect(removable(dir)).toMatch(/锁着/); // 前提：孙进程活着时目录锁着
 
     expect(await procs.killTree(child.pid as number)).toBe(true);
-    await settle(300);
-    expect(removable(dir)).toBe("可删");
+    // 强杀后句柄释放要一会儿，负载高时更久：轮询到能删为止
+    let result = "";
+    await waitUntil(() => (result = removable(dir)) === "可删", 10_000);
+    expect(result).toBe("可删");
   }, 20_000);
 
   it("删对象时按 subject 收尸：Agent 会话与 hypit 调用都连子孙一起杀（复审 S2-M2）", async () => {
@@ -69,15 +82,17 @@ describe.runIf(process.platform === "win32")("procs：连子孙一起收尸", ()
     const hypit = spawnTree();
     procs.register(agent.child, AGENT_LABEL, { kind: "template", id: "t-1" });
     procs.register(hypit.child, "hypit build", { kind: "template", id: "t-1" });
-    await settle(800);
+    await waitUntil(() => occupied(agent.dir) && occupied(hypit.dir), 10_000);
     expect(removable(agent.dir)).toMatch(/锁着/);
     expect(removable(hypit.dir)).toMatch(/锁着/);
 
     expect(await procs.killBySubject((s) => s.kind === "template" && s.id === "t-1")).toBe(2);
-    await settle(300);
-    // 只发 SIGTERM 的话孙进程还活着，这两行就会是「锁着」
-    expect(removable(agent.dir)).toBe("可删");
-    expect(removable(hypit.dir)).toBe("可删");
+    // 只发 SIGTERM 的话孙进程还活着，这两行就会一直「锁着」
+    let a = "";
+    let h = "";
+    await waitUntil(() => (a = removable(agent.dir)) === "可删" && (h = removable(hypit.dir)) === "可删", 10_000);
+    expect(a).toBe("可删");
+    expect(h).toBe("可删");
   }, 30_000);
 
   it("父进程已经退了：不报错也不乱杀（正常结束的会话由 Claude Code 自己收掉后台命令，实测）", async () => {

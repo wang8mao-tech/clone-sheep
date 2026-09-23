@@ -178,7 +178,7 @@ function assertTemplateNameFree(clientId: string, name: string): void {
 }
 
 /** 工程目录里写哪些 endpoint，取决于设置里的凭据验过没有、并发开多大。 */
-function workspaceServices(): WorkspaceServices {
+export function workspaceServices(): WorkspaceServices {
   const row = db()
     .prepare(
       `SELECT render_workers, render_concurrency, tokendance_verified_at, hypihub_verified_at

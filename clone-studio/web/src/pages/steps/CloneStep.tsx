@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router";
 import { QuotaBar } from "../../components/agent/QuotaBar.js";
 import { AnalysisSection, TimelineSection, VerdictSection } from "../../components/clone/CloneSections.js";
+import { EstimateCard } from "../../components/clone/EstimateCard.js";
 import { Button } from "../../components/ui/Button.js";
 import { QueryErrorState } from "../../components/ui/QueryErrorState.js";
 import { StatusMark } from "../../components/ui/StatusMark.js";
@@ -10,7 +11,10 @@ import { isActive, type AgentJobView } from "../../lib/agent.js";
 import { useTemplateAgent } from "../../lib/agent-feed-context.js";
 import { cloneApi, cloneKeys } from "../../lib/clone.js";
 import { evidenceApi, evidenceKeys } from "../../lib/evidence.js";
+import { estimateKeys } from "../../lib/estimate.js";
 import { formatUsd } from "../../lib/format.js";
+import { api } from "../../lib/api.js";
+import type { Settings } from "../../lib/types.js";
 import { formatRunElapsed } from "../../lib/run-elapsed.js";
 import { useNow } from "../../lib/useNow.js";
 
@@ -57,8 +61,23 @@ function CloneBody({ templateId }: { templateId: string }) {
 
   useEffect(() => {
     if (!feed) return;
-    return feed.onTemplateEvent("clone", () => void qc.invalidateQueries({ queryKey: cloneKeys.state(templateId) }));
+    const offClone = feed.onTemplateEvent(
+      "clone",
+      () => void qc.invalidateQueries({ queryKey: cloneKeys.state(templateId) }),
+    );
+    // 估价结论出来：复刻片那张卡重拉（clone 快照也带复刻片状态，一起失效）
+    const offEstimate = feed.onTemplateEvent("estimate", (data) => {
+      const id = (data as { productionId?: unknown } | null)?.productionId;
+      if (typeof id === "string") void qc.invalidateQueries({ queryKey: estimateKeys.production(id) });
+      void qc.invalidateQueries({ queryKey: cloneKeys.state(templateId) });
+    });
+    return () => {
+      offClone();
+      offEstimate();
+    };
   }, [feed, qc, templateId]);
+  // 估价卡要画单条限额的进度条
+  const settings = useQuery({ queryKey: ["settings"], queryFn: () => api.get<Settings>("/api/settings") });
 
   // 任务一结束（完成 / 熔断 / 失败）立刻补拉一次：最后写出的文件赶在轮询间隔之内也不会漏
   const jobStatus = job?.status;
@@ -167,6 +186,10 @@ function CloneBody({ templateId }: { templateId: string }) {
             </span>
           </div>
         )}
+        {/* CMP-006：判据通过、复刻片排上队之后才有估价；已出片的那张卡由 ③ 验货接手 */}
+        {data.replica && data.replica.status !== "done" && settings.data ? (
+          <EstimateCard productionId={data.replica.id} perItemLimitUsd={settings.data.perItemLimitUsd} />
+        ) : null}
       </div>
     </div>
   );

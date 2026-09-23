@@ -84,6 +84,40 @@ CREATE INDEX IF NOT EXISTS idx_productions_template ON productions (template_id)
 CREATE INDEX IF NOT EXISTS idx_productions_batch ON productions (batch_id);
 CREATE INDEX IF NOT EXISTS idx_productions_status ON productions (status);
 
+-- ── 费率表（REQ-006 估价来源）：hypit 不出数，Clone Studio 自维护「能力 → 单价」，设置页可编辑 ──
+CREATE TABLE IF NOT EXISTS pricing_rates (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  capability  TEXT NOT NULL,
+  -- 只对某个 Endpoint 生效；空表示这个能力走哪个 Endpoint 都用它
+  endpoint    TEXT,
+  unit        TEXT NOT NULL CHECK (unit IN ('request', 'second')),
+  usd         REAL NOT NULL CHECK (usd >= 0),
+  note        TEXT,
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pricing_rates_key ON pricing_rates (capability, IFNULL(endpoint, ''));
+
+-- ── 估价与闸门结论（REQ-006）：每次 plan 一条，绑到出片单位 ──────────────
+CREATE TABLE IF NOT EXISTS estimates (
+  id             TEXT PRIMARY KEY,
+  production_id  TEXT NOT NULL REFERENCES productions (id) ON DELETE CASCADE,
+  plan_json      TEXT,
+  pricing_json   TEXT,
+  -- ok：算出了明细（total 可能为空 = 拿不到）；blocked：未解析请求 / preflight 没过，不出片
+  kind           TEXT NOT NULL CHECK (kind IN ('ok', 'blocked')),
+  total_usd      REAL,
+  lines_json     TEXT NOT NULL,
+  reason         TEXT,
+  -- auto：限额内自动放行；confirm：等人确认；blocked：不出片
+  decision       TEXT NOT NULL CHECK (decision IN ('auto', 'confirm', 'blocked')),
+  reasons_json   TEXT NOT NULL,
+  confirmed_at   TEXT,
+  error_text     TEXT,
+  created_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_estimates_production ON estimates (production_id, created_at);
+
 -- ── Agent 会话。owner 是 template（复刻）或 production（变体）。 ─────────
 -- profile_name / model_id 是快照：档案删除后历史仍要看得出当时用的什么。
 CREATE TABLE IF NOT EXISTS agent_jobs (

@@ -46,6 +46,14 @@ export async function boot(options: { register?: boolean } = {}) {
   let checkBehaviour: CheckBehaviour = CHECK_OK;
   /** 证据步骤里要让哪一步失败（"media probe" / "transcribe" / "media tiles"） */
   let failAt: { step: string; error: Error } | undefined;
+  /** 估价用的 plan / pricing 假结果：给 Error 就抛；默认是「没有任何请求」的 plan */
+  let planBehaviour: Error | Record<string, unknown> | (() => Promise<Record<string, unknown>>) = {
+    format: "hypit.cli-plan@1",
+    ok: true,
+    providers: [],
+    needs: [],
+  };
+  let pricingBehaviour: Error | Record<string, unknown> = { format: "hypit.cli-pricing@1", groups: [] };
   const cli = await import("../hypit/cli.js");
   vi.spyOn(cli, "runHypit").mockImplementation(async (args: readonly string[]) => {
     hypitCalls.push([...args]);
@@ -53,6 +61,14 @@ export async function boot(options: { register?: boolean } = {}) {
     if (args[0] === "check") {
       if (checkBehaviour instanceof Error) throw checkBehaviour;
       return reply(typeof checkBehaviour === "function" ? await checkBehaviour() : checkBehaviour);
+    }
+    if (args[0] === "plan") {
+      if (planBehaviour instanceof Error) throw planBehaviour;
+      return reply(typeof planBehaviour === "function" ? await planBehaviour() : planBehaviour);
+    }
+    if (args[0] === "pricing") {
+      if (pricingBehaviour instanceof Error) throw pricingBehaviour;
+      return reply(pricingBehaviour);
     }
     const step = args[0] === "media" ? `media ${args[1]}` : args[0];
     if (failAt && step === failAt.step) throw failAt.error;
@@ -73,6 +89,8 @@ export async function boot(options: { register?: boolean } = {}) {
   const clone = await import("./clone.js");
   const verdicts = await import("./clone-verdicts.js");
   const evidence = await import("./evidence.js");
+  const estimate = await import("./estimate-run.js");
+  const rates = await import("./rates.js");
   service.resetAgentScheduler();
 
   const calls: Call[] = [];
@@ -104,6 +122,8 @@ export async function boot(options: { register?: boolean } = {}) {
     clone,
     verdicts,
     evidence,
+    estimate,
+    rates,
     calls,
     hypitCalls,
     db,
@@ -115,6 +135,12 @@ export async function boot(options: { register?: boolean } = {}) {
     },
     setFail: (step: string, error: Error) => {
       failAt = { step, error };
+    },
+    setPlan: (next: Error | Record<string, unknown> | (() => Promise<Record<string, unknown>>)) => {
+      planBehaviour = next;
+    },
+    setPricing: (next: Error | Record<string, unknown>) => {
+      pricingBehaviour = next;
     },
     setStatus: (status: string) => {
       db().prepare("UPDATE templates SET status = ?, language = 'zh' WHERE id = ?").run(status, templateId);

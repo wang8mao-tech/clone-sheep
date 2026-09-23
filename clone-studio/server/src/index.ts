@@ -9,6 +9,7 @@ import { agentScheduler, registerAgentStopper } from "./agent/agent-service.js";
 import { agentJobRoutes } from "./routes/agent-jobs.js";
 import { clientRoutes } from "./routes/clients.js";
 import { cloneRoutes } from "./routes/clone.js";
+import { estimateRoutes } from "./routes/estimate.js";
 import { registerCloneFlow } from "./services/clone.js";
 import { settingsRoutes } from "./routes/settings.js";
 import { systemRoutes } from "./routes/system.js";
@@ -58,6 +59,7 @@ async function main(): Promise<void> {
   await app.register(mediaRoutes);
   await app.register(agentJobRoutes);
   await app.register(cloneRoutes);
+  await app.register(estimateRoutes);
 
   // 调度器要用 app.log 记自己的内部错误，并接上删除流程的「先停 Agent」（AC-002）
   agentScheduler({ overrides: { log: app.log } });

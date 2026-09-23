@@ -17,10 +17,17 @@ import { CloneStep } from "../pages/steps/CloneStep.js";
 export { TPL, agentJob };
 
 let findSource: ReturnType<typeof installEventSource>;
+let estimateStub: RouteStub | undefined;
+
+/** 让估价接口从「还没估出来」变成有结论 */
+export function stubEstimate(estimate: unknown): void {
+  estimateStub = { body: { estimate } };
+}
 
 export function setupCloneStep(): void {
   beforeEach(() => {
     findSource = installEventSource();
+    estimateStub = undefined;
   });
 }
 
@@ -49,12 +56,19 @@ interface Backend {
   startCalls: number;
   /** GET /clone 被拉了几次：验轮询开没开 */
   cloneReads: number;
+  estimateReads: number;
 }
 
 export function backend(
-  init: { clone?: CloneState; job?: ReturnType<typeof agentJob> | null; start?: RouteStub; evidence?: RouteStub } = {},
+  init: {
+    clone?: CloneState;
+    job?: ReturnType<typeof agentJob> | null;
+    start?: RouteStub;
+    evidence?: RouteStub;
+    estimate?: RouteStub;
+  } = {},
 ) {
-  const state: Backend = { clone: init.clone ?? EMPTY, startCalls: 0, cloneReads: 0 };
+  const state: Backend = { clone: init.clone ?? EMPTY, startCalls: 0, cloneReads: 0, estimateReads: 0 };
   const drawer = drawerBackend(
     { job: init.job === undefined ? agentJob({ status: "running" }) : init.job },
     {
@@ -63,6 +77,15 @@ export function backend(
         return { body: state.clone };
       },
       [`/api/templates/${TPL}/evidence`]: init.evidence ?? { body: EVIDENCE_DONE },
+      // 估价卡要画单条限额；复刻片排上队后卡片会拉它的估价
+      "/api/settings": { body: { perItemLimitUsd: 1.5, batchLimitUsd: 15, agentBudgetUsd: 5 } },
+      "/api/productions/:id/estimate": () => {
+        state.estimateReads += 1;
+        return (
+          estimateStub ??
+          init.estimate ?? { status: 404, body: { error: { code: "NO_ESTIMATE", message: "这条还没有估价" } } }
+        );
+      },
       // 换模板的用例要切到 tpl-2：它也得是一个正常打开的页面，不然错误态会把上一个模板的残留一起盖掉
       "/api/templates/tpl-2/clone": { body: { ...EMPTY, templateId: "tpl-2" } },
       "/api/templates/tpl-2/evidence": { body: { ...EVIDENCE_DONE, templateId: "tpl-2" } },

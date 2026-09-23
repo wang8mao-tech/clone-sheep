@@ -3,8 +3,9 @@
 > 本文件记录项目的开发阶段划分、当前进度和剩余工作。
 > 新 session 启动时应首先阅读此文件，了解项目状态后再继续开发。
 >
-> **当前进度（2026-09-22）**：Phase 0 ✅（带一项已知阻塞）· Phase 1 ✅ · Phase 2 ✅（带两项遗留）· Phase 3 ✅ · **Phase 4 ✅**（五个 Task 交付，4.3 过六轮、4.4 / 4.5 各过四轮 review→fix；AC-004 / AC-005 / AC-006 真机浏览器实跑通过，用户实测确认）· **Phase 5 ✅**（五个 Task，review→fix 共 5.1 五轮 / 5.2 七轮 / 5.3 七轮 / 5.4 四轮 / 5.5 两轮；AC-007～010 真机通过，AC-002 自动化通过、真机转 Phase 13）· 下一步 Phase 6（开工前先解「本机渲染不通」）。
-> 分支 `feat/clone-studio`。Phase 6 开工前必须先解「本机渲染不通」，见「已知风险」。
+> **当前进度（2026-09-22）**：Phase 0 ✅· Phase 1 ✅ · Phase 2 ✅（带两项遗留）· Phase 3 ✅ · **Phase 4 ✅**（五个 Task 交付，4.3 过六轮、4.4 / 4.5 各过四轮 review→fix；AC-004 / AC-005 / AC-006 真机浏览器实跑通过，用户实测确认）· **Phase 5 ✅**（五个 Task，review→fix 共 5.1 五轮 / 5.2 七轮 / 5.3 七轮 / 5.4 四轮 / 5.5 两轮；AC-007～010 真机通过，AC-002 自动化通过、真机转 Phase 13）· 下一步 Phase 6（「本机渲染不通」09-23 复测已不复现，改为偶发风险）。
+> 分支 `feat/clone-studio`。「本机渲染不通」2026-09-23 复测两种失败都不再复现（900 帧与 4112 帧本地渲染均成功、ffprobe 核对通过），
+> 不再阻塞 Phase 6，改记为偶发风险，见「已知风险」。
 >
 > 依据：Product-Spec.md v1.5、Design-Brief.md v1.0、设计稿 https://claude.ai/artifact/7DWGBWDbka6Wm71vV6TBbH（7 屏，UI 以设计稿为准）、Hypit-Research.md、用户提供的《Codex 生图配置说明》（不随仓库分发，要点已写入 Spec REQ-011）。
 > 代码目录：`clone-studio/`（pnpm workspace：`server/`、`web/`、`providers/`）。`hypit-main/` 只读，不得修改。
@@ -37,7 +38,7 @@
 **验收标准**：
 - `node hypit-main/bin/hypit.mjs doctor --json` 有输出 ✅
 - spike-notes.md 对 Q-003、ASM-002、Codex 出图三项各有"成立 / 不成立 + 证据" ✅
-- 可播放 mp4 ⚠️ **只做到一半**：`get` 导出已有 Build Output 得到可播放 mp4（10.03s、h264 720×1280、30/1，ffprobe 通过），`check → plan → pricing → build → get` 的真实 JSON 形状全部记录在案；但**本机新渲染跑不通**，见「已知风险」。这一项的完整达成推迟到该阻塞解掉之后
+- 可播放 mp4 ✅（2026-09-23 补齐）：Phase 0 当时只做到 `get` 导出已有 Build Output（10.03s、h264 720×1280、30/1）；本机新渲染当时失败，09-23 复测 900 帧与 4112 帧本地渲染均成功，导出 mp4 经 ffprobe 核对（h264 1080×1920、30/1、帧数与文档一致），见「已知风险」与 spike-notes「2026-09-23 复测」
 
 ---
 
@@ -436,7 +437,8 @@ start / continue / auto_resume，`continueJob(jobId, note)` 区分不了打回�
 **验收标准**：
 - 一条真实参考视频走到复刻完成，三个区块与估价卡出现
 - AC-017、AC-018 的判定逻辑由 `gate.ts` 单元测试覆盖
-- AC-020（出片得到可播放 mp4）**被"本机渲染不通"阻塞**，见「已知风险」。开工前先解，否则整条出片链路无法验收
+- AC-020（出片得到可播放 mp4）：本地渲染 2026-09-23 复测可用（见「已知风险」），按正常验收；出片执行器要把失败原文完整展示、
+  支持「重试出片」，渲染并发保持 1，失败时记下当时可用内存
 
 ---
 
@@ -634,8 +636,14 @@ start / continue / auto_resume，`continueJob(jobId, note)` 区分不了打回�
 
 ## 已知风险
 
-- **本机渲染不通 → 阻塞 Phase 6，Phase 1-5 不受影响。** `hyperframes.local` 在本机两种失败形态：900 帧目标在编码后校验失败 `Rendered visual frame rate differs from its document`（同一错误逐字复现两次，确定性失败）；4112 帧目标跑到 3489 帧时 CLI 自身崩在 `Bad escaped character in JSON`。已排除 ffmpeg（原样复现编码命令三组，输出均为干净的 `30/1`）与 run 文件改动（保留的是本来就合法的 target）。下一步：抓编码产物本身 ffprobe、查子进程输出被本机 ANSI 代码页解码的问题。证据见 `clone-studio/docs/spike-notes.md`「本机渲染不通」。
-- **本机 `rmSync` 对中文名路径静默失败。** Phase 3 实测：`rmSync(dir, {recursive:true, force:true})` 删中文名目录时既不抛错也不删除，空目录和带文件的都一样，加 `maxRetries` 无效；同样的调用对 ASCII 名目录正常。与「本机渲染不通」里那条 ANSI 代码页嫌疑很可能同源。**生产路径踩不到**：工程目录与 `.trash` 条目名都取自 UUID，用户输入的名称按设计从不进路径（`workspace.ts` 的 `slug` 只进 `package.json` 的 name 字段）。影响两点：一是涉及 fs 删除的测试不要用中文名造数据，否则测的是生产走不到的路径；二是判断删除成败要看 `existsSync` 结果，不能只看有没有抛异常，`purgeTrash()` 已按此实现。
+- **本机渲染偶发失败（原「本机渲染不通」，2026-09-23 复测不再复现，不再阻塞 Phase 6）。** 2026-09-20 同一段时间里 `hyperframes.local`
+  连出四次失败：三次 `Rendered visual frame rate differs from its document`（900 帧与完整片都有）、一次 `Page.captureScreenshot timed out`，
+  另有一次 CLI 自身崩在 `Bad escaped character in JSON`。09-23 用同一份工作区、同一条命令、同样的软件（ffmpeg / 驱动 / hypit 0.2.6
+  均未变）重跑，900 帧与 4112 帧都渲染成功，导出后 ffprobe 为 h264 1080×1920、30/1、帧数与文档一致。两次运行的渲染配置逐项相同，
+  原先怀疑的 `[object Object]` 日志与 GBK 解码都已排除。更像当时机器负载（内存 / 显存）所致，但 09-20 没留下产物与读数，根因无法证实。
+  对策：出片失败原文完整展示并可「重试出片」；渲染并发保持 1、别和生视频等重负载同时跑；失败时记下可用内存，下次出现就有数据。
+  证据见 `clone-studio/docs/spike-notes.md`「本机渲染不通」及其「2026-09-23 复测」。
+- **本机 `rmSync` 对中文名路径静默失败。** Phase 3 实测：`rmSync(dir, {recursive:true, force:true})` 删中文名目录时既不抛错也不删除，空目录和带文件的都一样，加 `maxRetries` 无效；同样的调用对 ASCII 名目录正常。（原先猜它与渲染失败同源于 ANSI 代码页，09-23 复测已排除渲染那边，两者无关。）**生产路径踩不到**：工程目录与 `.trash` 条目名都取自 UUID，用户输入的名称按设计从不进路径（`workspace.ts` 的 `slug` 只进 `package.json` 的 name 字段）。影响两点：一是涉及 fs 删除的测试不要用中文名造数据，否则测的是生产走不到的路径；二是判断删除成败要看 `existsSync` 结果，不能只看有没有抛异常，`purgeTrash()` 已按此实现。
 - **本机内存/显存是共享资源。** 渲染 workers 默认 4 对这台机器偏高：Phase 0 实测 8 workers 触发 SQLite out of memory、2 workers 渲染进程 ACCESS_VIOLATION、1 worker 才稳。并发默认值要按实际余量定，不照搬默认；本机同时在跑生视频测试时不要启动渲染。
 - ~~订阅登录下 SDK 花费字段与限流行为未知~~ **Phase 0 已解**：`total_cost_usd` 五组实跑均返回真实数值，$ 熔断成立且改用 SDK 原生 `maxBudgetUsd`。同轮发现 `canUseTool` 拦不住花钱动作，拦截机制已改（见 Phase 5）。
 - ~~`hypit pricing` 对 TokenDance 的估价可用性未知~~ **Phase 0 已解且为否**：估价与实际花费都拿不到，改为自维护费率表并全部标"估"（见 Phase 6）。

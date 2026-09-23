@@ -233,6 +233,36 @@ Phase 6 开工前必须先解掉，否则出片链路整条不可用。它不阻
 下一步该查的方向：拿到编码产物本身 ffprobe（确认 `avg_frame_rate` 实际是多少）、
 以及子进程输出的编码问题是不是由本机 ANSI 代码页引起。
 
+#### 2026-09-23 复测：两种失败都不再复现
+
+同一台机器、同一份 spike 工作区（`X:\workflow\_spike-hypit\complex-explainer`）、同一条命令
+（`hypit build <run> --runtime ../../hypit.runtime.json --follow --json`，workers 1），本地渲染两次都成功：
+
+| build | 目标 | 结果 | 导出后 ffprobe |
+| ----- | ---- | ---- | -------------- |
+| `bld_20260923T090202973Z_FFE1F434A7` | `spike-one-part.svrun` → `export-part-1.video`（900 帧） | `outcome: complete`，8 分钟 | h264 1080×1920，`avg_frame_rate=30/1`，`nb_read_frames=900`，30.000s；aac 30.000s |
+| `bld_20260923T091136120Z_E2D63369F6` | `render.svrun` → `complete-film.video`（4112 帧） | `outcome: complete`，26 分钟 | h264 1080×1920，`avg_frame_rate=30/1`，`nb_read_frames=4112`，137.067s；aac 137.066s |
+
+排查过、已排除的：
+
+- **环境没变。** ffmpeg / ffprobe 仍是 `C:\ffmpeg\bin` 下 2026-01-19 的 gyan 版（PATH 上只有这一份）；NVIDIA 驱动 32.0.15.9186（2026-01-20）；
+  系统补丁最近一次 2025-11；`hypit-main` 1212 个文件全部是 2026-09-19 07:14 解压的、版本仍是 0.2.6（比 09-20 的失败还早）。
+- **两次运行的渲染配置一模一样。** 对比 `.hypit/results/<日期>/<build>/execution.jsonl`：都是
+  `Capture: opaque fast PNG; fixed workers 1`、`GPU hardware`、同一个 chrome-headless-shell、`quality standard; encoder ffmpeg`，
+  截帧耗时也相当（PNG 175s vs 164s）。区别只在编码之后那一步：09-20 报帧率不一致，09-23 `encoding and verifying video: 17871 ms` 通过。
+- **`[HyperFrames] render runtime fps [object Object]` 不是 fps 传错。** 这行是 `@hyperframes/core@0.7.101` 浏览器运行时里
+  `console.info("[hyperframes] render runtime fps", { canonicalFps, source, … })` 打的一个对象，转到 Node 日志时被字符串化成 `[object Object]`。
+- **「子进程输出被 GBK 解码」与帧率失败无关。** 原始 `execution.jsonl` 里的 `→` 完好（UTF-8）；之前看到的替换字符出在当时查看日志的那条管线上。
+
+09-20 那天其实连着出了四次失败，不止两次（`.hypit/results/2026-09-20/`）：三次 `Rendered visual frame rate differs from its document`
+（`export-part-1` 两次、`complete-film` 一次），一次 `Page.captureScreenshot timed out`；另有一次 CLI 进程自己崩在
+`Bad escaped character in JSON`（没有留下 build 结果）。同一段时间里多种不同的渲染失败、同样的软件三天后全部通过——
+更像当时机器的运行状态（Phase 0 记过可用内存只有约 4.7 GB、同时在跑生视频测试），而不是代码或编码上的确定性缺陷。
+**这是推断，不是证实**：09-20 的失败只留下了一句报错，没有产物、没有 ffprobe 实测值、也没有当时的内存 / 显存读数，根因无法再定位。
+
+**结论**：本地渲染在本机可用，「阻塞 Phase 6」解除，改记为偶发风险。Phase 6 的出片执行器要：失败原文完整展示并可「重试出片」；
+渲染并发保持 1、别和其它重负载同时跑；失败时顺手记下当时的可用内存，下次再出现就有数据可查。
+
 ### Q-003 结论：不成立
 
 **估价拿不到可用数字。** 全部联网 Provider 声明的 pricing 都只是一个价格页链接，没有任何结构化费率：

@@ -1,8 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
-import { Outlet } from "react-router";
-import { AgentDrawer } from "./AgentDrawer.js";
+import { Outlet, useMatch } from "react-router";
 import { Sidebar } from "./Sidebar.js";
 import { DesktopOnlyGate } from "./DesktopOnlyGate.js";
+import { AgentDrawer } from "../components/agent/AgentDrawer.js";
 import { HealthBanner } from "../components/HealthBanner.js";
 import { api, TIMEOUT_MS, type Health } from "../lib/api.js";
 import { archiveApi, archiveKeys } from "../lib/archive.js";
@@ -12,6 +12,8 @@ import { useSse } from "../lib/useSse.js";
 
 export function Shell() {
   const invalidateArchive = useInvalidateArchive();
+  // 抽屉挂在外壳上、在路由出口之外，拿不到子路由的 params，只好自己匹配一次
+  const templateId = useMatch("/clients/:clientId/templates/:templateId/*")?.params.templateId;
 
   const health = useQuery({
     queryKey: ["health"],
@@ -62,7 +64,7 @@ export function Shell() {
           <HealthBanner failures={checks.data?.blockingFailures ?? []} />
           <Outlet />
         </main>
-        <AgentDrawer />
+        <AgentDrawer templateId={templateId} />
       </div>
     </DesktopOnlyGate>
   );

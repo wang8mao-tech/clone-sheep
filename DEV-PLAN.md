@@ -317,6 +317,30 @@ ltk_data	okenizers\`（路径来自 `provider-whisperx-local/src/program.ts` 的
   不是从任务第一次开始算：库里的 `started_at` 保留的是第一次开始的时间，显示时以当前这次运行为准
   （Task 5.2 第四轮复审 S2-L12），算法照上面那条公式，别自己拿 `runStartedAt` 减、待办清单、markdown 逐字流式、工具调用折叠行、长输出折叠、错误红竖线、拦截琥珀竖线、结束卡
 - 实现熔断 / 中断横条 CMP-009
+- 抽屉的两处实现取舍（Task 5.4）：
+  - 「逐字流式」在前端做：会话没开 SDK 的 `includePartialMessages`，消息是整条落库、整条推的（开了会把每个
+    增量都落成一行、推一次事件）。抽屉只对打开之后才到的回复逐字显示（0.6 秒内流完：Spec 要求产生到显示 ≤1 秒，
+    落库、推送、拉取已占掉一截），快照里的历史整段显示，不重放；抽屉收起时内容照样挂着，展开不会重打一遍；
+    流到第几个字按经过的时间算、不按定时器跳了几下算（后台标签页定时器被压到一秒一跳，按跳数会拖成半分钟，真机实测）；
+    尊重 prefers-reduced-motion
+  - 顶栏要「档案名与模型 id」（REQ-010），`AgentJobView` 补了 `profileName`（`agent_jobs.profile_name` 已有，
+    档案功能落地前恒为 null，界面只显示模型 id；没指定模型写「订阅默认模型」）。「熔断上限」取设置页的
+    `agentBudgetUsd`，不另开接口
+  - 「用户消息」（任务提示 / 继续 / 打回意见）：会话走流式输入，SDK 不回显，宿主在每段运行开跑时记一条
+    `host_prompt`（kind：start / continue / auto_resume，Spec v1.9.1）。抽屉按它画「继续运行」「额度恢复，自动继续」
+    分隔，不再数 `system:init`
+  - 被宿主停下（中止、取消、熔断、限流）的那段：调度器自己记一条 `host_stop`（reason 同 stop_reason 写法，限流为
+    `awaiting_quota`）。抽屉据此把这一段收尾的 result 红块换成中性的「会话在这里被停下：原因」，每一段都认；
+    不去猜被停时 result 的字段——那是 SDK 的事，从没真机录过（复审 S1-N1）。没有这条记录的出错 result 照常红块
+  - 已知局限（Task 5.4 复审记下，暂不处理）：待办清单只从已加载的消息里找最近一次 TodoWrite，长会话的最后一次
+    TodoWrite 早于首屏那页时，要往上翻才会出现；顶栏「熔断上限」显示的是设置页当前值，运行中改了设置，
+    这次运行实际仍按开跑时的预算走；`host_stop` 是这次才加的，之前被中止过的任务没有这条记录，
+    它们收尾的 result 仍按红块显示（不回填）
+  - 宽度：默认也是最窄 420（§A.5「≤360 不允许」）；视口 ≥1600 才能拖到 640（§8.3），分隔条可键盘左右键调，
+    点击区 28px（§5.3）居中压在边框上；能拖宽时抽屉左边让出 14px 空隙，拖动区的左半落在空隙里，
+    不盖旁边页面的滚动条（复审 S1-R3-1，真机 elementFromPoint 核过）
+  - server 测试加了 `vitest.config.ts`（testTimeout 20 秒）：`pnpm run check` 两套测试并行、机器上开着 dev server 时，
+    路由测试每个文件第一个用例的冷启动（重新 import fastify 整条链）会拖过默认 5 秒，单独跑全绿
 
 **Task 拆分（2026-09-22）**，按序做，每个走 review→fix 循环：
 
@@ -325,8 +349,21 @@ ltk_data	okenizers\`（路径来自 `provider-whisperx-local/src/program.ts` 的
 | 5.1 | 运行器核心：server 接入 SDK、会话配置（`settingSources: []`、cwd、预置 hypit skill、`bypassPermissions` + guard hook + 禁 `Agent`/`Task`）、`guard.ts` 拦截规则与宿主拦截日志、`prompts.ts` 复刻 / 变体 / 打回提示 | AC-007、guard 单测 | ✅ 五轮 review→fix；AC-007 真机通过 |
 | 5.2 | 熔断与调度：墙钟、`maxBudgetUsd`、同命令连续失败、无消息卡死；订阅限流进等待额度并到点 resume；并发上限、排队、取消、中止、继续、重跑 | AC-008、AC-010 | ✅ 七轮 review→fix；限流 / 停止 / 收尸三处真机实测 |
 | 5.3 | 消息全量落 `agent_messages` + SSE + 刷新补发；`routes/agent-jobs.ts`；删模板先停 Agent 进程 | AC-009、AC-002 | ✅ 七轮 review→fix 两阶段 PASS；第七轮的修复只经全量矩阵 + 变异测试自验，第八轮复审被中止未出结果 |
-| 5.4 | 右侧抽屉：顶栏、待办、markdown 逐字流式、工具折叠行、长输出折叠、红 / 琥珀竖线、结束卡 | 设计稿 §A | |
+| 5.4 | 右侧抽屉：顶栏、待办、markdown 逐字流式、工具折叠行、长输出折叠、红 / 琥珀竖线、结束卡 | 设计稿 §A | ✅ 四轮 review→fix，第四轮两阶段 PASS（只剩 LOW，见下）；真机（隔离数据根 + 真服务端与调度器 + 脚本化假会话，零花费）验过逐字流式、折叠展开、中止、刷新补历史、540 条长历史往前翻、已取消结束卡、宿主停下的中性线、拖宽不压滚动条 |
 | 5.5 | 熔断 / 中断横条 CMP-009（继续 / 重跑） | CMP-009 | |
+
+**给 5.5 的交接（Task 5.4）**：
+- 横条上的动作照 `web/src/lib/agent-status.ts` 的 `nextActions(status)` 给：熔断 / 中断 / 失败 = 继续 + 重跑，已取消只给重跑，
+  完成的什么都不给；抽屉结束卡已按它写了说明文字，按钮只放横条（Design-Brief §A.3）。接口 `POST /api/agent-jobs/:id/continue`、`/rerun` 已有
+- 原因文字用同一个 `describeStop(job)`，用时用 `formatRunElapsed(job, now)`（含「—」规则），别另写一套
+- 点完动作拿回的任务状态交给抽屉：`AgentFeed.replaceJob(view)`；重跑出来的是新任务，模板主题的 `agent-job` 事件会让抽屉自己换过去
+- 第四轮复审留下的 LOW（不影响功能，择机处理）：≥1600 宽屏时抽屉左侧那 14px 空隙露出应用底色，横贯主区的边线在那里断开；
+  拖动区右半压在抽屉最左 14px 上，带竖线的工具行最左侧那点按下去是拖宽不是展开；收起后的窄轨约 45px 宽、显示状态点，
+  Design-Brief §2.1 写的是「32px 窄轨显示运行中任务数」；前端 JS 单包 764KB（highlight.js 常用语言全集，可改成只注册用到的语言）
+
+**给 Phase 7 的交接（Task 5.4）**：「打回并写意见」要在 `host_prompt` 里分出单独的 kind（如 `rework`，现在只有
+start / continue / auto_resume，`continueJob(jobId, note)` 区分不了打回和普通继续），抽屉按它画「打回意见 #n」
+带序号的分隔（Design-Brief §A.1），现在的分隔写的是「继续运行」。
 
 **关键文件**：
 - `clone-studio/server/src/agent/runner.ts` — SDK 会话生命周期

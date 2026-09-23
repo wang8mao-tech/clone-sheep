@@ -99,6 +99,44 @@ describe("熔断（AC-008）", () => {
     expect(store.requireJob(j.id).status).toBe("running");
   });
 
+  it("宿主停下的段记一笔（中止、熔断），会话自己结束的不记：抽屉不靠猜 result 的字段判断「被停下」", async () => {
+    const { scheduler, calls, runStops } = await setup({ budgetUsd: 0.2 });
+    const a = scheduler.enqueue(job("t1"));
+    calls[0]!.emit(init("s-1"));
+    await scheduler.abort(a.id);
+    expect(runStops).toEqual([{ jobId: a.id, reason: "user_abort" }]);
+
+    const b = scheduler.enqueue(job("t2"));
+    calls[1]!.emit(init("s-2"));
+    calls[1]!.emit(success(0.1));
+    calls[1]!.finish({ result: success(0.1) as never });
+    await flush();
+    expect(runStops.filter((r) => r.jobId === b.id)).toEqual([]);
+
+    const c = scheduler.enqueue(job("t3"));
+    calls[2]!.emit(init("s-3"));
+    const over = { type: "result", subtype: "error_max_budget_usd", total_cost_usd: 0.23, errors: [] };
+    calls[2]!.emit(over);
+    calls[2]!.finish({ result: over as never });
+    await flush();
+    expect(runStops.filter((r) => r.jobId === c.id)).toEqual([
+      { jobId: c.id, reason: expect.stringMatching(/^budget/) },
+    ]);
+  });
+
+  it("每段运行开跑都记下交给会话的那句话：第一次 start，人点继续 continue（含打回意见原文）", async () => {
+    const { scheduler, calls, runStarts } = await setup();
+    const j = scheduler.enqueue(job("t1"));
+    calls[0]!.emit(init("s-1"));
+    await scheduler.abort(j.id);
+    scheduler.continueJob(j.id, "字幕换成黄色");
+    expect(runStarts).toEqual([
+      { jobId: j.id, kind: "start", prompt: "复刻 t1" },
+      { jobId: j.id, kind: "continue", prompt: "字幕换成黄色" },
+    ]);
+    expect(calls[1]!.input.prompt).toBe("字幕换成黄色");
+  });
+
   it("10 分钟无消息：中止会话，已熔断（idle）", async () => {
     const { scheduler, store, calls, clock } = await setup();
     const j = scheduler.enqueue(job("t1"));

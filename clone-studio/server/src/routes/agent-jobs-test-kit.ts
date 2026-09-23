@@ -20,7 +20,11 @@ interface Call {
   finish(outcome: RunOutcome): void;
 }
 
-export async function boot() {
+/**
+ * `recordPrompts: false`：不记宿主的任务提示（host_prompt）。游标测试按 seq 精确断言分页语义，
+ * 开跑时多出来的那条提示会让每个 seq 平移一位、淹没要验的东西；提示本身在 agent-jobs.test.ts 里验。
+ */
+export async function boot(options: { recordPrompts?: boolean } = {}) {
   process.env.CLONE_STUDIO_DATA_ROOT = dataRoot;
   vi.resetModules();
   const dbMod = await import("../db/index.js");
@@ -47,7 +51,9 @@ export async function boot() {
 
   const service = await import("../agent/agent-service.js");
   service.resetAgentScheduler();
-  const scheduler = service.agentScheduler({ overrides: { run } });
+  const scheduler = service.agentScheduler({
+    overrides: { run, ...(options.recordPrompts === false ? { onRunStart: () => {} } : {}) },
+  });
   const { agentJobRoutes } = await import("./agent-jobs.js");
   const Fastify = (await import("fastify")).default;
   app = Fastify({ logger: false });

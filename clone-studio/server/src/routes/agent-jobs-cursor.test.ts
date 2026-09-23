@@ -10,7 +10,7 @@ describe("游标契约（Task 5.4 照这个写循环）", () => {
    * 用 jobLastSeq 当游标的话，这里会漏掉一大段（复审 S1-M7）。
    */
   it("按文件头的循环拉：每条恰好拿到一次，一条不漏一条不重", async () => {
-    const { app: a, scheduler, calls, template } = await boot();
+    const { app: a, scheduler, calls, template } = await boot({ recordPrompts: false });
     const store = await import("../agent/message-store.js");
     const job = scheduler.enqueue({ ownerKind: "template", ownerId: template.id, prompt: "复刻" });
     // 每条约 1.5MB，4MB 的预算一页装不下几条，必然触发截短
@@ -35,7 +35,7 @@ describe("游标契约（Task 5.4 照这个写循环）", () => {
   }, 30_000);
 
   it("追平之后再拉：空页，游标原地不动（不倒回开头）", async () => {
-    const { app: a, scheduler, calls, template } = await boot();
+    const { app: a, scheduler, calls, template } = await boot({ recordPrompts: false });
     const job = scheduler.enqueue({ ownerKind: "template", ownerId: template.id, prompt: "复刻" });
     for (let i = 0; i < 3; i++) calls[0]!.emit(assistant(`第 ${i}`));
 
@@ -48,7 +48,7 @@ describe("游标契约（Task 5.4 照这个写循环）", () => {
   });
 
   it("往前翻到头：beforeSeq=0 给空页，不是 400（复审 S1-L3）", async () => {
-    const { app: a, scheduler, calls, template } = await boot();
+    const { app: a, scheduler, calls, template } = await boot({ recordPrompts: false });
     const job = scheduler.enqueue({ ownerKind: "template", ownerId: template.id, prompt: "复刻" });
     calls[0]!.emit(assistant("一"));
     const res = await a.inject({ url: `/api/agent-jobs/${job.id}/messages?beforeSeq=0` });
@@ -57,7 +57,7 @@ describe("游标契约（Task 5.4 照这个写循环）", () => {
   });
 
   it("首屏可以少要几条（复审 S1-L5）", async () => {
-    const { app: a, scheduler, calls, template } = await boot();
+    const { app: a, scheduler, calls, template } = await boot({ recordPrompts: false });
     scheduler.enqueue({ ownerKind: "template", ownerId: template.id, prompt: "复刻" });
     for (let i = 1; i <= 6; i++) calls[0]!.emit(assistant(`第 ${i}`));
     const res = await a.inject({ url: `/api/templates/${template.id}/agent-job?limit=3` });
@@ -67,7 +67,7 @@ describe("游标契约（Task 5.4 照这个写循环）", () => {
   });
 
   it("单个任务查询给的是 jobLastSeq（5.4 每次重连拿它对表，复审 S2-M3）", async () => {
-    const { app: a, scheduler, calls, template } = await boot();
+    const { app: a, scheduler, calls, template } = await boot({ recordPrompts: false });
     const job = scheduler.enqueue({ ownerKind: "template", ownerId: template.id, prompt: "复刻" });
     calls[0]!.emit(assistant("一"));
     const res = await a.inject({ url: `/api/agent-jobs/${job.id}` });

@@ -62,6 +62,10 @@ export async function setup(settings: Partial<AgentSettings> = {}, options: Setu
   /** 调度器转出来的消息与拦截记录（Task 5.3 会拿它们落库、推 SSE） */
   const forwarded: Array<{ jobId: string; type: string }> = [];
   const intercepts: Array<{ jobId: string; rule: string }> = [];
+  /** 每段运行开跑时交给会话的那句话（抽屉的「用户消息」） */
+  const runStarts: Array<{ jobId: string; kind: string; prompt: string }> = [];
+  /** 宿主停下的那些段（抽屉据此把收尾的 result 当成「被停下」） */
+  const runStops: Array<{ jobId: string; reason: string }> = [];
   let ignoreStop = options.ignoreStop ?? false;
   // 和真 runner 一样：被停时 interrupt() 吐一条带累计花费的 error_during_execution result，再以 aborted 结束
   const run = (input: RunInput) =>
@@ -88,6 +92,8 @@ export async function setup(settings: Partial<AgentSettings> = {}, options: Setu
     workspaceOf: (job) => path.join(dataRoot, "ws", job.owner_id),
     onMessage: (jobId, message) => forwarded.push({ jobId, type: message.type }),
     onIntercept: (jobId, denial) => intercepts.push({ jobId, rule: denial.rule }),
+    onRunStart: (jobId, run) => runStarts.push({ jobId, ...run }),
+    onRunStop: (jobId, stop) => runStops.push({ jobId, ...stop }),
     resetWorkspace: (job) => resets.push(job.id),
     clock,
   });
@@ -100,6 +106,8 @@ export async function setup(settings: Partial<AgentSettings> = {}, options: Setu
     resets,
     forwarded,
     intercepts,
+    runStarts,
+    runStops,
     migrateMod,
     dbMod,
     /** 之后开的会话理不理会停止信号 */

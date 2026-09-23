@@ -13,6 +13,12 @@ import type { Denial } from "./guard.js";
 /** 宿主拦截记录在消息流里的类型名 */
 export const INTERCEPT_TYPE = "host_intercept";
 
+/** 宿主记下的「交给会话的那句话」（任务提示 / 继续 / 打回意见）在消息流里的类型名 */
+export const PROMPT_TYPE = "host_prompt";
+
+/** 宿主停下一段运行的记录在消息流里的类型名 */
+export const STOP_TYPE = "host_stop";
+
 /** 给界面的一条消息：payload 已经解析好，字段名与界面一致 */
 export interface AgentMessageView {
   seq: number;
@@ -78,6 +84,19 @@ export function appendMessage(jobId: string, message: SDKMessage): { seq: number
 /** 落一条宿主拦截记录（AC-007：宿主自己的日志里有一条「已拦截」） */
 export function appendIntercept(jobId: string, denial: InterceptRecord): { seq: number; type: string } {
   return insert(jobId, null, INTERCEPT_TYPE, denial);
+}
+
+/**
+ * 落一条「交给会话的那句话」：会话走流式输入，SDK 不回显，不记的话抽屉里永远看不到 Agent 在做什么任务。
+ * 全文照存，和别的消息一样不截断。
+ */
+export function appendPrompt(jobId: string, run: { kind: string; prompt: string }): { seq: number; type: string } {
+  return insert(jobId, "user", PROMPT_TYPE, { kind: run.kind, text: run.prompt });
+}
+
+/** 落一条「宿主在这里停下了这段运行」：抽屉据此把会话收尾那条 result 当成「被停下」而不是出错 */
+export function appendStop(jobId: string, stop: { reason: string }): { seq: number; type: string } {
+  return insert(jobId, null, STOP_TYPE, { reason: stop.reason });
 }
 
 /**

@@ -1,6 +1,6 @@
 # 产品需求规范：Clone Studio（暂定名）
 
-> 版本 v1.9 · 2026-09-22 · 内核：Hypit 0.2.6（本地副本 `hypit-main/`）· 技术调研见 `Hypit-Research.md`
+> 版本 v1.9.1 · 2026-09-23 · 内核：Hypit 0.2.6（本地副本 `hypit-main/`）· 技术调研见 `Hypit-Research.md`
 > Phase 0 先行验证结论见 `clone-studio/docs/spike-notes.md`，本版据其回写。
 
 ## 0. AI 使用说明
@@ -256,7 +256,7 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 
 **用途：** 复刻和写变体是同一种东西：在某个工作目录里无头跑一个带 hypit skill 的 Claude Agent 会话。
 
-**行为：** 后端用 Claude Agent SDK（TypeScript）`query()` 启动会话，cwd = 工作目录，hypit skill 以插件形式预置（宿主在数据根下维护一个插件目录，内含 `hypit-main/skills/hypit` 的副本，经 `plugins` 选项加载，skill 名 `clone-studio:hypit`；`settingSources: []` 下 SDK 不读 `.claude/skills`，实测插件照常加载）。流式消息落库并经 SSE 推到前端抽屉。保存 session id 供 resume。
+**行为：** 后端用 Claude Agent SDK（TypeScript）`query()` 启动会话，cwd = 工作目录，hypit skill 以插件形式预置（宿主在数据根下维护一个插件目录，内含 `hypit-main/skills/hypit` 的副本，经 `plugins` 选项加载，skill 名 `clone-studio:hypit`；`settingSources: []` 下 SDK 不读 `.claude/skills`，实测插件照常加载）。流式消息落库并经 SSE 推到前端抽屉；会话走流式输入、SDK 不回显交给它的那句话，所以宿主在每段运行开跑时把它（任务提示 / 继续 / 打回意见）也记进同一条消息流，抽屉的「用户消息」靠它显示；宿主停下某段运行（中止、取消、熔断、限流）时同样记一条，抽屉据此把被停下与会话出错分开。保存 session id 供 resume。
 
 **规则：**
 - MUST 传 `settingSources: []` 做会话隔离。实测不传会连用户本机 `~/.claude` 的权限规则与 hooks 一起继承（消息流里出现 `system:hook_started`），行为不可复现。

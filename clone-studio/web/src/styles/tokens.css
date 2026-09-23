@@ -10,6 +10,8 @@
   --color-surface: #16181b;
   --color-surface-raised: #1d2024;
   --color-border: #2a2e33;
+  /* Agent 抽屉底色：比 surface 再暗半级，与工作区区分（Design-Brief §A.5） */
+  --color-drawer: #121417;
 
   --color-primary: #19e3b1;
   --color-primary-soft: #7cf2d4;
@@ -129,6 +131,77 @@ body {
   /* 层级靠边框和表面亮度，不靠阴影；仅弹窗与下拉用一层柔和阴影（5.4） */
   .elevation-overlay {
     box-shadow: 0 8px 24px rgb(0 0 0 / 45%);
+  }
+}
+
+/*
+ * Agent 抽屉里的 markdown（Design-Brief §A.2 / §A.5）：Tailwind 的 preflight 把列表符号、标题字号都抹平了，
+ * 这里按抽屉的等宽排版补回来。只作用在 .agent-md 里，不影响别处。
+ */
+@layer components {
+  .agent-md > * + * {
+    margin-top: var(--spacing-sm);
+  }
+  .agent-md h1,
+  .agent-md h2,
+  .agent-md h3,
+  .agent-md h4 {
+    font-weight: 600;
+    color: var(--color-text);
+  }
+  .agent-md h1,
+  .agent-md h2 {
+    font-size: var(--text-heading-md);
+  }
+  .agent-md ul {
+    list-style: disc;
+    padding-left: 1.5em;
+  }
+  .agent-md ol {
+    list-style: decimal;
+    padding-left: 1.75em;
+  }
+  .agent-md blockquote {
+    border-left: 2px solid var(--color-border);
+    padding-left: var(--spacing-sm);
+    color: var(--color-text-secondary);
+  }
+  .agent-md :not(pre) > code {
+    border-radius: var(--radius-sm);
+    background: var(--color-surface-raised);
+    padding: 0 0.3em;
+  }
+  .agent-md table {
+    border-collapse: collapse;
+  }
+  .agent-md th,
+  .agent-md td {
+    border: 1px solid var(--color-border);
+    padding: 2px 6px;
+  }
+
+  /* 代码高亮（rehype-highlight 出的 hljs-* 类）：只用语义色，不引第三方主题 */
+  .agent-md .hljs-keyword,
+  .agent-md .hljs-built_in,
+  .agent-md .hljs-selector-tag {
+    color: var(--color-primary);
+  }
+  .agent-md .hljs-string,
+  .agent-md .hljs-attr,
+  .agent-md .hljs-template-string {
+    color: var(--color-warning);
+  }
+  .agent-md .hljs-number,
+  .agent-md .hljs-literal {
+    color: var(--color-info);
+  }
+  .agent-md .hljs-comment {
+    color: var(--color-text-tertiary);
+    font-style: italic;
+  }
+  .agent-md .hljs-title,
+  .agent-md .hljs-function {
+    color: var(--color-primary-soft);
   }
 }
 

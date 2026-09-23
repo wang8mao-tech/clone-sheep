@@ -16,7 +16,7 @@ function elapsed(row: { status: string; run_started_at: string | null; run_elaps
 
 describe("订阅限流：等待额度并到点自动续跑", () => {
   it("rejected → 等待额度（记续跑时间）→ 到点 resume 同一会话，只拿剩下的预算", async () => {
-    const { scheduler, store, calls, clock } = await setup({ budgetUsd: 5 });
+    const { scheduler, store, calls, clock, runStarts, runStops } = await setup({ budgetUsd: 5 });
     const j = scheduler.enqueue(job("t1"));
     calls[0]!.emit(init("s-1"));
     // 单次会话中途没有 result（复审 S2-M1）：花费要等被停时 interrupt 吐的 result 才知道
@@ -33,6 +33,10 @@ describe("订阅限流：等待额度并到点自动续跑", () => {
     clock.advance(60 * 60_000);
     expect(calls).toHaveLength(2);
     expect(calls[1]!.input).toMatchObject({ resume: "s-1", maxBudgetUsd: 3.5 });
+    // 等额度后的续跑是宿主自己发起的，抽屉按 auto_resume 画分隔，不当成人点的继续
+    expect(runStarts.map((r) => r.kind)).toEqual(["start", "auto_resume"]);
+    // 被限流停下的那一段也是宿主停的
+    expect(runStops).toEqual([{ jobId: j.id, reason: "awaiting_quota" }]);
     expect(store.requireJob(j.id)).toMatchObject({ status: "running", resume_at: null });
   });
 
@@ -91,7 +95,7 @@ describe("订阅限流：等待额度并到点自动续跑", () => {
 
   it("额度用光就不再续跑：熔断这条终态也要记下这一段的用时（复审 S1-M1(r7)）", async () => {
     // 预算只够这一段：限流到点后 planQuotaResume 判定没得跑了，直接熔断
-    const { scheduler, store, calls, clock } = await setup({ budgetUsd: 1 });
+    const { scheduler, store, calls, clock, runStops } = await setup({ budgetUsd: 1 });
     const j = scheduler.enqueue(job("t1"));
     calls[0]!.emit(init("s-1"));
     for (let i = 0; i < 7; i++) {
@@ -106,7 +110,8 @@ describe("订阅限流：等待额度并到点自动续跑", () => {
     expect(tripped.status).toBe("tripped");
     expect(tripped.stop_reason).toMatch(/^budget/);
     // 跑了 7 分钟就得显示 7 分钟。不记这一笔的话，界面上是「原因：花费达到上限 / 用时 0 秒」
-    expect(elapsed(tripped, clock.now())).toBe(7 * 60_000);
+    expect(elapsed(tripped, clock.now())).toBe(7 * 60_000); // 停下记录写真正的原因：不会续跑了，抽屉不能说「额度受限，等恢复后续跑」（复审 S1-R3-2）
+    expect(runStops).toEqual([{ jobId: j.id, reason: expect.stringMatching(/^budget/) }]);
   });
 
   it("等额度期间用时冻住：不虚高、不倒退、不为负（复审 S1-M3 / S1-M1(r6)）", async () => {

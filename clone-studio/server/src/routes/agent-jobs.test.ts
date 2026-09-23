@@ -38,8 +38,14 @@ describe("GET /api/templates/:id/agent-job", () => {
     const res = await a.inject({ url: `/api/templates/${template.id}/agent-job` });
     const body = res.json<{ job: { id: string; status: string }; messages: { seq: number }[]; lastSeq: number }>();
     expect(body.job).toMatchObject({ id: job.id, status: "running", ownerKind: "template" });
-    expect(body.messages.map((m) => m.seq)).toEqual([1, 2]);
-    expect(body.lastSeq).toBe(2);
+    // 第 1 条是宿主记的任务提示（抽屉的「用户消息」），之后才是会话自己的消息
+    expect(body.messages.map((m) => m.seq)).toEqual([1, 2, 3]);
+    expect(body.messages[0]).toMatchObject({
+      type: "host_prompt",
+      role: "user",
+      payload: { kind: "start", text: "复刻" },
+    });
+    expect(body.lastSeq).toBe(3);
   });
 });
 
@@ -49,7 +55,8 @@ describe("快照取的是末尾一页", () => {
     const job = scheduler.enqueue({ ownerKind: "template", ownerId: template.id, prompt: "复刻" });
     const store = await import("../agent/message-store.js");
     for (let i = 1; i <= 520; i++) calls[0]!.emit(assistant(`第 ${i}`));
-    expect(store.lastSeq(job.id)).toBe(520);
+    // 520 条会话消息 + 开跑时那条任务提示
+    expect(store.lastSeq(job.id)).toBe(521);
 
     const res = await a.inject({ url: `/api/templates/${template.id}/agent-job` });
     const body = res.json<{
@@ -59,10 +66,10 @@ describe("快照取的是末尾一页", () => {
       firstSeq: number;
       lastSeq: number;
     }>();
-    expect(body.lastSeq).toBe(520);
+    expect(body.lastSeq).toBe(521);
     expect(body.firstSeq).toBeGreaterThan(1); // 开头那些不在这一页里
     expect(body).toMatchObject({ hasOlder: true, hasNewer: false });
-    expect(body.messages.at(-1)!.seq).toBe(520);
+    expect(body.messages.at(-1)!.seq).toBe(521);
   }, 20_000);
 });
 
@@ -86,17 +93,18 @@ describe("消息增量与 SSE", () => {
 
     expect(events.filter((e) => e.topic === `job:${job.id}`).map((e) => e.data)).toEqual(
       expect.arrayContaining([
-        { jobId: job.id, seq: 1, type: "assistant" },
-        { jobId: job.id, seq: 2, type: "host_intercept" },
+        { jobId: job.id, seq: 1, type: "host_prompt" },
+        { jobId: job.id, seq: 2, type: "assistant" },
+        { jobId: job.id, seq: 3, type: "host_intercept" },
       ]),
     );
     // 模板页不知道 job id：状态变化也推到模板主题
     expect(events.some((e) => e.topic === `template:${template.id}`)).toBe(true);
 
-    const res = await a.inject({ url: `/api/agent-jobs/${job.id}/messages?afterSeq=1` });
+    const res = await a.inject({ url: `/api/agent-jobs/${job.id}/messages?afterSeq=2` });
     const body = res.json<{ messages: { seq: number; type: string }[]; lastSeq: number }>();
     expect(body.messages.map((m) => m.type)).toEqual(["host_intercept"]);
-    expect(body.lastSeq).toBe(2);
+    expect(body.lastSeq).toBe(3);
   });
 
   it("往前翻历史：beforeSeq + limit", async () => {

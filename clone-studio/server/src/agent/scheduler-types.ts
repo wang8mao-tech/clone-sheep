@@ -5,6 +5,8 @@ import type { Denial } from "./guard.js";
 import type { AgentJobRow } from "./job-store.js";
 import type { RunInput, RunOutcome } from "./runner.js";
 
+export type RunKind = "start" | "continue" | "auto_resume";
+
 /** 调度器的外部依赖：全部注入，测试换成假的，生产在 Task 5.3 接线 */
 export interface SchedulerDeps {
   run(input: RunInput): Promise<RunOutcome>;
@@ -16,6 +18,17 @@ export interface SchedulerDeps {
   onMessage?(jobId: string, message: SDKMessage): void;
   onIntercept?(jobId: string, denial: Denial & { tool: string; agentId?: string }): void;
   onChange?(job: AgentJobRow): void;
+  /**
+   * 一段运行开跑时，交给会话的那句话（Design-Brief §A.2「用户消息」）。会话走流式输入，SDK 不回显它，
+   * 抽屉只能靠宿主自己记一笔。`start` 是任务第一次跑，`continue` 是人点的继续（含打回意见），
+   * `auto_resume` 是等额度之后宿主自己续跑。
+   */
+  onRunStart?(jobId: string, run: { kind: RunKind; prompt: string }): void;
+  /**
+   * 这一段运行是宿主停下的（人点中止 / 取消、熔断、订阅限流），不是会话自己结束的。
+   * `reason` 同 stop_reason 的写法；限流是 `awaiting_quota`。
+   */
+  onRunStop?(jobId: string, stop: { reason: string }): void;
   /** 调度器自己出错时记一笔（pino 形状，生产传 app.log） */
   log?: { error(detail: unknown, message: string): void };
   clock?: Clock;

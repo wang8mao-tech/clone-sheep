@@ -60,7 +60,7 @@ export interface RouteStub {
  * 闸门根本轮不到执行，而这恰恰是最容易变成假绿的一半。
  * 要匹配动态段就在键里写 `:name` 占位，如 "/api/clients/:id/deletion-impact"。
  */
-export function stubFetch(routes: Record<string, RouteStub | ((init?: RequestInit) => RouteStub)>): void {
+export function stubFetch(routes: Record<string, RouteStub | ((init?: RequestInit, url?: string) => RouteStub)>): void {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -80,7 +80,8 @@ export function stubFetch(routes: Record<string, RouteStub | ((init?: RequestIni
 
       if (!key) throw new Error(`用例没有给 ${method} ${url} 准备桩`);
       const stub = routes[key];
-      const { status = 200, body } = typeof stub === "function" ? stub(init) : (stub as RouteStub);
+      // 函数桩第二个参数给完整地址（含查询串）：分页之类的桩要按参数回不同的页
+      const { status = 200, body } = typeof stub === "function" ? stub(init, raw) : (stub as RouteStub);
       return new Response(JSON.stringify(body), {
         status,
         headers: { "Content-Type": "application/json" },

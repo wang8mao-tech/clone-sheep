@@ -1,7 +1,7 @@
 import { Breaker, systemClock, type Clock, type Verdict } from "./breaker.js";
 import { createJob, requireJob, updateJob, type AgentJobRow, type NewJob, type OwnerKind } from "./job-store.js";
 import { assertContinuable, assertLatest, assertOwnerFree, assertRerunnable } from "./job-guards.js";
-import { settle } from "./outcome.js";
+import { runKind, settle, spendOf } from "./outcome.js";
 import { planQuotaResume, type Spend } from "./quota.js";
 import { continuePrompt } from "./prompts.js";
 import type { RunOutcome } from "./runner.js";
@@ -158,7 +158,8 @@ export class Scheduler {
 
   private async execute(pending: Pending, entry: Running): Promise<void> {
     const before = requireJob(pending.jobId);
-    const now = new Date().toISOString();
+    // 两列取同一个时刻、同一只时钟：分两次取会差出 1 毫秒，第一次开跑时 started_at 与 run_started_at 对不上
+    const now = new Date(this.clock.now()).toISOString();
     // started_at 记任务第一次开始；run_started_at 记**这一段**的起点，run_elapsed_ms 记这次运行
     // 在此之前已经跑掉的时间。由人发起的运行（开始 / 继续 / 重跑）从 0 起算，等额度续跑接着算——
     // 这样「用时」在等额度、排队时自然冻住，也永远不会出现未来时间或负数（复审 S1-M1(r6)）
@@ -167,11 +168,12 @@ export class Scheduler {
       started_at: before.started_at ?? now,
       // 这一段的起点走注入的时钟：用时的另一半（run_elapsed_ms）也是它算出来的，
       // 两半必须同一个时间源，否则加起来就是两把尺子量出的数
-      run_started_at: new Date(this.clock.now()).toISOString(),
+      run_started_at: now,
       run_elapsed_ms: pending.elapsedMs ?? 0,
       ended_at: null,
       resume_at: null,
     });
+    this.deps.onRunStart?.(job.id, { kind: runKind(pending, before.started_at), prompt: pending.prompt });
     let verdict: Verdict | undefined;
     let latestCost: number | undefined;
     // 本次运行之前已经记下的累计花费。resume 接上转录里的累计值时清零（那份累计里已经含它），
@@ -224,14 +226,7 @@ export class Scheduler {
     } finally {
       breaker.stop();
     }
-    const spend = {
-      // resume 的会话 total_cost_usd 接着转录里的累计值往上加，取大即可（崩溃时的结果可能
-      // 带着清零的花费，不能拿它把已记下的累计值冲掉）；新开的会话从 0 算起，要叠加
-      // 只增不减：崩溃时的结果可能带着清零的花费，不能拿它把已记下的累计值冲掉
-      cost: Math.max(carry + Math.max(0, latestCost ?? 0), before.cost_usd),
-      costBefore: before.cost_usd,
-      elapsedMs: breaker.elapsedMs(),
-    };
+    const spend = spendOf(carry, latestCost, before.cost_usd, breaker.elapsedMs());
     // 已经被丢弃（stop 超时）：任务早标了失败，可能已经又跑起了新一轮，这里不能再写库
     if (!this.isCurrent(pending.jobId, entry)) return;
     const settlement = settle(outcome, verdict, entry.action);
@@ -241,6 +236,8 @@ export class Scheduler {
       this.awaitQuota({ ...pending, elapsedMs: ranMs }, settlement.resumeAt, spend);
       return;
     }
+    // 宿主自己停的（中止 / 取消、熔断）记一笔，抽屉认它判断「被停下」（复审 S1-N1）；限流的在 awaitQuota 里记
+    if (entry.action || verdict) this.deps.onRunStop?.(job.id, { reason: settlement.stopReason ?? "" });
     this.patch(pending.jobId, {
       status: settlement.status,
       stop_reason: settlement.stopReason,
@@ -255,6 +252,8 @@ export class Scheduler {
   private awaitQuota(pending: Pending, resumeAt: Date, spend: Spend): void {
     const job = requireJob(pending.jobId);
     const plan = planQuotaResume(job, pending, spend);
+    // 额度用光就不会续跑了：停下记录写真正的原因，别让抽屉说「等恢复后续跑」（复审 S1-R3-2）
+    this.deps.onRunStop?.(job.id, { reason: plan.kind === "trip" ? plan.reason : "awaiting_quota" });
     if (plan.kind === "trip") {
       // 这里也是终态：额度用光不再续跑，这一段跑掉的时间同样要落库。少写这一笔，
       // 界面就会出现「原因：运行时间用完 / 用时 0 秒」这种自相矛盾的行（复审 S1-M1(r7)）

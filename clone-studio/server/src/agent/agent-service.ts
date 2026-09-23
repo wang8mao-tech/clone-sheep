@@ -4,7 +4,7 @@ import { sseHub } from "../lib/sse.js";
 import { resetAgentProducts } from "../hypit/workspace.js";
 import { settingsFromDb } from "./agent-settings.js";
 import type { AgentJobRow } from "./job-store.js";
-import { appendIntercept, appendMessage } from "./message-store.js";
+import { appendIntercept, appendMessage, appendPrompt, appendStop } from "./message-store.js";
 import { runAgent } from "./runner.js";
 import { Scheduler, type SchedulerDeps } from "./scheduler.js";
 
@@ -36,6 +36,14 @@ export function agentScheduler(options: AgentServiceOptions = {}): Scheduler {
     },
     onIntercept: (jobId, denial) => {
       const stored = appendIntercept(jobId, denial);
+      announce(jobId, stored);
+    },
+    onRunStart: (jobId, run) => {
+      const stored = appendPrompt(jobId, run);
+      announce(jobId, stored);
+    },
+    onRunStop: (jobId, stop) => {
+      const stored = appendStop(jobId, stop);
       announce(jobId, stored);
     },
     onChange: (job) => {
@@ -124,6 +132,8 @@ export interface AgentJobView {
   costUsd: number;
   costIsEstimate: boolean;
   stopReason: string | null;
+  /** 所用模型档案名（Spec REQ-010：抽屉页头要显示档案名与模型 id）；没选档案时为 null */
+  profileName: string | null;
   modelId: string | null;
   resumeAt: string | null;
   createdAt: string;
@@ -145,6 +155,7 @@ export function present(job: AgentJobRow): AgentJobView {
     costUsd: job.cost_usd,
     costIsEstimate: job.cost_is_estimate === 1,
     stopReason: job.stop_reason,
+    profileName: job.profile_name,
     modelId: job.model_id,
     resumeAt: job.resume_at,
     createdAt: job.created_at,

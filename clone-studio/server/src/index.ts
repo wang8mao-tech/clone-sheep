@@ -8,6 +8,8 @@ import { migrateWorkspaces } from "./services/workspace-migration.js";
 import { agentScheduler, registerAgentStopper } from "./agent/agent-service.js";
 import { agentJobRoutes } from "./routes/agent-jobs.js";
 import { clientRoutes } from "./routes/clients.js";
+import { cloneRoutes } from "./routes/clone.js";
+import { registerCloneFlow } from "./services/clone.js";
 import { settingsRoutes } from "./routes/settings.js";
 import { systemRoutes } from "./routes/system.js";
 import { mediaRoutes } from "./routes/media.js";
@@ -55,10 +57,13 @@ async function main(): Promise<void> {
   await app.register(referenceRoutes);
   await app.register(mediaRoutes);
   await app.register(agentJobRoutes);
+  await app.register(cloneRoutes);
 
   // 调度器要用 app.log 记自己的内部错误，并接上删除流程的「先停 Agent」（AC-002）
   agentScheduler({ overrides: { log: app.log } });
   registerAgentStopper();
+  // 证据准备做完自动起复刻、Agent 完成后宿主核完成判据（REQ-004）
+  registerCloneFlow(app.log);
 
   // 只绑回环地址：单机单用户，不做权限模型，也就绝不能对外暴露（Spec 6.3 / 非功能需求）
   await app.listen({ host: config.host, port: config.port });

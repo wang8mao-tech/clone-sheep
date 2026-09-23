@@ -116,6 +116,17 @@ export function continuePrompt(): string {
   ].join("\n");
 }
 
+/**
+ * 复刻判据没过之后的「继续」：会话以为自己做完了，宿主要把没过的原因说给它听，
+ * 否则 resume 一次大概率原样停下，白花一次钱（Task 6.1 审查 S2-M3）。
+ */
+export function cloneRetryPrompt(reason: string): string {
+  return [
+    `宿主核对完成判据没有通过：${reason}`,
+    "在工作目录已有产物的基础上补齐，以 `hypit check reference.svrun --json` 通过为准，通过后停下，不要出片。",
+  ].join("\n");
+}
+
 export interface VariantPromptInput {
   brief: string;
   templateSource: string;

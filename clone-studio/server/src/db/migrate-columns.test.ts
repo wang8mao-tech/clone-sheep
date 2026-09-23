@@ -110,4 +110,27 @@ describe("加列迁移", () => {
     expect(() => migrate()).not.toThrow();
     expect(columnsOf(db(), "evidence_steps")).toContain("error_raw");
   });
+  it("6.1 首版建的 clone_verdicts 补上 job_ended_at，已有结论原样保留（Task 6.1 复审）", async () => {
+    const { db, migrate } = await freshModules();
+    const d = db();
+    migrate();
+
+    d.exec("DROP TABLE clone_verdicts");
+    d.exec(`CREATE TABLE clone_verdicts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, template_id TEXT NOT NULL, job_id TEXT NOT NULL,
+      ok INTEGER NOT NULL, missing_json TEXT NOT NULL, check_json TEXT, error_text TEXT, created_at TEXT NOT NULL)`);
+    d.prepare(
+      `INSERT INTO clone_verdicts (template_id, job_id, ok, missing_json, created_at)
+       VALUES ('t1', 'j1', 1, '[]', '2026-09-23T00:00:00.000Z')`,
+    ).run();
+    d.prepare("DELETE FROM schema_migrations WHERE version = 6").run();
+
+    migrate();
+    expect(columnsOf(d, "clone_verdicts")).toContain("job_ended_at");
+    expect(d.prepare("SELECT job_id, ok, job_ended_at FROM clone_verdicts").get()).toEqual({
+      job_id: "j1",
+      ok: 1,
+      job_ended_at: null,
+    });
+  });
 });

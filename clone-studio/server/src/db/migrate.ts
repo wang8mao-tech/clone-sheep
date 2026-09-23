@@ -60,6 +60,18 @@ const STEPS: ReadonlyArray<{ version: number; run: (d: ReturnType<typeof db>) =>
       }
     },
   },
+  {
+    // Task 6.1 复审：结论要绑到任务的哪一次完成上。表是同一个 Task 里建的，但 6.1 首版可能已经
+    // 在用户机器上跑过（start.bat 直接用工作区代码），老表没有这一列
+    version: 6,
+    run: (d) => {
+      const columns = d.prepare("PRAGMA table_info(clone_verdicts)").all() as Array<{ name: string }>;
+      if (columns.length > 0 && !columns.some((c) => c.name === "job_ended_at")) {
+        d.exec("ALTER TABLE clone_verdicts ADD COLUMN job_ended_at TEXT");
+      }
+      d.exec("CREATE INDEX IF NOT EXISTS idx_clone_verdicts_job ON clone_verdicts (job_id, job_ended_at)");
+    },
+  },
 ];
 
 /** agent_jobs 补列：老库里那张表已经存在，schema.sql 的 CREATE TABLE IF NOT EXISTS 不会给它加列 */

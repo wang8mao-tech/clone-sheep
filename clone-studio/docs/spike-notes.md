@@ -238,10 +238,10 @@ Phase 6 开工前必须先解掉，否则出片链路整条不可用。它不阻
 同一台机器、同一份 spike 工作区（`X:\workflow\_spike-hypit\complex-explainer`）、同一条命令
 （`hypit build <run> --runtime ../../hypit.runtime.json --follow --json`，workers 1），本地渲染两次都成功：
 
-| build | 目标 | 结果 | 导出后 ffprobe |
-| ----- | ---- | ---- | -------------- |
-| `bld_20260923T090202973Z_FFE1F434A7` | `spike-one-part.svrun` → `export-part-1.video`（900 帧） | `outcome: complete`，8 分钟 | h264 1080×1920，`avg_frame_rate=30/1`，`nb_read_frames=900`，30.000s；aac 30.000s |
-| `bld_20260923T091136120Z_E2D63369F6` | `render.svrun` → `complete-film.video`（4112 帧） | `outcome: complete`，26 分钟 | h264 1080×1920，`avg_frame_rate=30/1`，`nb_read_frames=4112`，137.067s；aac 137.066s |
+| build                                | 目标                                                     | 结果                         | 导出后 ffprobe                                                                       |
+| ------------------------------------ | -------------------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------ |
+| `bld_20260923T090202973Z_FFE1F434A7` | `spike-one-part.svrun` → `export-part-1.video`（900 帧） | `outcome: complete`，8 分钟  | h264 1080×1920，`avg_frame_rate=30/1`，`nb_read_frames=900`，30.000s；aac 30.000s    |
+| `bld_20260923T091136120Z_E2D63369F6` | `render.svrun` → `complete-film.video`（4112 帧）        | `outcome: complete`，26 分钟 | h264 1080×1920，`avg_frame_rate=30/1`，`nb_read_frames=4112`，137.067s；aac 137.066s |
 
 排查过、已排除的：
 

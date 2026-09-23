@@ -427,8 +427,26 @@ start / continue / auto_resume，`continueJob(jobId, note)` 区分不了打回�
 - 实现出片执行器：`build --follow --json` + `activity --watch --jsonl` 取结构化进度，渲染并发上限（默认 1），`get` 导出到 `output/`，key 只注入 hypit 子进程环境
 - 实现估价 / 限额卡 CMP-006、出片进度 CMP-007、台账写入（`builds`、AgentJob 花费）
 
+**Task 拆分（2026-09-23）**，按序做，每个走 review→fix 循环，两阶段 PASS 后单独 commit：
+
+| Task | 内容 | 覆盖 | 状态 |
+|---|---|---|---|
+| 6.1 | 复刻编排与完成判据（server）：证据准备**新完成**时自动建复刻任务（已有模板不补跑，配测试）；任务完成后宿主自己验完成判据（`reference.svrun` / `ANALYSIS.md` / `TIMELINE.md` 存在 + `hypit check --json` 通过），结果落库；判据不过标失败并给原因；建 replica production；`GET /api/templates/:id/clone` 给 ② 页的文件与 check 结果、`POST` 同路径给从没有过任务的模板手动开始；复刻任务运行中拒绝换参考视频；可用能力清单进系统提示（REQ-006，Phase 5 已实现，`prompts.ts` `capabilitySection`） | REQ-004 行为、FLOW-002 步骤 3-4 | ✅ 四轮 review→fix，第四轮两阶段 PASS（只剩 1 条 LOW，转 6.4）。变异自检 27 条全杀（独立拷贝里跑）；真机：审查员用真实库备份起当前代码，3 个停在复刻中的老模板没有被补跑 |
+| 6.2 | ② 复刻页（web）：左 60% 分析摘要 / 时间线（时间码点击联动参考播放器）/ 校验结果三个折叠区，随文件产生逐个出现；右 40% 参考视频小播放器 + 估价卡位；运行中「复刻进行中」+ 用时 / 花费 / 模型；熔断沿用 `BreakerBar`、任务数据用 `useTemplateAgent()`；加载 / 空 / 错误态 | SCREEN-004 | |
+| 6.3 | 估价与花钱闸门：费率表（能力 → 单价，设置页可编辑）；`plan` / `pricing` 解析成估价（needs 字段 × 单价、请求数）；`gate.ts` 纯函数判定单条 / 批次限额，估价拿不到按超限、未解析请求直接失败；估价卡 CMP-006（明细、价格页链接、「将自动出片」或「确认出片 $x.xx」）；确认出片接口 | REQ-006 估价与规则、AC-017 / 018 / 019 | |
+| 6.4 | 出片执行器与台账：出片前重生 Runtime Profile；`build --follow --json` + `activity --watch --jsonl` 结构化进度；判成败看 `result.outcome`；`get` 导出到 `output/`（`output` 进 `WORKSPACE_DIRS`）；key 只进 hypit 子进程；全局渲染并发默认 1、`hyperframes.local` workers 默认改 1（Spec 同步 + 存量迁移）；失败原文完整展示、「重试出片」、失败时记可用内存；台账（builds 估价 / build-id / receipt、Agent 花费）标「估」；出片进度 CMP-007；出片进行中拒绝换参考视频（6.1 只作废未出片的复刻片，渲染中的那条要这里保护）；复刻片出片完成后模板从 `cloning` 置 `awaiting_review`（6.1 判据通过时模板仍留在 `cloning`，没有别的 Task 管这次转换）；模板卡「成片数」只数变体与已验货的复刻片（`archive.ts` `templateStats` 现在数全部 done，复刻片出完会被提前计入，与 REQ-004「通过验货时作为第一条成片」冲突） | REQ-006 出片、REQ-009、AC-020（mp4 部分） | |
+| 6.5 | Phase 6 真机验收与收口：一条真实参考视频导入 → 复刻完成 → 三个区块与估价卡；出片得 mp4 并 ffprobe；限额内自动出片与超限待确认各走一次；Phase 四步验证 | Phase 6 验收标准 | |
+
 **关键文件**：
-- `clone-studio/server/src/services/clone.ts` — 复刻编排与完成判据
+- `clone-studio/server/src/services/clone.ts` — 复刻编排与完成判据（`clone-starter.ts` 是证据流水线调它的注册点；
+  `routes/clone.ts` 的 `GET /api/templates/:id/clone` 给 ② 页 `{analysis, timeline, svrunExists, verdict, replica}`，
+  文件没产生是 null，超 256 KB 截断给页面并带 `truncated`；结论只给和当前这次运行对得上的那条，完成了还没核完是 `verifying`）
+  FLOW-002「check 反复不过计入卡死检测」：宿主判据未过要人点「继续」才会再跑，每次都有人把关，没有计入卡死检测（有意为之，Spec 已写明）
+  结论出来时往 `template:<id>` 推一条 `clone` 事件（前端的 useSse 事件名清单要有 `clone`，6.2 加）；POST 的错误码：`NOT_CLONING` / `CLONE_EXISTS`（任务已完成时文案是「已经复刻完成」）/ `CLONE_NOT_STARTED`（工作目录自检不过，原因原样带出）
+  复刻片读写在 `services/replicas.ts`（只依赖库，证据流水线换参考视频时直接作废未出片的复刻片）
+  **进程教训**：用户自己的后端是 `tsx watch` 跑同一份工作区，任何源码改动都会被热重载进用户的真实服务。6.1 变异自检两次直接改了工作区源码（UTC 11:32–11:57 三轮；12:26 又一次，是改脚本那步语法错误没生效、同一条命令接着跑了旧脚本），「启动补跑」变异在真实库给 3 个老模板共起了 12 个任务（6 个起了会话，都被下一次重载标成中断，库记花费 $0；工作目录核对完好）。此后变异自检只在 scratchpad 的独立拷贝里跑，脚本拒绝指向工作区，每次前后比对工作区源码指纹
+  `ensureReplica` 复用「未出片」的复刻片时也会复用 `failed` 的那条而不重新排队：这条分支 6.1 里走不到（判据通过时没有失败的复刻片），6.4 出片失败 /「重试出片」时一并定下失败复刻片是重新排队还是作废重建，并补测试
+  6.1 第四轮审查 LOW（转 6.4）：一次 `hypit check` 若卡住跨过整个换参考视频、新证据做完又回到 cloning、而新一轮 `startClone` 因工作目录自检失败没起来，旧的那次核完仍会按旧产物建一条排队复刻片。6.4 给核对记一个开始时的模板 `updated_at` / 运行令牌，建复刻片前比对
 - `clone-studio/server/src/services/gate.ts` — 估价与限额判定（纯函数 + 单元测试）
 - `clone-studio/server/src/services/build.ts` — build、进度、导出、取消
 - `clone-studio/server/src/services/ledger.ts` — 花费记账
@@ -445,7 +463,7 @@ start / continue / auto_resume，`continueJob(jobId, note)` 区分不了打回�
 ## Phase 7: 模板验货（REQ-004 后半，设计稿"③ 验货"）
 
 **交付内容**：
-- 复刻片作为 `productions`（kind=replica，带 version）入库
+- 复刻片的 `productions`（kind=replica，带 version）在 Task 6.1 判据通过时已建；这里做「通过验货」时把它作为该模板第一条成片（REQ-004）
 - 实现并排同步播放器 CMP-004：共享进度条、播放 / 暂停、倍速、逐帧、声音来源切换、任一路缓冲两路同停、9:16 按高适配不拉伸
 - 实现版本切换、时长差与分辨率差、底部固定操作区
 - 实现"打回并写意见"：意见 resume 原 Agent 会话 → 重新 check → 重新过闸出片 → 新版本
@@ -631,6 +649,7 @@ start / continue / auto_resume，`continueJob(jobId, note)` 区分不了打回�
 | `builds` | Phase 1 | 每次出片的估价、实际、hypit build-id、错误 |
 | `assets` | Phase 1 | 变体素材、来源 URL、是否用户替换 |
 | `hypit_calls` | Phase 2 | 每次 hypit 调用的命令、退出码、JSON 输出 |
+| `clone_verdicts` | Phase 6 | 每次复刻任务完成后宿主核完成判据的结果：缺的文件、`hypit check` 原样输出、未通过原文 |
 | `video_channels` | Phase 12 | 生视频通道配置（凭据存 secrets.json） |
 | `model_profiles` | Phase 10 | Agent 模型档案（token 存 secrets.json，不入库） |
 

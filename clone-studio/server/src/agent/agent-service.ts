@@ -3,7 +3,7 @@ import { requireTemplate } from "../services/archive.js";
 import { sseHub } from "../lib/sse.js";
 import { resetAgentProducts } from "../hypit/workspace.js";
 import { settingsFromDb } from "./agent-settings.js";
-import type { AgentJobRow } from "./job-store.js";
+import { latestJobOf, requireJob, updateJob, type AgentJobRow } from "./job-store.js";
 import { appendIntercept, appendMessage, appendPrompt, appendStop } from "./message-store.js";
 import { runAgent } from "./runner.js";
 import { Scheduler, type SchedulerDeps } from "./scheduler.js";
@@ -46,15 +46,53 @@ export function agentScheduler(options: AgentServiceOptions = {}): Scheduler {
       const stored = appendStop(jobId, stop);
       announce(jobId, stored);
     },
-    onChange: (job) => {
-      const view = present(job);
-      notify(`job:${job.id}`, "agent-job", view);
-      // 模板页不知道 job id：状态变化也往对象的主题推一份
-      notify(`${job.owner_kind}:${job.owner_id}`, "agent-job", view);
-    },
+    onChange: broadcast,
     ...options.overrides,
   });
+  serviceLog = options.overrides?.log ?? serviceLog;
   return instance;
+}
+
+/** 任务状态变了：推给抽屉 / 模板页，再交给宿主里关心它的模块（复刻编排验完成判据） */
+function broadcast(job: AgentJobRow): void {
+  const view = present(job);
+  notify(`job:${job.id}`, "agent-job", view);
+  // 模板页不知道 job id：状态变化也往对象的主题推一份
+  notify(`${job.owner_kind}:${job.owner_id}`, "agent-job", view);
+  for (const listener of listeners) {
+    try {
+      listener(job);
+    } catch (error) {
+      // 一个监听方出错不能拖垮调度器的状态更新，但要留痕
+      serviceLog?.error({ jobId: job.id, error }, "任务状态监听方出错");
+    }
+  }
+}
+
+let serviceLog: { error(detail: unknown, message: string): void } | undefined;
+
+const listeners = new Set<(job: AgentJobRow) => void>();
+
+/** 订阅任务状态变化（同步回调，里面要做慢事自己丢到异步里）。返回取消订阅 */
+export function onJobChange(listener: (job: AgentJobRow) => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+/**
+ * Agent 说做完了、宿主核完成判据没过（REQ-004）：把这个任务改判为「失败」并写明原因。
+ * 改判之后横条就给「继续 / 重跑」——停在一个假的「完成」上，人什么也做不了。
+ * 只改仍是「完成」、仍是对象最新、且仍是核的那一次运行（endedAt 对得上）的任务：核的过程中
+ * 人可能已经继续或重跑了，继续后再次完成的那一次不能被上一次的结论改判。
+ */
+export function failFinishedJob(jobId: string, reason: string, endedAt?: string | null): AgentJobRow | undefined {
+  const job = requireJob(jobId);
+  const latest = latestJobOf(job.owner_kind, job.owner_id);
+  if (job.status !== "done" || latest?.id !== job.id) return undefined;
+  if (endedAt !== undefined && job.ended_at !== endedAt) return undefined;
+  const failed = updateJob(jobId, { status: "failed", stop_reason: reason });
+  broadcast(failed);
+  return failed;
 }
 
 /**
@@ -70,7 +108,7 @@ function announce(jobId: string, stored: { seq: number; type: string }): void {
  * 推送失败不能把一次会话判失败：这些回调跑在 runner 的 onMessage 里，往上抛会被记成
  * 「消息落库失败」，于是浏览器那边断一下就赔掉一次付费运行。落库失败才该让任务失败。
  */
-function notify(topic: string, event: string, data: unknown, options?: { buffer?: boolean }): void {
+export function notify(topic: string, event: string, data: unknown, options?: { buffer?: boolean }): void {
   try {
     sseHub.publish(topic, event, data, options);
   } catch {
@@ -93,6 +131,8 @@ export function registerAgentStopper(): void {
 /** 测试用：换一份新的调度器（生产里一个进程只建一次） */
 export function resetAgentScheduler(): void {
   instance = undefined;
+  listeners.clear();
+  serviceLog = undefined;
   setAgentStopper(undefined);
 }
 

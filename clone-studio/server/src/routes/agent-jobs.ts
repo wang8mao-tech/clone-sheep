@@ -4,6 +4,7 @@ import { agentScheduler, present } from "../agent/agent-service.js";
 import { latestJobOf, requireJob } from "../agent/job-store.js";
 import { lastSeq, listMessages, listMessagesBefore, listRecentMessages, PAGE_LIMIT } from "../agent/message-store.js";
 import { requireTemplate } from "../services/archive.js";
+import { continuePromptFor } from "../services/clone.js";
 import { archiveErrorHandler } from "./errors.js";
 
 /**
@@ -104,7 +105,8 @@ export async function agentJobRoutes(app: FastifyInstance): Promise<void> {
   app.post("/api/agent-jobs/:jobId/continue", (request) => {
     const { jobId } = request.params as { jobId: string };
     const { note } = z.object({ note: z.string().min(1).max(2_000).optional() }).parse(request.body ?? {});
-    return { job: present(agentScheduler().continueJob(jobId, note)) };
+    // 复刻判据没过之后的继续：把没过的原因交给会话，而不是一句通用的「接着做」（Task 6.1 S2-M3）
+    return { job: present(agentScheduler().continueJob(jobId, note ?? continuePromptFor(jobId))) };
   });
 
   /** 重跑：清掉 Agent 产物，按原任务提示重开一个任务 */

@@ -129,6 +129,23 @@ CREATE TABLE IF NOT EXISTS agent_messages (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_messages_job_seq ON agent_messages (job_id, seq);
 
+-- ── 复刻完成判据的验证结果（REQ-004）：Agent 说做完了，宿主自己再核一遍 ─────────
+-- missing_json：缺的文件名数组；check_json：hypit check --json 的原样输出；error_text：check 没跑成时的原文
+CREATE TABLE IF NOT EXISTS clone_verdicts (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  template_id  TEXT NOT NULL REFERENCES templates (id) ON DELETE CASCADE,
+  job_id       TEXT NOT NULL,
+  -- 核的是任务哪一次完成：判据不过、继续后同一个任务会再完成一次，那一次要有自己的结论
+  job_ended_at TEXT,
+  ok           INTEGER NOT NULL,
+  missing_json TEXT NOT NULL,
+  check_json   TEXT,
+  error_text   TEXT,
+  created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_clone_verdicts_template ON clone_verdicts (template_id, id);
+-- (job_id, job_ended_at) 的索引建在 migrate.ts 第 6 步：schema.sql 先于迁移执行，老表还没这一列时在这里建会直接报错
+
 -- ── 每次 hypit build。actual_usd 恒为空：hypit 拿不到实际花费（Spec REQ-006）。 ──
 CREATE TABLE IF NOT EXISTS builds (
   id             TEXT PRIMARY KEY,

@@ -3,6 +3,9 @@ import { db } from "../db/index.js";
 import { HypitError } from "../hypit/cli.js";
 import { ensureWorkspaceLayout } from "../hypit/workspace.js";
 import { requireTemplate } from "./archive.js";
+import { activeJobsOf } from "../agent/job-store.js";
+import { requestClone } from "./clone-starter.js";
+import { cancelOpenReplicas } from "./replicas.js";
 import { EVIDENCE_STEPS, nextStep, pipelineStatus, type EvidenceStep, type ProbeFacts } from "./evidence-rules.js";
 import { execute, tilesDirOf, transcriptPathOf } from "./evidence-steps.js";
 import {
@@ -89,6 +92,10 @@ export async function startEvidence(args: StartArgs): Promise<EvidenceState> {
       args.templateId,
     );
 
+  // 旧参考视频的复刻片不能留着等估价：新证据哪怕失败，也不能让一条按旧稿子排队的复刻片被自动出片。
+  // 必须在模板离开 cloning 之后作废：上面的 rm 要 await，正在核的那一轮若在这个空当里核完，看到的
+  // 还是 cloning，会再建一条排队的复刻片（Task 6.1 第三轮审查复现的竞态）
+  cancelOpenReplicas(args.templateId);
   void run(args);
   return evidenceState(args.templateId);
 }
@@ -129,6 +136,10 @@ function assertNotRunning(templateId: string): void {
   if (running.has(templateId)) {
     throw new EvidenceError("EVIDENCE_BUSY", "这个模板的证据准备还在跑，等它结束或先重试失败的那一步。", 409);
   }
+  // 复刻 Agent 正在读这些证据：这时清掉转写和拼图，它会拿半新半旧的证据写完，新导入也起不了新任务
+  if (activeJobsOf("template", templateId).length > 0) {
+    throw new EvidenceError("AGENT_ACTIVE", "这个模板的复刻任务还在跑，先在右侧抽屉中止它再换参考视频。", 409);
+  }
 }
 
 function requireWorkspace(template: ReturnType<typeof requireTemplate>): string {
@@ -164,9 +175,10 @@ async function run(args: StartArgs & { from?: EvidenceStep }): Promise<void> {
         return;
       }
     }
-    // 四步都过了。REQ-002 状态段的「成功→自动进入复刻」：这里只把状态推到
-    // cloning，真正启动复刻 Agent 是 Phase 5/6 的事
+    // 四步都过了。REQ-002 状态段的「成功→自动进入复刻」：状态推到 cloning，
+    // 再请复刻编排起 Agent（clone-starter.ts 注册点；只在这一刻触发，已有模板不补跑）
     setTemplateStatus(templateId, "cloning");
+    requestClone(templateId);
   } catch (error) {
     // 收尾本身也可能炸（库已关、磁盘满）。run() 是 void 调用的游离 Promise，
     // 让它抛出去就是一条未捕获拒绝——Node 默认会因此结束进程。宁可丢掉这条

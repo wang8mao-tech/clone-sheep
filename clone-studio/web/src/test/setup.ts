@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { afterEach, vi } from "vitest";
 import { cleanup } from "@testing-library/react";
+import { mediaStateOf as stateOf } from "./media.js";
 
 /**
  * jsdom 的补丁层。
@@ -58,6 +59,53 @@ if (typeof globalThis.EventSource === "undefined") {
     close(): void {}
   }
   globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+}
+
+// ── HTMLMediaElement：jsdom 的 play/pause 只报「未实现」，paused 永远是 true，
+//    duration 永远是 NaN。这里用一份每元素的假状态（test/media.ts）顶上：play/pause 翻 paused 并派发同名事件，
+//    currentTime 可读写，duration 由用例用 setMediaDuration 设。**没有真解码**：
+//    缓冲、时间推进、ended 都得用例自己 fireEvent，桩只保证状态读写前后一致 ──
+if (typeof HTMLMediaElement !== "undefined") {
+  const proto = HTMLMediaElement.prototype;
+  proto.play = function play(this: HTMLMediaElement): Promise<void> {
+    const s = stateOf(this);
+    if (s.paused) {
+      s.paused = false;
+      this.dispatchEvent(new Event("play"));
+    }
+    return Promise.resolve();
+  };
+  proto.pause = function pause(this: HTMLMediaElement): void {
+    const s = stateOf(this);
+    if (!s.paused) {
+      s.paused = true;
+      this.dispatchEvent(new Event("pause"));
+    }
+  };
+  proto.load = function load(): void {};
+  Object.defineProperty(proto, "paused", {
+    configurable: true,
+    get(this: HTMLMediaElement) {
+      return stateOf(this).paused;
+    },
+  });
+  Object.defineProperty(proto, "duration", {
+    configurable: true,
+    get(this: HTMLMediaElement) {
+      return stateOf(this).duration;
+    },
+  });
+  Object.defineProperty(proto, "currentTime", {
+    configurable: true,
+    get(this: HTMLMediaElement) {
+      return stateOf(this).currentTime;
+    },
+    set(this: HTMLMediaElement, v: number) {
+      const { duration } = stateOf(this);
+      stateOf(this).currentTime = Math.max(0, Number.isFinite(duration) ? Math.min(v, duration) : v);
+    },
+  });
+  // playbackRate / muted jsdom 自己就能读写，不用补
 }
 
 if (typeof Element.prototype.scrollIntoView !== "function") {

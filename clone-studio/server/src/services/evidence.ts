@@ -5,7 +5,7 @@ import { ensureWorkspaceLayout } from "../hypit/workspace.js";
 import { requireTemplate } from "./archive.js";
 import { activeJobsOf } from "../agent/job-store.js";
 import { requestClone } from "./clone-starter.js";
-import { cancelOpenReplicas } from "./replicas.js";
+import { cancelOpenReplicas, isBuilding } from "./replicas.js";
 import { EVIDENCE_STEPS, nextStep, pipelineStatus, type EvidenceStep, type ProbeFacts } from "./evidence-rules.js";
 import { execute, tilesDirOf, transcriptPathOf } from "./evidence-steps.js";
 import {
@@ -139,6 +139,10 @@ function assertNotRunning(templateId: string): void {
   // 复刻 Agent 正在读这些证据：这时清掉转写和拼图，它会拿半新半旧的证据写完，新导入也起不了新任务
   if (activeJobsOf("template", templateId).length > 0) {
     throw new EvidenceError("AGENT_ACTIVE", "这个模板的复刻任务还在跑，先在右侧抽屉中止它再换参考视频。", 409);
+  }
+  // 复刻片正在渲染：它读的是这份 reference.svrun 和证据，换掉会让渲染中的那条出错（6.1 只作废未出片的）
+  if (isBuilding(templateId)) {
+    throw new EvidenceError("BUILD_ACTIVE", "这个模板的复刻片正在出片，等它结束或先取消出片再换参考视频。", 409);
   }
 }
 

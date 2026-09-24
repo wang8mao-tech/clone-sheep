@@ -16,6 +16,14 @@ export interface ReplicaRow {
   updated_at: string;
 }
 
+/** 这个模板有出片单位正在渲染 */
+export function isBuilding(templateId: string): boolean {
+  return (
+    db().prepare("SELECT 1 FROM productions WHERE template_id = ? AND status = 'building' LIMIT 1").get(templateId) !==
+    undefined
+  );
+}
+
 /** 模板当前的复刻片（最新版本，已作废的不算）。打回重做会有 v2、v3，Phase 7 管版本切换 */
 export function latestReplica(templateId: string): ReplicaRow | undefined {
   return db()
@@ -42,10 +50,17 @@ export function cancelOpenReplicas(templateId: string): number {
 /**
  * 判据通过：确保有一条排队中的复刻片等估价。已经有一条还没出片的就复用它（「继续」后再次完成
  * 不该多出一条）；已出片的（打回后重做）建下一版。版本号跟着全部历史走，作废的也占号。
+ * 失败的（估价 blocked、或出片失败）是按上一版稿子来的：作废它、建下一版，重新走估价与闸门，
+ * 不复用（复用会留在 failed 里，永远不再估价 / 出片）。
  */
 export function ensureReplica(templateId: string): void {
   const current = latestReplica(templateId);
-  if (current && current.status !== "done") return;
+  if (current && current.status !== "done" && current.status !== "failed") return;
+  if (current?.status === "failed") {
+    db()
+      .prepare("UPDATE productions SET status = 'cancelled', updated_at = ? WHERE id = ? AND status = 'failed'")
+      .run(new Date().toISOString(), current.id);
+  }
   const max = db()
     .prepare("SELECT MAX(version) AS v FROM productions WHERE template_id = ? AND kind = 'replica'")
     .get(templateId) as { v: number | null };

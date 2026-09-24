@@ -66,7 +66,7 @@ describe("migrate", () => {
     ).run(now);
 
     const changed = m.markStaleRunningAsInterrupted();
-    expect(changed).toEqual({ jobs: 1, productions: 1, builds: 1, evidence: 0 });
+    expect(changed).toEqual({ jobs: 1, productions: 1, builds: 1, evidence: 0, orphans: [] });
 
     expect(
       d.prepare("SELECT status, stop_reason, resume_at FROM agent_jobs WHERE id='j1'").get() as never,

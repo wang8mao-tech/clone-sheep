@@ -13,7 +13,7 @@ const IDLE: FeedState = {
 };
 
 /** 同一条 SSE 上顺带转给页面的模板事件（server/src/services/clone.ts 的 `clone`） */
-const TEMPLATE_EVENTS = ["clone", "estimate"] as const;
+const TEMPLATE_EVENTS = ["clone", "estimate", "build"] as const;
 
 /**
  * 模板的 Agent 任务 + 消息流。取数顺序见 AgentFeed 的说明：

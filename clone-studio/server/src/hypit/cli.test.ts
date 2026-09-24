@@ -85,13 +85,20 @@ describe.runIf(process.platform === "win32")("runHypit 的超时收尸", () => {
       }
     };
 
-    const call = runHypit(["builds"], { cwd: dataRoot, timeoutMs: 1_500 });
-    await new Promise((r) => setTimeout(r, 800));
-    expect(locked(), "前提：孙进程起来了并占着目录").toBe(true);
+    // 等孙进程真的占住目录再让它超时：固定睡 800ms 在整套测试并行跑、机器忙时不够（6.4 收尾时 pnpm check 两次撞上）
+    const settle = async (want: boolean, deadlineMs: number): Promise<boolean> => {
+      const until = Date.now() + deadlineMs;
+      while (Date.now() < until) {
+        if (locked() === want) return true;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      return locked() === want;
+    };
+    const call = runHypit(["builds"], { cwd: dataRoot, timeoutMs: 6_000 });
+    expect(await settle(true, 5_000), "前提：孙进程起来了并占着目录").toBe(true);
 
     await expect(call).rejects.toMatchObject({ code: "TIMEOUT" });
-    await new Promise((r) => setTimeout(r, 600));
-    // 只杀 hypit 自己的话，这里还是 true
-    expect(locked()).toBe(false);
+    // 只杀 hypit 自己的话，这里永远等不到 false
+    expect(await settle(false, 5_000)).toBe(true);
   }, 30_000);
 });

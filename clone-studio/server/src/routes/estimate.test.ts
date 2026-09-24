@@ -32,6 +32,9 @@ const PAID_PLAN = {
   preflight: { ok: true, diagnostics: [] },
 };
 
+const productionStatus = (b: Booted, id: string) =>
+  (b.db().prepare("SELECT status FROM productions WHERE id = ?").get(id) as { status: string }).status;
+
 async function replicaReady(b: Booted): Promise<string> {
   b.setStatus("cloning");
   b.clone.startClone(b.templateId);
@@ -95,7 +98,7 @@ describe("费率表", () => {
 });
 
 describe("估价与确认", () => {
-  it("读估价；待确认的点确认后回到排队；auto 的不能确认", async () => {
+  it("读估价；待确认的点确认后放行、执行器接手出片；出完的不能再估", async () => {
     const b = await boot();
     b.setPlan(PAID_PLAN);
     const id = await replicaReady(b);
@@ -106,11 +109,24 @@ describe("估价与确认", () => {
     const confirmed = await server.inject({ method: "POST", url: `/api/productions/${id}/confirm-cost` });
     expect(confirmed.statusCode).toBe(200);
     expect(confirmed.json().estimate.confirmedAt).toBeTruthy();
+    // 确认即放行（6.4）：假 build 立刻成功
+    await until(() => productionStatus(b, id) === "done", "确认后出片完成");
 
-    // 改了费率再估：$0.5 在限额内，auto，此时再确认是 409
+    // 出完的不能重估
     b.rates.upsertRate({ capability: "@hypit/seedance@2#generate-video", unit: "second", usd: 0.1 });
     const re = await server.inject({ method: "POST", url: `/api/productions/${id}/estimate` });
-    expect(re.json().estimate).toMatchObject({ totalUsd: 0.5, decision: "auto" });
+    expect(re.statusCode).toBe(409);
+    expect(re.json().error.code).toBe("NOT_ESTIMABLE");
+    await server.close();
+  });
+
+  it("auto 的不能确认：409 NOT_AWAITING_CONFIRM", async () => {
+    const b = await boot();
+    b.setPlan(PAID_PLAN);
+    b.rates.upsertRate({ capability: "@hypit/seedance@2#generate-video", unit: "second", usd: 0.1 });
+    const id = await replicaReady(b);
+    expect(b.estimate.currentEstimate(id)).toMatchObject({ totalUsd: 0.5, decision: "auto" });
+    const server = await app();
     const again = await server.inject({ method: "POST", url: `/api/productions/${id}/confirm-cost` });
     expect(again.statusCode).toBe(409);
     expect(again.json().error.code).toBe("NOT_AWAITING_CONFIRM");

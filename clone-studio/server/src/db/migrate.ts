@@ -72,6 +72,18 @@ const STEPS: ReadonlyArray<{ version: number; run: (d: ReturnType<typeof db>) =>
       d.exec("CREATE INDEX IF NOT EXISTS idx_clone_verdicts_job ON clone_verdicts (job_id, job_ended_at)");
     },
   },
+  {
+    // Task 6.4：builds 补失败上下文列；hyperframes.local 的 workers 默认从 4 改 1（Spec v1.9.4，本机实测只有 1 稳定）。
+    // 存量设置里还是默认值 4 的一并改成 1；用户自己改过别的值的不动
+    version: 7,
+    run: (d) => {
+      const columns = d.prepare("PRAGMA table_info(builds)").all() as Array<{ name: string }>;
+      if (columns.length > 0 && !columns.some((c) => c.name === "context_json")) {
+        d.exec("ALTER TABLE builds ADD COLUMN context_json TEXT");
+      }
+      d.prepare("UPDATE settings SET render_workers = 1 WHERE id = 1 AND render_workers = 4").run();
+    },
+  },
 ];
 
 /** agent_jobs 补列：老库里那张表已经存在，schema.sql 的 CREATE TABLE IF NOT EXISTS 不会给它加列 */
@@ -122,9 +134,19 @@ export function markStaleRunningAsInterrupted(): {
   productions: number;
   builds: number;
   evidence: number;
+  /** 上次死掉时还在跑、且已经提交到 hypit 的 build：Worker 上可能还在渲染，启动后要逐条 `hypit cancel` */
+  orphans: Array<{ productionId: string; hypitBuildId: string }>;
 } {
   const d = db();
   const now = new Date().toISOString();
+  const orphans = (
+    d
+      .prepare(
+        `SELECT production_id AS productionId, hypit_build_id AS hypitBuildId FROM builds
+          WHERE status IN ('queued', 'running') AND hypit_build_id IS NOT NULL`,
+      )
+      .all() as Array<{ productionId: string; hypitBuildId: string }>
+  ).map((r) => ({ productionId: r.productionId, hypitBuildId: r.hypitBuildId }));
   const jobs = d
     .prepare(
       `UPDATE agent_jobs SET status = 'interrupted', ended_at = COALESCE(ended_at, ?),
@@ -169,7 +191,7 @@ export function markStaleRunningAsInterrupted(): {
        WHERE status IN ('queued', 'running')`,
     )
     .run(now).changes;
-  return { jobs, productions, builds, evidence };
+  return { jobs, productions, builds, evidence, orphans };
 }
 
 // 允许 `pnpm db:migrate` 直接跑：比较本模块路径与进程入口路径

@@ -8,6 +8,7 @@ import { requireTemplate, workspaceServices } from "./archive.js";
 import { estimateFromPlan, type Estimate } from "./estimate.js";
 import { decideGate, type GateDecision, type GateReason } from "./gate.js";
 import { listRates } from "./rates.js";
+import { pumpBuilds } from "./build-run.js";
 import { currentEstimate, EstimateError, pricingUrlsOf, type EstimateRecord } from "./estimate-store.js";
 
 export { currentEstimate, EstimateError, type EstimateRecord } from "./estimate-store.js";
@@ -112,6 +113,8 @@ async function estimateOnce(productionId: string): Promise<EstimateRecord> {
     estimateId: record.id,
     decision: applied ? record.decision : null,
   });
+  // 限额内自动放行：交给出片执行器（AC-017「无需点击自动进入渲染中」）
+  if (applied && record.decision === "auto") pumpBuilds();
   return record;
 }
 
@@ -256,6 +259,8 @@ export function confirmCost(productionId: string): EstimateRecord {
     )
     .run(now, productionId);
   notify(`template:${production.template_id}`, "estimate", { productionId, estimateId: current.id, decision: "auto" });
+  // 人确认了：出片（AC-018「点确认后才开始 build」）
+  pumpBuilds();
   return { ...current, confirmedAt: now };
 }
 

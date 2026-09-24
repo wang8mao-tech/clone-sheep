@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "../ui/Badge.js";
+import { CloneCard as Card } from "./CloneCard.js";
 import { Button } from "../ui/Button.js";
 import { ApiError } from "../../lib/api.js";
 import {
@@ -155,18 +156,6 @@ export function EstimateCard({
         </p>
       ) : null}
     </Card>
-  );
-}
-
-function Card({ title, badge, children }: { title: string; badge?: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <section aria-label={title} className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-4">
-      <div className="flex items-center gap-2">
-        <span className="flex-1 text-caption font-medium text-text-secondary">{title}</span>
-        {badge}
-      </div>
-      {children}
-    </section>
   );
 }
 

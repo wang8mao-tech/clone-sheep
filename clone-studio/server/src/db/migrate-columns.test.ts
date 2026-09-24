@@ -110,6 +110,24 @@ describe("加列迁移", () => {
     expect(() => migrate()).not.toThrow();
     expect(columnsOf(db(), "evidence_steps")).toContain("error_raw");
   });
+  it("v7：老库的 builds 补上 context_json，workers 默认 4 改 1，用户自己改过的值不动（Task 6.4）", async () => {
+    const { db, migrate } = await freshModules();
+    const d = db();
+    migrate();
+    d.exec("ALTER TABLE builds DROP COLUMN context_json");
+    d.prepare("UPDATE settings SET render_workers = 4 WHERE id = 1").run();
+    d.prepare("DELETE FROM schema_migrations WHERE version = 7").run();
+
+    migrate();
+    expect(columnsOf(d, "builds")).toContain("context_json");
+    expect(d.prepare("SELECT render_workers FROM settings WHERE id = 1").get()).toEqual({ render_workers: 1 });
+
+    d.prepare("UPDATE settings SET render_workers = 3 WHERE id = 1").run();
+    d.prepare("DELETE FROM schema_migrations WHERE version = 7").run();
+    migrate();
+    expect(d.prepare("SELECT render_workers FROM settings WHERE id = 1").get()).toEqual({ render_workers: 3 });
+  });
+
   it("6.1 首版建的 clone_verdicts 补上 job_ended_at，已有结论原样保留（Task 6.1 复审）", async () => {
     const { db, migrate } = await freshModules();
     const d = db();

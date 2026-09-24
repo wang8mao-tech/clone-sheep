@@ -1,5 +1,16 @@
 # 变更记录
 
+## [v1.9.4] - 2026-09-24
+> 本版改动来自 Task 6.4（出片执行器）：渲染 workers 默认值按本机实测改为 1，并把执行器的行为写进 REQ-006；两轮审查后执行器改为「提交拿 id + status --watch 跟到底」，取消与 receipt 的规则随之写清。
+
+### 修改
+- **§非功能 · 性能**：「渲染 workers 默认 4」改为 1，与 REQ-006 规则一致。
+- **REQ-006 行为 · 出片流程**：`build --follow --json` 改为 `build --json` 提交 + `status <id> --watch --json --verbose` 跟到底（6.4 第二轮审查：`--follow` 在 JSON 模式下到结束才给 build-id，中途取消没法告诉 hypit；不带 `--verbose` 完成了的操作连 receipt 一起被过滤）。新增 MUST：任何停下都让 hypit 取消那条 build；人取消的 build 记「已取消」、出片单位回到「失败」可重试。
+- **REQ-009 行为 · receipt**：一次 build 多条远程操作时记第一条带 url 的 receipt。
+- **§6.1 Build**：加 `context_json`（失败时记下的可用内存与最后一条进度，REQ-006「记下当时可用内存」的落点）。
+- **REQ-006 规则 · 渲染并发**：`hyperframes.local` 默认 workers 从 4 改为 1，全局同时 1 个 build（Phase 0 / 09-23 实测：8 workers 内存不足、2 workers 渲染进程 ACCESS_VIOLATION、1 稳定）。存量设置里仍是 4 的迁移为 1。
+- **REQ-006 规则 · 出片执行器**：进度来源、成败判据只看 `result.outcome`、导出到 `output/`、出片前重生 Runtime Profile、失败原文与可用内存、重试出片、出片中拒绝换参考视频。
+
 ## [v1.9.3] - 2026-09-23
 > 本版改动来自 Task 6.3（估价与花钱闸门）：把费率表的形状、按秒计价的取值、估价的触发时机写进 Spec，闸门规则不变。
 

@@ -10,6 +10,8 @@ import { agentJobRoutes } from "./routes/agent-jobs.js";
 import { clientRoutes } from "./routes/clients.js";
 import { cloneRoutes } from "./routes/clone.js";
 import { estimateRoutes } from "./routes/estimate.js";
+import { buildRoutes } from "./routes/build.js";
+import { cancelOrphanedBuilds, pumpBuilds, setBuildLog } from "./services/build-run.js";
 import { registerCloneFlow } from "./services/clone.js";
 import { settingsRoutes } from "./routes/settings.js";
 import { systemRoutes } from "./routes/system.js";
@@ -60,12 +62,20 @@ async function main(): Promise<void> {
   await app.register(agentJobRoutes);
   await app.register(cloneRoutes);
   await app.register(estimateRoutes);
+  await app.register(buildRoutes);
 
   // 调度器要用 app.log 记自己的内部错误，并接上删除流程的「先停 Agent」（AC-002）
   agentScheduler({ overrides: { log: app.log } });
   registerAgentStopper();
   // 证据准备做完自动起复刻、Agent 完成后宿主核完成判据（REQ-004）
   registerCloneFlow(app.log);
+  // 出片执行器：闸门放行了的出片单位按渲染并发上限起片；重启时先取消上次留在 Worker 上的 build，再把没起来的接上
+  setBuildLog(app.log);
+  if (stale.orphans.length) {
+    const cancelled = await cancelOrphanedBuilds(stale.orphans);
+    app.log.warn({ orphans: stale.orphans.length, cancelled }, "上次退出时有出片在跑，已让 hypit 取消");
+  }
+  pumpBuilds();
 
   // 只绑回环地址：单机单用户，不做权限模型，也就绝不能对外暴露（Spec 6.3 / 非功能需求）
   await app.listen({ host: config.host, port: config.port });

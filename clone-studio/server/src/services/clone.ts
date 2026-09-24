@@ -97,6 +97,8 @@ type Judgement = Omit<CloneVerdict, "jobId" | "jobEndedAt" | "createdAt">;
 
 /** 核一次已完成复刻任务的完成判据，结论落库；通过建复刻片，不过（含核的过程出错）改判任务失败 */
 export async function verifyClone(job: AgentJobRow): Promise<CloneVerdict> {
+  // 核对开始时模板的样子：核的过程中它若变过（换参考视频又回到复刻中），旧稿子核出来的结论不建复刻片
+  const templateSeen = findTemplate(job.owner_id)?.updated_at ?? null;
   let result: Judgement;
   try {
     result = await judge(job);
@@ -106,7 +108,7 @@ export async function verifyClone(job: AgentJobRow): Promise<CloneVerdict> {
   }
   const verdict = db().transaction(() => {
     const saved = saveVerdict({ templateId: job.owner_id, jobId: job.id, jobEndedAt: job.ended_at, ...result });
-    if (saved.ok && isCurrentRun(job)) ensureReplica(job.owner_id);
+    if (saved.ok && isCurrentRun(job, templateSeen)) ensureReplica(job.owner_id);
     return saved;
   })();
   if (!verdict.ok) failFinishedJob(job.id, failureReason(verdict), job.ended_at);
@@ -159,15 +161,19 @@ function firstDiagnostic(diagnostics: unknown): string | undefined {
 }
 
 /**
- * 核的过程中情况可能变了：人换了参考视频（模板回到导入中）或起了新一轮。只有模板仍在「复刻中」、
- * 任务仍是最新、仍是完成、仍是同一次完成的，才建复刻片
+ * 核的过程中情况可能变了：人换了参考视频（模板回到导入中）或起了新一轮。只有模板仍在「复刻中」且核对开始后
+ * 没被改过（换参考视频再回到复刻中会改 updated_at）、任务仍是最新、仍是完成、仍是同一次完成的，才建复刻片
  */
-function isCurrentRun(job: AgentJobRow): boolean {
+function isCurrentRun(job: AgentJobRow, templateSeen: string | null): boolean {
   const now = requireJob(job.id);
   const latest = latestJobOf(job.owner_kind, job.owner_id);
   const template = findTemplate(job.owner_id);
   return (
-    template?.status === "cloning" && latest?.id === job.id && now.status === "done" && now.ended_at === job.ended_at
+    template?.status === "cloning" &&
+    template.updated_at === templateSeen &&
+    latest?.id === job.id &&
+    now.status === "done" &&
+    now.ended_at === job.ended_at
   );
 }
 

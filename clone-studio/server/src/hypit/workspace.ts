@@ -26,7 +26,7 @@ export const PROFILE_FILENAME = "hypit.runtime.json";
  * **它同时是重跑时的保留清单**（resetAgentProducts）：往工作目录里加宿主自己产出的目录
  * （比如 Phase 6 导出成片的 `output/`）时必须加到这里，否则第一次重跑就把它删了。
  */
-const WORKSPACE_DIRS = [["productions"], ["assets"], ["references", "src"]] as const;
+const WORKSPACE_DIRS = [["productions"], ["assets"], ["references", "src"], ["output"]] as const;
 
 /** 本地 Provider 承接的能力，全部零价 */
 const MEDIA_LOCAL_CAPABILITIES = [

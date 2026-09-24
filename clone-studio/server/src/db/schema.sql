@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS settings (
   agent_budget_usd        REAL    NOT NULL DEFAULT 5.0,
   agent_concurrency       INTEGER NOT NULL DEFAULT 2,
   render_concurrency      INTEGER NOT NULL DEFAULT 1,
-  render_workers          INTEGER NOT NULL DEFAULT 4,
+  -- 本机实测 1 worker 稳定、2 起渲染进程 ACCESS_VIOLATION（Phase 0 / 已知风险），默认 1
+  render_workers          INTEGER NOT NULL DEFAULT 1,
   reference_max_seconds   INTEGER NOT NULL DEFAULT 180,
   batch_max_items         INTEGER NOT NULL DEFAULT 20,
   codex_provider_enabled  INTEGER NOT NULL DEFAULT 0,
@@ -196,6 +197,8 @@ CREATE TABLE IF NOT EXISTS builds (
   error_code     TEXT,
   error_message  TEXT,
   output_path    TEXT,
+  -- 失败时记下的机器状态（可用内存）与最后一条进度，排查偶发渲染失败用（已知风险）
+  context_json   TEXT,
   started_at     TEXT,
   ended_at       TEXT,
   created_at     TEXT NOT NULL

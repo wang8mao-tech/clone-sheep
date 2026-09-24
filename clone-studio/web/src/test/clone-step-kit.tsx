@@ -18,16 +18,23 @@ export { TPL, agentJob };
 
 let findSource: ReturnType<typeof installEventSource>;
 let estimateStub: RouteStub | undefined;
+let buildStub: RouteStub | undefined;
 
 /** 让估价接口从「还没估出来」变成有结论 */
 export function stubEstimate(estimate: unknown): void {
   estimateStub = { body: { estimate } };
 }
 
+/** 让出片接口给某个 build 记录 */
+export function stubBuild(build: unknown): void {
+  buildStub = { body: { build } };
+}
+
 export function setupCloneStep(): void {
   beforeEach(() => {
     findSource = installEventSource();
     estimateStub = undefined;
+    buildStub = undefined;
   });
 }
 
@@ -57,6 +64,7 @@ interface Backend {
   /** GET /clone 被拉了几次：验轮询开没开 */
   cloneReads: number;
   estimateReads: number;
+  buildReads: number;
 }
 
 export function backend(
@@ -68,7 +76,7 @@ export function backend(
     estimate?: RouteStub;
   } = {},
 ) {
-  const state: Backend = { clone: init.clone ?? EMPTY, startCalls: 0, cloneReads: 0, estimateReads: 0 };
+  const state: Backend = { clone: init.clone ?? EMPTY, startCalls: 0, cloneReads: 0, estimateReads: 0, buildReads: 0 };
   const drawer = drawerBackend(
     { job: init.job === undefined ? agentJob({ status: "running" }) : init.job },
     {
@@ -85,6 +93,10 @@ export function backend(
           estimateStub ??
           init.estimate ?? { status: 404, body: { error: { code: "NO_ESTIMATE", message: "这条还没有估价" } } }
         );
+      },
+      "/api/productions/:id/build": () => {
+        state.buildReads += 1;
+        return buildStub ?? { status: 404, body: { error: { code: "NO_BUILD", message: "这条还没有出过片" } } };
       },
       // 换模板的用例要切到 tpl-2：它也得是一个正常打开的页面，不然错误态会把上一个模板的残留一起盖掉
       "/api/templates/tpl-2/clone": { body: { ...EMPTY, templateId: "tpl-2" } },

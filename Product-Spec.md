@@ -1,6 +1,6 @@
 # 产品需求规范：Clone Studio（暂定名）
 
-> 版本 v1.9.3 · 2026-09-23 · 内核：Hypit 0.2.6（本地副本 `hypit-main/`）· 技术调研见 `Hypit-Research.md`
+> 版本 v1.9.4 · 2026-09-24 · 内核：Hypit 0.2.6（本地副本 `hypit-main/`）· 技术调研见 `Hypit-Research.md`
 > Phase 0 先行验证结论见 `clone-studio/docs/spike-notes.md`，本版据其回写。
 
 ## 0. AI 使用说明
@@ -343,7 +343,7 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 
 **优先级：** P0　**关联任务：** TASK-004、TASK-005　**关联流程：** FLOW-002、FLOW-003
 
-**行为：** 出片前 spawn `hypit plan --json` 与 `hypit pricing --json` 得到外部请求数与执行参数。通过闸门后 spawn `hypit build <run> --follow --json`，并行 `hypit activity --watch --jsonl` 取结构化进度。完成后 `hypit get <build-id> --output final.video --to output/<name>.mp4 --json`。
+**行为：** 出片前 spawn `hypit plan --json` 与 `hypit pricing --json` 得到外部请求数与执行参数。通过闸门后 spawn `hypit build <run> --json` 提交、立刻拿到 build-id，再 spawn `hypit status <build-id> --watch --json --verbose` 跟到结束，并行 `hypit activity --watch --jsonl` 取结构化进度（不用 `build --follow`：JSON 模式下它到结束才给 build-id，中途取消就没法告诉 hypit；hypit 自己也说明 Ctrl-C 只是不看了、Build 照跑）。完成后 `hypit get <build-id> --output final.video --to output/<name>.mp4 --json`。
 
 **估价来源（Q-003 已解答，hypit 不出数）：** hypit 的 `pricing.kind` 只有 `"page"`（一个价格页 URL）和 `"local"`（零价）两种，不含任何结构化费率，官方文档明言 "Hypit itself calculates no total"。因此：
 - MUST Clone Studio 自己维护一张"能力/模型 → 单价"费率表（随设置页可编辑），用 `plan --json` 的 `needs[].summary.fields`（宽高、`startFrame`/`endFrameExclusive`、帧率、采样率）与 `providerRequestCount` 自行计算估价。
@@ -359,7 +359,9 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 - MUST 凭据用 `@hypit/credential-store-env`，TokenDance / HypiHub key 由后端注入 hypit 子进程环境变量，不写进工作目录任何文件。
 - MUST 后端生成的 `hypit.runtime.json` 按已验证的生成服务写 endpoints：TokenDance（`@hypit/provider-tokendance`，覆盖 Seedance 2.0/2.5 视频、Seedream 5.0 lite 生图、MiniMax H3 视频）为主；HypiHub 已连接时一并写入，覆盖 TokenDance 没有的能力（配音 TTS、GPT Image 等）。
 - MUST 把当前可用的能力清单（哪些模型能用、哪些不能）写进 Agent 系统提示，要求 Agent 只用可用能力写 SVML；plan 出现无 Provider 可解析的请求时标失败并指明缺哪种能力。
-- MUST 渲染并发受 `hyperframes.local` 的 `workers` 与全局渲染任务数限制，默认 workers=4。
+- MUST 渲染并发受 `hyperframes.local` 的 `workers` 与全局渲染任务数限制，默认 workers=1、全局同时 1 个 build（本机实测 workers=2 起渲染进程崩溃、1 稳定；设置页可调）。
+- MUST 出片执行器：`build --json` 提交后 build-id 立刻落台账；`status --watch --json --verbose` 的进度行与 `activity --watch --jsonl` 给结构化进度；判成败只看 `result.outcome`，不看 `work.state`；成功后 `get` 导出到工作目录 `output/`；出片前重新生成 Runtime Profile；失败时完整展示 `failure` 原文、记下当时可用内存，可「重试出片」；出片进行中不允许换参考视频。
+- MUST 任何时候停下（人取消、跟进度的进程超时或出错、后端重启后发现上次还在跑的 build）都让 hypit 取消那条 build，不让 Worker 继续渲染、继续花钱。人取消的那次 build 记「已取消」，出片单位回到「失败」可重试（出片单位的「已取消」只表示作废）。
 - MUST 记录花费到台账。**build 的实际花费拿不到**：hypit 的 Result 只有不含金额的 `receipt: { id, url? }`，全仓库无任何金额字段。故生成侧花费一律按"请求数 × 自维护单价"记账并标"估"，不谎称账单。
 
 **输入（设置）：**
@@ -407,7 +409,7 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 
 **优先级：** P0　**关联任务：** TASK-004
 
-**行为：** 每个 Agent 任务记：时长、等价 token 花费（取最新一条 `result` 的 `total_cost_usd`，SDK 自称 "An estimate, not a billing statement"）。每次 build 记：估价、build-id、`receipt.id`/`url`（若有）。成片卡片显示合计；模板页头显示模板累计。
+**行为：** 每个 Agent 任务记：时长、等价 token 花费（取最新一条 `result` 的 `total_cost_usd`，SDK 自称 "An estimate, not a billing statement"）。每次 build 记：估价、build-id、`receipt.id`/`url`（若有；一次 build 有多条远程操作时记第一条带 url 的，都没有 url 记第一条，其余用 `hypit inspect <build-id>` 看）。成片卡片显示合计；模板页头显示模板累计。
 
 **规则：**
 - MUST 两类花费都标注为"估算"，界面不出现"实际账单"字样。build 侧没有实际金额可取（见 REQ-006 估价来源）。
@@ -572,7 +574,7 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 | ModelProfile | Agent 模型档案 | id, name, kind(subscription/anthropic/compatible), base_url, token(加密存配置文件，不入库明文), model_id, fast_model_id, supports_vision, supports_web_search, price_in, price_out, verified_at, is_default, builtin |
 | AgentMessage | Agent 流式消息 | id, job_id, seq, role, type, payload |
 | VideoChannel | 生视频通道配置 | id, kind(tokendance/minimax_cloud/minimax_comfyui/jimeng_cli), enabled, config(地址等，凭据存 secrets.json), verified_at, is_default |
-| Build | 一次 hypit build | id, production_id, video_channel, video_model, hypit_build_id, estimate_usd, actual_usd, status, error_code, error_message, output_path |
+| Build | 一次 hypit build | id, production_id, video_channel, video_model, hypit_build_id, estimate_usd, actual_usd, status, error_code, error_message, output_path, context_json（失败时的可用内存与最后一条进度） |
 | Asset | 变体条目素材 | id, production_id, file_path, source_url, replaced_by_user |
 | PricingRate | 费率表一行（REQ-006） | id, capability, endpoint(可空), unit(request/second), usd, note |
 | Estimate | 一次估价与闸门结论 | id, production_id, kind(ok/blocked), total_usd(可空=拿不到), lines, reason, decision(auto/confirm/blocked), reasons, confirmed_at |
@@ -624,7 +626,7 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 
 | 类别 | 要求 | 优先级 |
 |---|---|---|
-| 性能 | 界面操作响应 ≤300ms；Agent 消息从产生到抽屉显示 ≤1 秒；默认并发 2 Agent + 1 渲染，渲染 workers 默认 4 | P0 |
+| 性能 | 界面操作响应 ≤300ms；Agent 消息从产生到抽屉显示 ≤1 秒；默认并发 2 Agent + 1 渲染，渲染 workers 默认 1 | P0 |
 | 安全 | 后端只绑 127.0.0.1；Agent 写路径限工作目录；build 拦截；key 不进 Agent 环境、不落工作目录 | P0 |
 | 隐私 | 数据全在本机；除所选 Agent 模型服务、TokenDance / HypiHub、Agent 联网搜图外无外发；不做遥测 | P0 |
 | 兼容性 | Windows 11，Chrome/Edge 最新版，视口 ≥1280px；不做移动端 | P0 |

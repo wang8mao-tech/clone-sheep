@@ -5,6 +5,7 @@ import type { FastifyInstance } from "fastify";
 import { present } from "../agent/agent-service.js";
 import { latestJobOf } from "../agent/job-store.js";
 import { ArchiveError, requireTemplate } from "../services/archive.js";
+import { latestBuildRow } from "../services/build-store.js";
 import { currentVerdict, latestReplica, startClone } from "../services/clone.js";
 import { isReallyInside } from "../lib/safe-path.js";
 import { archiveErrorHandler } from "./errors.js";
@@ -63,8 +64,15 @@ export async function cloneRoutes(app: FastifyInstance): Promise<void> {
       timeline,
       svrunExists: dir ? existsSync(join(dir, "reference.svrun")) : false,
       ...currentVerdict(id),
+      // buildId：出过片的才有。failed 且没有 build = 估价没过（估价卡，可重估）；有 build = 出片失败（出片卡，可重试）
       replica: replica
-        ? { id: replica.id, version: replica.version, status: replica.status, updatedAt: replica.updated_at }
+        ? {
+            id: replica.id,
+            version: replica.version,
+            status: replica.status,
+            updatedAt: replica.updated_at,
+            buildId: latestBuildRow(replica.id)?.id ?? null,
+          }
         : null,
     };
   });
@@ -76,6 +84,10 @@ export async function cloneRoutes(app: FastifyInstance): Promise<void> {
   app.post("/api/templates/:id/clone", async (request, reply) => {
     const { id } = request.params as { id: string };
     const template = requireTemplate(id);
+    // 复刻片出完模板就离开「复刻中」（待审 / 已通过）：这是「已经复刻完成」，不是「还没到这一步」
+    if (template.status === "awaiting_review" || template.status === "approved") {
+      throw new ArchiveError("这个模板已经复刻完成了，不用再开始", "CLONE_EXISTS", 409);
+    }
     if (template.status !== "cloning") {
       throw new ArchiveError("模板还没到复刻这一步：先在 ① 参考 完成证据准备", "NOT_CLONING", 409);
     }

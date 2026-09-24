@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { drawerBackend } from "../../test/agent-drawer-kit.js";
 import { CLONE_POLL_MS } from "./CloneStep.js";
@@ -13,6 +13,7 @@ import {
   mount,
   pushTemplateEvent,
   source,
+  stubBuild,
   stubEstimate,
   stubSnapshotFailure,
   TPL,
@@ -95,7 +96,7 @@ describe("其它状态", () => {
 });
 
 describe("估价卡（CMP-006）", () => {
-  const REPLICA = { id: "prod-1", version: 1, status: "queued", updatedAt: "" };
+  const REPLICA = { id: "prod-1", version: 1, status: "queued", updatedAt: "", buildId: null };
   const ESTIMATE = {
     id: "e1",
     productionId: "prod-1",
@@ -132,6 +133,70 @@ describe("估价卡（CMP-006）", () => {
     pushTemplateEvent("estimate", { productionId: "prod-1", estimateId: "e1", decision: "auto" });
     expect(await screen.findByText("限额内，将自动出片")).toBeTruthy();
     expect(state.estimateReads).toBeGreaterThan(reads);
+  });
+
+  it("估价没过（blocked）的复刻片：状态是失败但没出过片，右栏还是估价卡，带原因和「重新估价」", async () => {
+    stubEstimate({
+      ...ESTIMATE,
+      kind: "blocked",
+      decision: "blocked",
+      totalUsd: null,
+      reason: "plan 有 1 个请求没有 Provider 能接：缺 @hypit/seedance@2#generate-video",
+      reasons: [],
+    });
+    const { state } = backend({
+      job: agentJob({ status: "done" }),
+      clone: { ...EMPTY, analysis: file("分析"), replica: { ...REPLICA, status: "failed", buildId: null } },
+    });
+    await mount();
+    const card = await screen.findByRole("region", { name: "出片估价" });
+    expect(screen.queryByRole("region", { name: "出片" })).toBeNull();
+    // 没出过片就不该去拉出片记录（出片卡对 404 会自己隐藏，光看界面分不出来）
+    expect(state.buildReads).toBe(0);
+    expect(await screen.findByText(/缺 @hypit\/seedance@2#generate-video/)).toBeTruthy();
+    expect(within(card).getByRole("button", { name: "重新估价" })).toBeTruthy();
+  });
+
+  it("复刻片过了闸门在出片：右栏换成出片卡；build 事件让它重拉", async () => {
+    const BUILD = {
+      id: "b1",
+      productionId: "prod-1",
+      status: "failed",
+      hypitBuildId: null,
+      estimateUsd: 0,
+      receiptId: null,
+      receiptUrl: null,
+      errorCode: "BUILD_FAILED",
+      errorMessage: "Command need:… failed",
+      outputPath: null,
+      startedAt: null,
+      endedAt: null,
+      createdAt: "",
+      context: null,
+      activity: null,
+      progress: null,
+    };
+    stubBuild(BUILD);
+    const { state } = backend({
+      job: agentJob({ status: "done" }),
+      clone: { ...EMPTY, analysis: file("分析"), replica: { ...REPLICA, status: "failed", buildId: "b1" } },
+    });
+    await mount();
+    expect(await screen.findByRole("region", { name: "出片" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "出片估价" })).toBeNull();
+    expect(await screen.findByText("出片失败")).toBeTruthy();
+    const reads = state.buildReads;
+    // 重试出完了：后端推 build 事件，卡片重拉
+    stubBuild({
+      ...BUILD,
+      status: "done",
+      errorCode: null,
+      errorMessage: null,
+      outputPath: "X:\\o\\replica-v1-abcd1234.mp4",
+    });
+    pushTemplateEvent("build", { productionId: "prod-1" });
+    expect(await screen.findByText("已出片")).toBeTruthy();
+    expect(state.buildReads).toBeGreaterThan(reads);
   });
 });
 

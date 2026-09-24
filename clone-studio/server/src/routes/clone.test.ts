@@ -34,6 +34,8 @@ describe("GET /api/templates/:id/clone", () => {
     b.writeProducts();
     await b.finishRun();
     await until(() => b.verdictCount() === 1, "判据落库");
+    // 默认假 plan 全本地 $0 → auto → 执行器接手出片（6.4），假 build 立刻成功
+    await until(() => b.clone.latestReplica(b.templateId)?.status === "done", "复刻片自动出完");
     const full = (await server.inject({ url })).json();
     expect(full.analysis).toEqual({ text: "# ANALYSIS.md\n", truncated: false });
     expect(full.timeline.text).toBe("# TIMELINE.md\n");
@@ -41,8 +43,10 @@ describe("GET /api/templates/:id/clone", () => {
       svrunExists: true,
       verifying: false,
       verdict: { ok: true },
-      replica: { version: 1, status: "queued" },
+      replica: { version: 1, status: "done" },
     });
+    // 出过片：快照带最新 build id（② 页据此分「估价没过」与「出片失败」）
+    expect(full.replica.buildId).toBe(b.build.latestBuild(full.replica.id)?.id);
     await server.close();
   });
 
@@ -114,10 +118,13 @@ describe("POST /api/templates/:id/clone", () => {
 
   it("已经有过任务（哪怕做完了）：409 CLONE_EXISTS，不清掉做好的稿子", async () => {
     const b = await boot();
+    // plan 跑不起来 → 复刻片停在待确认、模板留在复刻中：验「有过任务」这条分支
+    b.setPlan(new Error("plan 挂了"));
     b.setStatus("cloning");
     b.clone.startClone(b.templateId);
     b.writeProducts();
     await b.finishRun();
+    await until(() => b.clone.latestReplica(b.templateId)?.status === "awaiting_cost_confirm", "复刻片待确认");
     const server = await app();
     const res = await server.inject({ method: "POST", url: `/api/templates/${b.templateId}/clone` });
     expect(res.statusCode).toBe(409);
@@ -125,6 +132,21 @@ describe("POST /api/templates/:id/clone", () => {
     // 做好的稿子还在
     expect(existsSync(path.join(b.workspace, "ANALYSIS.md"))).toBe(true);
     expect(existsSync(path.join(b.workspace, "reference.svrun"))).toBe(true);
+    await server.close();
+  });
+
+  it("复刻片出完、模板已到待审：409 CLONE_EXISTS（不是「还没到复刻这一步」）", async () => {
+    const b = await boot();
+    b.setStatus("cloning");
+    b.clone.startClone(b.templateId);
+    b.writeProducts();
+    await b.finishRun();
+    // 默认假 plan $0 → auto → 假 build 立刻成功 → 模板转待审
+    await until(() => b.templateStatus() === "awaiting_review", "模板待审");
+    const server = await app();
+    const res = await server.inject({ method: "POST", url: `/api/templates/${b.templateId}/clone` });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.code).toBe("CLONE_EXISTS");
     await server.close();
   });
 

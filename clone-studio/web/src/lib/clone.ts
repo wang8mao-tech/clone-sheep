@@ -35,7 +35,8 @@ export interface CloneState {
   verdict: CloneVerdict | null;
   /** 任务完成了、宿主还在核判据 */
   verifying: boolean;
-  replica: { id: string; version: number; status: string; updatedAt: string } | null;
+  /** buildId：出过片的才有。failed 且没有 build = 估价没过（估价卡，可重估）；有 build = 出片失败 / 取消（出片卡，可重试） */
+  replica: { id: string; version: number; status: string; updatedAt: string; buildId: string | null } | null;
 }
 
 export const cloneKeys = {

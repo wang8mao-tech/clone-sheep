@@ -182,8 +182,16 @@ describe("侧栏树与统计", () => {
     ).run(now);
 
     const stats = archive.templateStats(template);
-    expect(stats.outputs).toBe(1);
+    // 复刻片出完但模板还没验货：不算成片（REQ-004：验货通过才是第一条成片）；花费照算
+    expect(stats.outputs).toBe(0);
     expect(stats.totalCostUsd).toBeCloseTo(0.92, 6);
     expect(stats.costIsEstimate).toBe(true);
+    // 验货通过后这条复刻片就是第一条成片；变体不看模板状态
+    expect(archive.templateStats({ ...template, status: "approved" }).outputs).toBe(1);
+    d.prepare(
+      `INSERT INTO productions (id, template_id, kind, status, created_at, updated_at)
+       VALUES ('p2', ?, 'variant', 'done', ?, ?)`,
+    ).run(template.id, now, now);
+    expect(archive.templateStats(template).outputs).toBe(1);
   });
 });

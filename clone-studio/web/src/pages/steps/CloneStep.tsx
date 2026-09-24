@@ -3,14 +3,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router";
 import { QuotaBar } from "../../components/agent/QuotaBar.js";
 import { AnalysisSection, TimelineSection, VerdictSection } from "../../components/clone/CloneSections.js";
+import { BuildCard } from "../../components/clone/BuildCard.js";
 import { EstimateCard } from "../../components/clone/EstimateCard.js";
 import { Button } from "../../components/ui/Button.js";
 import { QueryErrorState } from "../../components/ui/QueryErrorState.js";
 import { StatusMark } from "../../components/ui/StatusMark.js";
 import { isActive, type AgentJobView } from "../../lib/agent.js";
 import { useTemplateAgent } from "../../lib/agent-feed-context.js";
-import { cloneApi, cloneKeys } from "../../lib/clone.js";
+import { cloneApi, cloneKeys, type CloneState } from "../../lib/clone.js";
 import { evidenceApi, evidenceKeys } from "../../lib/evidence.js";
+import { buildKeys } from "../../lib/build.js";
 import { estimateKeys } from "../../lib/estimate.js";
 import { formatUsd } from "../../lib/format.js";
 import { api } from "../../lib/api.js";
@@ -71,9 +73,16 @@ function CloneBody({ templateId }: { templateId: string }) {
       if (typeof id === "string") void qc.invalidateQueries({ queryKey: estimateKeys.production(id) });
       void qc.invalidateQueries({ queryKey: cloneKeys.state(templateId) });
     });
+    // 出片进度 / 结果变了：那张卡重拉（复刻片状态也跟着 clone 快照走）
+    const offBuild = feed.onTemplateEvent("build", (data) => {
+      const id = (data as { productionId?: unknown } | null)?.productionId;
+      if (typeof id === "string") void qc.invalidateQueries({ queryKey: buildKeys.production(id) });
+      void qc.invalidateQueries({ queryKey: cloneKeys.state(templateId) });
+    });
     return () => {
       offClone();
       offEstimate();
+      offBuild();
     };
   }, [feed, qc, templateId]);
   // 估价卡要画单条限额的进度条
@@ -186,12 +195,30 @@ function CloneBody({ templateId }: { templateId: string }) {
             </span>
           </div>
         )}
-        {/* CMP-006：判据通过、复刻片排上队之后才有估价；已出片的那张卡由 ③ 验货接手 */}
-        {data.replica && data.replica.status !== "done" && settings.data ? (
+        {/* CMP-006：判据通过、复刻片排上队之后才有估价；过了闸门之后换成 CMP-007 出片卡（进度 / 结果 / 失败重试） */}
+        {data.replica && showsEstimate(data.replica) && settings.data ? (
           <EstimateCard productionId={data.replica.id} perItemLimitUsd={settings.data.perItemLimitUsd} />
         ) : null}
+        {data.replica && showsBuild(data.replica) ? <BuildCard productionId={data.replica.id} /> : null}
       </div>
     </div>
+  );
+}
+
+type Replica = NonNullable<CloneState["replica"]>;
+
+/** 闸门前（排队 / 待确认），以及估价没过的失败（没出过片）：估价卡，能重估 */
+function showsEstimate(r: Replica): boolean {
+  return r.status === "queued" || r.status === "awaiting_cost_confirm" || (r.status === "failed" && r.buildId === null);
+}
+
+/** 过了闸门：出片卡（进度 / 结果 / 出片失败或取消后的重试） */
+function showsBuild(r: Replica): boolean {
+  return (
+    r.status === "building" ||
+    r.status === "done" ||
+    r.status === "interrupted" ||
+    (r.status === "failed" && r.buildId !== null)
   );
 }
 

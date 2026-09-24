@@ -5,6 +5,7 @@ import { workspaceDir } from "../hypit/workspace.js";
 import { procs } from "../lib/procs.js";
 import { stopAgentsFor } from "./agent-stopper.js";
 import { requireClient, requireTemplate } from "./archive.js";
+import { cancelRunningBuilds } from "./build-run.js";
 import { removeWithRollback } from "./trash.js";
 
 export { purgeTrash } from "./trash.js";
@@ -211,7 +212,9 @@ async function stopProcesses(templateIds: readonly string[], productionIds: read
   const templateSet = new Set(templateIds);
   const productionSet = new Set(productionIds);
 
-  // 先让调度器停 Agent 会话：它走 interrupt，会话能体面收尾、子进程也被带走，
+  // 正在出片的先取消：本地子进程中止之外还要让 hypit 取消那条 build，不然 Worker 继续渲染、继续花钱
+  await cancelRunningBuilds(productionIds);
+  // 再让调度器停 Agent 会话：它走 interrupt，会话能体面收尾、子进程也被带走，
   // 并且等到真的结束才返回。之后的 killBySubject 是兜底（hypit 调用、以及没停干净的）
   await stopAgentsFor([
     ...templateIds.map((id) => ({ kind: "template" as const, id })),

@@ -25,11 +25,9 @@ describe("判据", () => {
     // 显式 --workspace（REQ-002 MUST「所有 hypit 调用显式 --workspace」）
     expect(b.hypitCalls).toContainEqual(["check", "reference.svrun", "--workspace", b.workspace, "--json"]);
     expect(job.status).toBe("done");
-    expect(b.clone.latestReplica(b.templateId)).toMatchObject({
-      version: 1,
-      status: "queued",
-      run_path: "reference.svrun",
-    });
+    expect(b.clone.latestReplica(b.templateId)).toMatchObject({ version: 1, run_path: "reference.svrun" });
+    // 默认假 plan 全本地 $0 → auto → 执行器接手（6.4），假 build 立刻成功
+    await until(() => b.clone.latestReplica(b.templateId)?.status === "done", "复刻片自动出完");
   });
 
   it("缺 ANALYSIS.md：任务改判失败并写明缺什么，不建复刻片", async () => {
@@ -189,9 +187,11 @@ describe("核的过程中情况变了", () => {
 describe("换参考视频", () => {
   it("判据通过后换参考视频、新证据失败：旧复刻片作废，不会留着等估价", async () => {
     const b = await boot();
+    // plan 跑不起来 → 待确认花费：复刻片停在闸门前（$0 的会直接出片，出完的不是「等估价」）
+    b.setPlan(new Error("plan 挂了"));
     await cloning(b);
     await b.finishRun();
-    await until(() => b.clone.latestReplica(b.templateId)?.status === "queued", "旧复刻片排队");
+    await until(() => b.clone.latestReplica(b.templateId)?.status === "awaiting_cost_confirm", "旧复刻片待确认");
 
     b.setFail("media probe", new Error("新视频坏了"));
     await b.evidence.startEvidence({
@@ -206,6 +206,7 @@ describe("换参考视频", () => {
   it("还在核时换了参考视频（走真的 startEvidence）：核完不建复刻片，新证据失败也不留排队的旧复刻片", async () => {
     // 第三轮审查复现的竞态：作废旧复刻片若早于模板离开 cloning，中间 rm 的 await 空当里核完的那一轮会再建一条
     const b = await boot();
+    b.setPlan(new Error("plan 挂了"));
     let release: (v: Record<string, unknown>) => void = () => undefined;
     b.setCheck(() => new Promise((resolve) => (release = resolve)));
     await cloning(b);
@@ -223,6 +224,45 @@ describe("换参考视频", () => {
     await until(() => b.verdictCount() === 1, "结论落库");
     expect(b.clone.latestReplica(b.templateId)).toBeUndefined();
   });
+  it("核的过程中换过参考视频又回到复刻中、新一轮没起来：旧稿子核出的结论不建复刻片（模板 updated_at 变了）", async () => {
+    const b = await boot();
+    let release: (v: Record<string, unknown>) => void = () => undefined;
+    b.setCheck(() => new Promise((resolve) => (release = resolve)));
+    await cloning(b);
+    await b.finishRun();
+    await until(() => b.hypitCalls.some((c) => c[0] === "check"), "开始核");
+
+    // 换参考视频：模板回到导入中；新证据做完又回到复刻中，但新一轮 startClone 没起来（最新任务还是旧的那条）
+    b.db()
+      .prepare("UPDATE templates SET status = 'cloning', updated_at = ? WHERE id = ?")
+      .run(new Date(Date.now() + 1000).toISOString(), b.templateId);
+    release(CHECK_OK);
+    await until(() => b.verdictCount() === 1, "结论落库");
+    expect(b.clone.latestReplica(b.templateId)).toBeUndefined();
+  });
+
+  it("有一条失败的复刻片（估价 blocked / 出片失败）时判据再次通过：作废它、建下一版重新排队", async () => {
+    const b = await boot();
+    b.setPlan(new Error("plan 挂了"));
+    await cloning(b);
+    const jobId = await b.finishRun();
+    await until(() => b.clone.latestReplica(b.templateId)?.status === "awaiting_cost_confirm", "v1 待确认");
+    const v1 = b.clone.latestReplica(b.templateId) as { id: string };
+    b.db().prepare("UPDATE productions SET status = 'failed' WHERE id = ?").run(v1.id);
+
+    // 同一次完成再核一遍（重启补核之类，不走 startClone、旧复刻片没被作废）：判据再次通过
+    b.setPlan({ format: "hypit.cli-plan@1", ok: true, providers: [], needs: [] });
+    await b.clone.verifyClone(b.store.requireJob(jobId));
+    const v2 = b.clone.latestReplica(b.templateId);
+    expect(v2).toMatchObject({ version: 2 });
+    expect(v2?.id).not.toBe(v1.id);
+    expect(
+      (b.db().prepare("SELECT status FROM productions WHERE id = ?").get(v1.id) as { status: string }).status,
+    ).toBe("cancelled");
+    // 新的一版走自己的估价：$0 → 自动出片
+    await until(() => b.clone.latestReplica(b.templateId)?.status === "done", "v2 出完");
+  });
+
   it("核完时模板已经离开复刻中（作废之后才核完）：不建复刻片", async () => {
     const b = await boot();
     let release: (v: Record<string, unknown>) => void = () => undefined;

@@ -63,14 +63,15 @@ const statusOf = (b: Booted, id: string) =>
   (b.db().prepare("SELECT status FROM productions WHERE id = ?").get(id) as { status: string }).status;
 
 describe("判据通过后自动估价", () => {
-  it("全是本地能力：$0，限额内自动放行，复刻片留在排队等出片；plan / pricing 都记进 hypit_calls", async () => {
+  it("全是本地能力：$0，限额内自动放行，出片执行器接手直到出完；plan / pricing 都记进 hypit_calls", async () => {
     const b = await boot();
     b.setPlan(plan({ providerRequestCount: 0, providers: [plan().providers[0]], needs: [plan().needs[0]] }));
     const id = await replicaReady(b);
 
     const est = b.estimate.currentEstimate(id);
     expect(est).toMatchObject({ kind: "ok", totalUsd: 0, decision: "auto", reasons: [] });
-    expect(statusOf(b, id)).toBe("queued");
+    // auto 即出片（6.4）：假 build 立刻成功
+    await until(() => statusOf(b, id) === "done", "自动出片完成");
     const calls = b.hypitCalls.filter((c) => c[0] === "plan" || c[0] === "pricing");
     expect(calls.map((c) => c[0])).toEqual(["plan", "pricing"]);
     // 显式 --workspace，且指定重写过的 Runtime Profile
@@ -114,7 +115,7 @@ describe("判据通过后自动估价", () => {
     expect(b.estimate.currentEstimate(id)).toMatchObject({ totalUsd: 0.5, decision: "auto" });
   });
 
-  it("AC-018：估价 $2.1 超过单条限额：待确认花费；确认后回到排队（AC-018 的 build 由 6.4 接）", async () => {
+  it("AC-018：估价 $2.1 超过单条限额：待确认花费；确认后放行，执行器接手出片", async () => {
     const b = await boot();
     b.rates.upsertRate({ capability: SEEDANCE, unit: "second", usd: 0.42 });
     b.setPlan(plan());
@@ -128,7 +129,9 @@ describe("判据通过后自动估价", () => {
 
     const confirmed = b.estimate.confirmCost(id);
     expect(confirmed.confirmedAt).not.toBeNull();
-    expect(statusOf(b, id)).toBe("queued");
+    // 确认即放行：回到排队并立刻被执行器推进（6.4），假 build 立刻成功
+    expect(["queued", "building", "done"]).toContain(statusOf(b, id));
+    await until(() => statusOf(b, id) === "done", "确认后出片完成");
     // 再确认一次是幂等的；auto 的那种不能确认
     expect(b.estimate.confirmCost(id).confirmedAt).toBe(confirmed.confirmedAt);
   });
@@ -191,7 +194,7 @@ describe("重估与重启", () => {
     b.rates.upsertRate({ capability: SEEDANCE, unit: "request", usd: 0.3 });
     await b.estimate.estimateProduction(id);
     expect(b.estimate.currentEstimate(id)).toMatchObject({ totalUsd: 0.3, decision: "auto" });
-    expect(statusOf(b, id)).toBe("queued");
+    await until(() => statusOf(b, id) === "done", "新结论 auto → 出片完成");
   });
 
   it("重启：排队中没估过价的复刻片补估一次；估过的不重复估", async () => {
@@ -204,8 +207,11 @@ describe("重估与重启", () => {
     await b.clone.verifyClone(b.store.requireJob(jobId));
     const replica = b.clone.latestReplica(b.templateId) as { id: string };
     await until(() => b.estimate.currentEstimate(replica.id) !== undefined, "估价落库");
-    // 模拟「进程在估价落库前退出」：把结论删掉，复刻片留在排队里
+    // $0 auto 即出片：等假 build 出完再模拟「进程在估价落库前退出」——结论、build 记录都没落，复刻片留在排队里
+    await until(() => statusOf(b, replica.id) === "done", "自动出片完成");
     b.db().prepare("DELETE FROM estimates WHERE production_id = ?").run(replica.id);
+    b.db().prepare("DELETE FROM builds WHERE production_id = ?").run(replica.id);
+    b.db().prepare("UPDATE productions SET status = 'queued' WHERE id = ?").run(replica.id);
     expect(b.estimate.unestimatedQueued()).toEqual([replica.id]);
     const before = b.hypitCalls.filter((c) => c[0] === "plan").length;
 
@@ -258,6 +264,10 @@ describe("重估与重启", () => {
     expect(await b.estimate.estimateProduction("v2")).toMatchObject({ decision: "confirm", reasons: ["batch_halted"] });
     // 重估更早的 v1：后面 v2 的 batch_halted 挡不到它，它自己只按数字判（0.1 ≤ 剩余 0.2）
     expect(await b.estimate.estimateProduction("v1")).toMatchObject({ decision: "auto" });
+    // auto 即出片（6.4）：v0、v1 都被执行器推进，假 build 立刻成功；出完再把 v1 拉回排队，只为继续验闸门顺序
+    await until(() => statusOf(b, "v1") === "done", "v1 自动出片完成");
+    d.prepare("DELETE FROM builds WHERE production_id = 'v1'").run();
+    d.prepare("UPDATE productions SET status = 'queued' WHERE id = 'v1'").run();
     // 让 v1 回到因批次超限停下的状态，再验「v1 被作废后不再挡 v2」「v1 确认后不再挡 v2」
     b.rates.upsertRate({ capability: SEEDANCE, unit: "second", usd: 0.1 });
     expect(await b.estimate.estimateProduction("v1")).toMatchObject({

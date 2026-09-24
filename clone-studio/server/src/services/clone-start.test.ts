@@ -83,6 +83,8 @@ describe("换参考视频", () => {
 
   it("上一轮做完后换参考视频：新一轮起之前清掉旧产物、作废没出片的旧复刻片", async () => {
     const b = await boot();
+    // plan 跑不起来 → 复刻片停在待确认（$0 的会直接出片，出完的不是「没出片」）
+    b.setPlan(new Error("plan 挂了"));
     b.setStatus("cloning");
     b.clone.startClone(b.templateId);
     b.writeProducts();

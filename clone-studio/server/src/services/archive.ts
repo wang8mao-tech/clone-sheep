@@ -199,7 +199,7 @@ export function workspaceServices(): WorkspaceServices {
     // WhisperX 一律绑上：服务没起时 hypit 报 MANAGED_PROGRAM_DOWN，
     // 比「无 Provider 可解析」更能指出真正的问题（连通性检测留到 Phase 4）
     whisperx: true,
-    renderWorkers: row?.render_workers ?? 4,
+    renderWorkers: row?.render_workers ?? 1,
     renderConcurrency: row?.render_concurrency ?? 1,
   };
 }
@@ -237,10 +237,14 @@ export interface TemplateStats {
 
 export function templateStats(template: TemplateRow): TemplateStats {
   const d = db();
+  // 成片数：变体出完就算；复刻片要「通过验货」之后才算第一条成片（REQ-004），没验货前不计
   const outputs = (
-    d.prepare("SELECT COUNT(*) AS n FROM productions WHERE template_id = ? AND status = 'done'").get(template.id) as {
-      n: number;
-    }
+    d
+      .prepare(
+        `SELECT COUNT(*) AS n FROM productions
+          WHERE template_id = ? AND status = 'done' AND (kind = 'variant' OR ? = 'approved')`,
+      )
+      .get(template.id, template.status) as { n: number }
   ).n;
 
   const agent = d

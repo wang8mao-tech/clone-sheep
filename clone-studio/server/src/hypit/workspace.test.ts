@@ -111,8 +111,11 @@ describe("createWorkspace", () => {
     writeFileSync(path.join(dir, "ANALYSIS.md"), "x");
     writeFileSync(path.join(dir, "reference.svrun"), "x");
     mkdirSync(path.join(dir, "scratch", "deep"), { recursive: true });
+    // 已经导出的成片在 output/：重跑不能删（Task 6.4 把 output 加进保留清单）
+    writeFileSync(path.join(dir, "output", "replica-v1-abcd1234.mp4"), "mp4");
 
     expect(mod.resetAgentProducts(dir).sort()).toEqual(["ANALYSIS.md", "reference.svrun", "scratch"]);
+    expect(existsSync(path.join(dir, "output", "replica-v1-abcd1234.mp4"))).toBe(true);
     for (const rel of [
       "package.json",
       "hypit.runtime.json",

@@ -39,6 +39,11 @@ const ESTIMABLE: readonly string[] = ["queued", "awaiting_cost_confirm", "failed
 /** 正在估的：同一条不并发跑两遍 plan（启动补估 + 判据触发可能撞在一起） */
 const inFlight = new Set<string>();
 
+/** 这条正在估价：变体重跑要等它（估完的结论会改状态，8.2 审查 M1） */
+export function isEstimating(productionId: string): boolean {
+  return inFlight.has(productionId);
+}
+
 interface Limits {
   per_item_limit_usd: number;
   batch_limit_usd: number;
@@ -213,7 +218,7 @@ function applyDecision(production: ProductionRow, record: EstimateRecord): boole
   const changes = db()
     .prepare(
       `UPDATE productions SET status = ?, updated_at = ?
-        WHERE id = ? AND status IN ('queued', 'awaiting_cost_confirm', 'failed')`,
+        WHERE id = ? AND status IN ('queued', 'awaiting_cost_confirm', 'failed') AND run_path IS NOT NULL`,
     )
     .run(status, new Date().toISOString(), production.id).changes;
   return changes > 0;

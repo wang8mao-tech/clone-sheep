@@ -41,6 +41,11 @@ export function setBuildLog(next: BuildLog): void {
   log = next;
 }
 
+/** 出片这一侧后台动作（估价、出片）出错时的日志：素材通过后的估价也记在这里 */
+export function logBackgroundError(detail: object, message: string): void {
+  log.error(detail, message);
+}
+
 function renderConcurrency(): number {
   const row = db().prepare("SELECT render_concurrency FROM settings WHERE id = 1").get() as
     { render_concurrency: number } | undefined;
@@ -195,6 +200,10 @@ export function retryBuild(productionId: string): { queued: boolean } {
   }
   if (!hasBuild(productionId)) {
     throw new BuildError("这条还没出过片：是估价没过，用「重新估价」", "NOT_RETRYABLE", 409);
+  }
+  // 变体重跑过（运行文件清掉了、素材要重新审）：没有能出的稿子（8.2 审查 M2）
+  if (!production.run_path) {
+    throw new BuildError("这条变体已经重跑，稿子要重新写、素材要重新审，不能直接重试出片", "NOT_RETRYABLE", 409);
   }
   // 回到排队、重新估价过闸门：限额内由估价结果自动起片，超限停在「待确认花费」等人确认（Task 7.2）
   setProductionStatus(productionId, "queued");

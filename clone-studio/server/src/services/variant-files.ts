@@ -165,14 +165,19 @@ export function resetVariantProducts(dir: string, keepAssets: readonly string[],
       if (existsSync(from)) copyFileSync(from, dest);
     }
   }
-  if (keepAssets.length > 0) {
-    writeFileSync(
-      path.join(resolved, USER_ASSETS_FILE),
-      `${JSON.stringify({ assets: keepAssets }, null, 2)}\n`,
-      "utf8",
-    );
-  }
+  writeUserAssets(resolved, keepAssets);
   return removed;
+}
+
+/**
+ * 写 / 刷新 USER_ASSETS.json（用户替换过、会话不许动的图）：重跑与打回前都写，先删目录项再写，
+ * 不顺着 Agent 留下的硬链接写出去。没有这样的图就删掉清单
+ */
+export function writeUserAssets(dir: string, files: readonly string[]): void {
+  const target = path.join(dir, USER_ASSETS_FILE);
+  // Agent 可能在这个名字上建了目录或链接：不跟随地删掉（8.2 第二轮审查 L3）
+  if (existsSync(target) || isDanglingLink(target)) removeNoFollow(target);
+  if (files.length > 0) writeFileSync(target, `${JSON.stringify({ assets: files }, null, 2)}\n`, "utf8");
 }
 
 /** 比较路径用的键：NTFS 不分大小写（Assets/x 与 assets/x 是同一个文件） */
@@ -188,6 +193,15 @@ function clearAssets(dir: string, keep: ReadonlySet<string>): void {
     if (st.isSymbolicLink()) unlinkLink(abs);
     else if (st.isDirectory()) clearAssets(abs, keep);
     else if (!keep.has(pathKey(abs))) rmSync(abs, { force: true });
+  }
+}
+
+/** 断掉的链接 existsSync 看不见，lstat 看得见 */
+function isDanglingLink(p: string): boolean {
+  try {
+    return lstatSync(p).isSymbolicLink();
+  } catch {
+    return false;
   }
 }
 

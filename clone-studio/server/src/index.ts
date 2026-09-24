@@ -13,6 +13,7 @@ import { estimateRoutes } from "./routes/estimate.js";
 import { buildRoutes } from "./routes/build.js";
 import { reviewRoutes } from "./routes/review.js";
 import { variantRoutes } from "./routes/variants.js";
+import { variantAssetRoutes } from "./routes/variant-assets.js";
 import { cancelOrphanedBuilds, pumpBuilds, setBuildLog } from "./services/build-run.js";
 import { registerCloneFlow } from "./services/clone.js";
 import { registerVariantFlow } from "./services/variant-flow.js";
@@ -68,6 +69,7 @@ async function main(): Promise<void> {
   await app.register(buildRoutes);
   await app.register(reviewRoutes);
   await app.register(variantRoutes);
+  await app.register(variantAssetRoutes);
 
   // 调度器要用 app.log 记自己的内部错误，并接上删除流程的「先停 Agent」（AC-002）
   agentScheduler({ overrides: { log: app.log } });

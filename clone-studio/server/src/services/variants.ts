@@ -177,8 +177,9 @@ export function presentVariant(row: VariantRow): VariantView {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     agent: job ? present(job) : null,
-    estimate: currentEstimate(row.id) ?? null,
-    build: latestBuild(row.id) ?? null,
+    // 没有运行文件（还没过素材审核，或重跑之后）：旧稿的估价与出片不作数，不给界面（8.2 第二轮审查 L2）
+    estimate: row.run_path ? (currentEstimate(row.id) ?? null) : null,
+    build: row.run_path ? (latestBuild(row.id) ?? null) : null,
     needsMe: NEEDS_ME.has(row.status),
   };
 }

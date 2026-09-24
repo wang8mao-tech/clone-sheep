@@ -524,7 +524,7 @@ start / continue / auto_resume，`continueJob(jobId, note)` 区分不了打回�
 
 | Task | 内容 | 覆盖 | 状态 |
 |---|---|---|---|
-| 7.1 | 并排同步播放器 CMP-004（web）：两路 `<video>` 共享进度条与控制、播放/暂停/拖动/倍速一致、逐帧前后键、声音来源切换默认原片、任一路缓冲两路同停、9:16 按高适配。由云端会话在分支 `feat/phase7-sync-players` 实现，本地拉下来审查、改到两阶段 PASS 再合进 `feat/clone-studio`；分支不可用就本地自己写 | AC-011、REQ-004 播放器 MUST | |
+| 7.1 | 并排同步播放器 CMP-004（web）：两路 `<video>` 共享进度条与控制、播放/暂停/拖动/倍速一致、逐帧前后键、声音来源切换默认原片、任一路缓冲两路同停、9:16 按高适配。由云端会话在分支 `feat/phase7-sync-players` 实现，本地拉下来审查、改到两阶段 PASS 再合进 `feat/clone-studio`；分支不可用就本地自己写 | AC-011、REQ-004 播放器 MUST | ✅ 云端会话起草（分支 `feat/phase7-sync-players` @ 1215f5c），本地三轮 review→fix，第三轮两阶段 PASS（首轮 2 HIGH：stalled 后只认 canplay 会卡死、两片时长不同时短的播完后拖回去冻住；第二轮 2 MEDIUM：一路坏了连累另一路、暂停时登记的缓冲解不开；第三轮 1 MEDIUM 当场修：一路坏了另一路播到尾后点播放没反应）。变异自检 32 条全杀（独立拷贝） |
 | 7.2 | 验货后端（server）：`GET /api/templates/:id/review`（历次复刻片版本 + 每版出片结果、哪版可通过）；`GET /api/productions/:id/video`（复刻片 mp4，与参考视频共用一套 range / 数据根内读取）；`POST .../approve`（只准通过最新一版已出片的复刻片，模板置 `approved`、记下是哪一版，成片数只算这一版）；`POST .../rework`（意见 1-2000 字，`host_prompt` 分出 `rework` kind，resume 原会话，模板回到 `cloning`，之后照 6.x 的判据 → 估价 → 出片出下一版）；重试出片重过闸门（6.4 第三轮 M2：重试前重估，这条出片单位之前提交过的 build 估价计入它自己的「已花」）。Spec 同步 | REQ-004、REQ-006、AC-013 后端、AC-040 后端 | ✅ 三轮 review→fix，第三轮两阶段 PASS（首轮 1 HIGH：重试闸门同一毫秒会复用旧放行；第二轮 2 MEDIUM：排队中的打回意见被中止 / 重启后丢失、「打回被取消」分支走不到已删；第三轮只剩 LOW，L-1 当场收）。变异自检 32 条全杀（独立拷贝） |
 | 7.3 | ③ 验货页（web）SCREEN-005：左原片右复刻片 vN（CMP-004）、版本分段控件、时长差与分辨率差（取播放器元数据）、底部固定操作区「打回」（次按钮，展开意见框，1-2000 字计数）与「通过验货」（主按钮，只对最新一版可用）；渲染中 / 出片失败沿用 CMP-007 出片卡；通过后跳到 ④；抽屉按 `rework` 画「打回意见 #n」分隔；未通过时 ④ / ⑤ 的锁定说明「先通过验货」 | SCREEN-005、AC-011/012/013/040、Design-Brief §A.1 | |
 | 7.4 | Phase 7 真机验收与收口：14 秒参考视频在隔离环境走到复刻片已出 → 并排播放拖动同步取 currentTime 证据 → 打回一次（真实会话）→ v2 出片、v1/v2 可切换播放 → 通过验货后 ④ 解锁；Phase 四步验证 | Phase 7 验收标准 | |
@@ -546,7 +546,15 @@ start / continue / auto_resume，`continueJob(jobId, note)` 区分不了打回�
 - 重试出片重过闸门（6.4 第三轮 M2，7.2 定下）：`build-run.ts` `released()` 要求估价**严格**晚于这条的上一次 build（同一毫秒也不行，7.2 审查 S2-H1），
   重启补估 `unestimatedQueued` 也收「最新估价不晚于上一次 build」的排队项（S2-M1），`retryBuild` 放回排队后调 `estimateProduction`；
   `estimate-run.ts` 批次「已花」加上批次里已提交却失败 / 取消的 build 估价。复刻片没有批次，重试只是重估（超单条限额就停在待确认）。
-- `clone-studio/web/src/pages/steps/ReviewStep.tsx`（7.3）、`web/src/components/SyncPlayers.tsx` + `useSyncPlayback.ts`（7.1）
+- `clone-studio/web/src/components/SyncPlayers.tsx` + `useSyncPlayback.ts`（7.1）— CMP-004：左路是主时钟（左路到尾或读不出来时换右路），另一路漂移 >0.2s 拉回；
+  到尾按「时间到了时长」判（浏览器 `ended` 拖回去之前一直是真），拖回去后 intent 是播放就把没到尾的都播起来；缓冲只认 `readyState < 3` 且打算播时的 waiting / stalled，
+  canplay / canplaythrough / playing 任一解除，点播放时先清掉其实已够数据的；一路读不出来就地红字、另一路照常；换片加载出元数据后对齐进度、补倍速静音、接着播；
+  `fps` 给逐帧与进度条步长（③ 页传参考视频探测到的帧率）；`onMeta` 回报时长与分辨率。测试替身在 `web/src/test/setup.ts` + `media.ts`（readyState / ended / error / 被拒的 play）。
+  由云端会话在 `feat/phase7-sync-players` 起草，本地审查三轮改完再合进来（分支保留在远端，不合并）。
+- `clone-studio/web/src/pages/steps/ReviewStep.tsx` + `ReworkPanel.tsx`（7.3）— SCREEN-005：版本分段控件（这一轮 v1 / v2…，默认最新）、SyncPlayers、两片差异一行（`lib/review.ts` `describeDiff`）、
+  选中的版本没出好换成 CMP-007 出片卡；底部 sticky 操作区左「打回」（展开意见框，标题「打回意见 #n」，按去首尾空白计 1-2000 字）、右「通过验货」（只对最新一版可用，禁用写明原因）；
+  通过后跳 ④、打回后跳 ② 并把新任务交给抽屉；`review` / `build` / `clone` 事件都让它重拉。抽屉按 `rework` 画「打回意见 #n」分隔（`lib/agent-timeline.ts`，第一次复刻是第 1 轮）。
+  步骤条锁定原因（`lib/steps.ts` `lockedReason`，Stepper 的 title 与读屏文字）：④ / ⑤「先通过验货」（AC-012）。
 
 **验收标准**：
 - AC-011、AC-012、AC-013 通过

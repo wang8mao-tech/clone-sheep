@@ -18,7 +18,10 @@ export interface DrawerDb {
   rerunCalls: number;
 }
 
-export function drawerBackend(init: Partial<DrawerDb> = {}, extra: Record<string, RouteStub | (() => RouteStub)> = {}) {
+export function drawerBackend(
+  init: Partial<DrawerDb> = {},
+  extra: Record<string, RouteStub | ((init?: RequestInit, url?: string) => RouteStub)> = {},
+) {
   const db: DrawerDb = {
     job: agentJob(),
     messages: [],

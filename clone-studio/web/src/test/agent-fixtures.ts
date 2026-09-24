@@ -19,7 +19,7 @@ export const agentMessages = {
   /** 宿主记的「交给会话的那句话」（server/src/agent/message-store.ts appendPrompt） */
   prompt: (
     seq: number,
-    kind: "start" | "continue" | "auto_resume",
+    kind: "start" | "continue" | "auto_resume" | "rework",
     text: string,
     createdAt = T0,
   ): AgentMessageView => ({

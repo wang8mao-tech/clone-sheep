@@ -29,7 +29,17 @@ export interface Step {
   state: StepState;
   /** 未解锁的步骤不可点（CMP-001：灰、锁图标、不可点） */
   enterable: boolean;
+  /** 未解锁时为什么（AC-012：④ 变体说「先通过验货」）；解锁了是 undefined */
+  lockedReason?: string;
 }
+
+const LOCKED_REASON: Record<StepKey, string> = {
+  reference: "",
+  clone: "先完成 ① 参考的证据准备",
+  review: "复刻片出好之后才能验货",
+  variants: "先通过验货",
+  outputs: "先通过验货",
+};
 
 export interface StepInput {
   status: TemplateStatus;
@@ -102,6 +112,7 @@ export function deriveSteps({ status, evidenceStatus }: StepInput): Step[] {
     label: STEP_LABELS[key],
     state: state[key],
     enterable: state[key] !== "locked",
+    ...(state[key] === "locked" ? { lockedReason: LOCKED_REASON[key] } : {}),
   }));
 }
 

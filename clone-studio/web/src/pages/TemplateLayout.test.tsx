@@ -126,8 +126,22 @@ describe("步骤条（CMP-001）", () => {
   it("未解锁的步骤不可点，且读得出「未解锁」", async () => {
     renderApp(BASE);
     await screen.findByRole("heading", { name: "足球榜单" });
-    expect(stepButton("变体")).toBeDisabled();
+    expect(stepButton("变体")).toHaveAttribute("aria-disabled", "true");
     expect(stepButton("变体")).toHaveTextContent("未解锁");
+    // AC-012：④ 变体 / ⑤ 成片 说清楚为什么锁着
+    for (const name of ["变体", "成片"]) {
+      expect(stepButton(name)).toHaveAttribute("title", "先通过验货");
+      expect(stepButton(name)).toHaveTextContent("先通过验货");
+    }
+  });
+
+  it("AC-012：未验货时点 ④变体，不跳过去，页面上说「先通过验货」", async () => {
+    stub("awaiting_review");
+    renderApp(`${BASE}/clone`);
+    await screen.findByRole("heading", { name: "足球榜单" });
+    await userEvent.click(stepButton("变体"));
+    expect(await screen.findByText("「变体」还没解锁：先通过验货")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "④ 变体 工作区" })).toBeNull();
   });
 
   it("验货通过后 ④变体解锁并可点进去（SCOPE-004）", async () => {
@@ -137,6 +151,7 @@ describe("步骤条（CMP-001）", () => {
 
     const variants = stepButton("变体");
     expect(variants).toBeEnabled();
+    expect(variants).not.toHaveAttribute("aria-disabled");
     await userEvent.click(variants);
 
     expect(await screen.findByRole("region", { name: "④ 变体 工作区" })).toBeInTheDocument();

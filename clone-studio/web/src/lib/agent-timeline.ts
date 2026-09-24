@@ -67,13 +67,16 @@ export function buildTimeline(messages: readonly AgentMessageView[]): TimelineIt
   const items: TimelineItem[] = [];
   const tools = new Map<string, ToolItem>();
   let prevAt: string | null = null;
+  // 第一次复刻是第 1 轮，每次打回加一轮（Design-Brief §A.1「打回意见 #2」）
+  let round = 1;
 
   for (const m of messages) {
     const p = m.payload;
     const at = m.createdAt;
     const key = `${m.seq}`;
     if (m.type === "host_prompt" && isRecord(p)) {
-      pushPrompt(items, m.seq, str(p.kind), str(p.text));
+      if (str(p.kind) === "rework") round += 1;
+      pushPrompt(items, m.seq, str(p.kind), str(p.text), round);
     } else if (m.type === "host_intercept" && isRecord(p)) {
       items.push({
         kind: "intercept",
@@ -153,13 +156,13 @@ export function buildTimeline(messages: readonly AgentMessageView[]): TimelineIt
  * 第一次是任务提示；人点的继续先画一条分隔再给那句话（打回意见就是它）；等额度后的自动续跑
  * 是宿主自己说的「接着做」，只画分隔。
  */
-function pushPrompt(items: TimelineItem[], seq: number, kind: string, text: string): void {
-  if (kind === "continue" || kind === "auto_resume") {
+function pushPrompt(items: TimelineItem[], seq: number, kind: string, text: string, round: number): void {
+  if (kind === "continue" || kind === "auto_resume" || kind === "rework") {
     items.push({
       kind: "divider",
       key: `${seq}.d`,
       seq,
-      label: kind === "continue" ? "继续运行" : "额度恢复，自动继续",
+      label: kind === "rework" ? `打回意见 #${round}` : kind === "continue" ? "继续运行" : "额度恢复，自动继续",
     });
   }
   if (kind !== "auto_resume" && text.trim()) items.push({ kind: "prompt", key: `${seq}`, seq, text });

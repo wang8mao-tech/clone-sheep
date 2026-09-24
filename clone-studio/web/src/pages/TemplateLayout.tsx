@@ -5,6 +5,7 @@ import { Badge } from "../components/ui/Badge.js";
 import { QueryErrorState } from "../components/ui/QueryErrorState.js";
 import { InlineNameEditor } from "../components/ui/InlineNameEditor.js";
 import { Stepper } from "../components/Stepper.js";
+import { useToast } from "../components/ui/Toast.js";
 import { BreakerBar } from "../components/BreakerBar.js";
 import { archiveApi, archiveKeys } from "../lib/archive.js";
 import { formatUsd } from "../lib/format.js";
@@ -20,6 +21,7 @@ import { defaultStep, deriveSteps, isStepKey, type StepKey } from "../lib/steps.
 export function TemplateLayout() {
   const { clientId = "", templateId = "", step } = useParams();
   const actions = useArchiveActions();
+  const toast = useToast();
   const { editing, editError, beginEdit, closeEditor, clearEditError, rename } = actions;
 
   const detail = useQuery({
@@ -120,6 +122,7 @@ export function TemplateLayout() {
         // 点了会跳去一个马上要被重定向走的步骤
         loading={!template}
         hrefFor={hrefFor}
+        onLocked={(s) => toast.push("info", `「${s.label}」还没解锁：${s.lockedReason ?? "前面的步骤还没完成"}`)}
       />
 
       {/* CMP-009：任务熔断 / 中断 / 失败 / 取消后给「继续」「重跑」，在步骤条下方、工作区上方 */}

@@ -8,6 +8,8 @@ interface Props {
   current: StepKey;
   /** 点已解锁的步骤跳过去；未解锁的不可点 */
   hrefFor: (key: StepKey) => string;
+  /** 点了没解锁的步骤：页面给出原因（AC-012「先通过验货」）；不给就只有 title 与读屏文字 */
+  onLocked?: (step: Step) => void;
   /**
    * 模板数据还没到。此时步骤表是按缺省值猜出来的（一个已验货的模板会先被
    * 画成「①进行中 + 后面四个 ·」），这一帧的信息是错的，所以整体不可点。
@@ -39,7 +41,7 @@ const STATE_LABEL: Record<StepState, string> = {
  * 按「有设计稿时 UI 以设计稿为准」走。状态本身靠 sr-only 文字读出来，
  * 不只依赖形状与颜色（Design-Brief 8.2）。
  */
-export function Stepper({ steps, current, hrefFor, loading = false }: Props) {
+export function Stepper({ steps, current, hrefFor, onLocked, loading = false }: Props) {
   const navigate = useNavigate();
 
   return (
@@ -55,10 +57,12 @@ export function Stepper({ steps, current, hrefFor, loading = false }: Props) {
             {i > 0 ? <span aria-hidden className="h-px w-7 shrink-0 bg-border" /> : null}
             <button
               type="button"
-              disabled={loading || !step.enterable}
+              // 未解锁的不用 disabled：disabled 的按钮不派发点击、title 气泡也不一定出，AC-012 要点了看得到原因
+              disabled={loading}
+              aria-disabled={!step.enterable || undefined}
               aria-current={isCurrent ? "step" : undefined}
-              title={loading ? "读取中" : step.enterable ? undefined : "还没解锁"}
-              onClick={() => void navigate(hrefFor(step.key))}
+              title={loading ? "读取中" : step.enterable ? undefined : (step.lockedReason ?? "还没解锁")}
+              onClick={() => (step.enterable ? void navigate(hrefFor(step.key)) : onLocked?.(step))}
               className={[
                 "flex h-full items-center gap-2 border-b-2 px-1 transition-colors",
                 isCurrent ? "border-primary" : "border-transparent",
@@ -76,6 +80,7 @@ export function Stepper({ steps, current, hrefFor, loading = false }: Props) {
               </span>
               <span className="sr-only">
                 {STATE_LABEL[step.state]}
+                {step.lockedReason ? `：${step.lockedReason}` : ""}
                 {isCurrent ? "，当前步骤" : ""}
               </span>
             </button>

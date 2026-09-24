@@ -72,6 +72,24 @@ describe("buildTimeline", () => {
     ]);
   });
 
+  it("验货打回：每轮一条「打回意见 #n」分隔（第一次复刻是第 1 轮），意见原文作为用户消息；打回后的继续不另起轮次", () => {
+    const items = buildTimeline([
+      m.prompt(1, "start", "复刻这条视频"),
+      m.init(2),
+      m.prompt(3, "rework", "验货打回意见 #2：\n主持人太小"),
+      m.init(4),
+      m.prompt(5, "continue", "接着做"),
+      m.init(6),
+      m.prompt(7, "rework", "验货打回意见 #3：\n节奏再快"),
+    ]);
+    expect(items.filter((i) => i.kind === "divider").map((i) => (i.kind === "divider" ? i.label : ""))).toEqual([
+      "打回意见 #2",
+      "继续运行",
+      "打回意见 #3",
+    ]);
+    expect(items.filter((i) => i.kind === "prompt")).toHaveLength(4);
+  });
+
   it("SDK 的 user 消息里只取工具结果：文字内容（技能注入之类）不当成任务提示", () => {
     const items = buildTimeline([
       {

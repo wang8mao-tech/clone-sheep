@@ -70,7 +70,7 @@ describe("① 参考 · 失败与重试", () => {
     expect(await screen.findByRole("listitem", { name: /^下载：进行中/ })).toBeInTheDocument();
     await waitFor(() => expect(stepButton("参考")).toHaveTextContent("进行中"));
     expect(stepButton("复刻")).not.toHaveTextContent("失败");
-    expect(stepButton("复刻")).toBeDisabled();
+    expect(stepButton("复刻")).toHaveAttribute("aria-disabled", "true");
   });
 
   it("AC-005：超 180 秒停在探测并给出原话", async () => {
@@ -89,7 +89,7 @@ describe("① 参考 · 失败与重试", () => {
     expect(screen.getByRole("listitem", { name: /^转写.*：等待/ })).toBeInTheDocument();
     // 源视频已落盘，但失败仍记在 ①参考 头上，②复刻 不解锁（审查 HIGH）
     expect(stepButton("参考")).toHaveTextContent("失败");
-    expect(stepButton("复刻")).toBeDisabled();
+    expect(stepButton("复刻")).toHaveAttribute("aria-disabled", "true");
   });
 
   it("下载之后的步骤失败：进模板页落在 ①参考，而不是被送去 ②复刻", async () => {

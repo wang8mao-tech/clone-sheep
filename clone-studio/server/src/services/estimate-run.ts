@@ -123,10 +123,20 @@ function hasBuild(productionId: string): boolean {
 }
 
 /**
- * 批次「已花」：现算，不靠谁去累加一个字段——批次里其它出片单位最新一次估价里已放行的（auto 或人已确认）
- * 之和，作废 / 失败 / 排队待估的不算。build 拿不到实际金额（REQ-009），放行的估价就是这条会花的钱
+ * 批次「已花」：现算，不靠谁去累加一个字段——两部分相加：
+ * 1. 批次里其它出片单位最新一次估价里已放行的（auto 或人已确认）之和，作废 / 失败 / 排队待估的不算；
+ * 2. 批次里所有已经提交给 hypit、却没出成（失败 / 取消）的 build 的估价——包括这条自己之前的尝试。
+ *    「重试出片」会再花一次钱，旧的那次不能当没发生过（6.4 第三轮审查 M2，Task 7.2）。
+ * build 拿不到实际金额（REQ-009），估价就是这次会花的钱
  */
 function batchSpentUsd(batchId: string, exceptProductionId: string): number {
+  const attempts = db()
+    .prepare(
+      `SELECT COALESCE(SUM(b.estimate_usd), 0) AS spent
+         FROM builds b JOIN productions p ON p.id = b.production_id
+        WHERE p.batch_id = ? AND b.hypit_build_id IS NOT NULL AND b.status IN ('failed', 'cancelled')`,
+    )
+    .get(batchId) as { spent: number };
   const row = db()
     .prepare(
       `SELECT COALESCE(SUM(e.total_usd), 0) AS spent
@@ -138,7 +148,7 @@ function batchSpentUsd(batchId: string, exceptProductionId: string): number {
           AND (e.decision = 'auto' OR e.confirmed_at IS NOT NULL)`,
     )
     .get(batchId, exceptProductionId) as { spent: number };
-  return row.spent;
+  return row.spent + attempts.spent;
 }
 
 function gateInput(production: ProductionRow, estimateUsd: number | null) {
@@ -273,7 +283,10 @@ export function unestimatedQueued(templateId?: string): string[] {
     .prepare(
       `SELECT p.id FROM productions p
         WHERE p.status = 'queued' AND p.run_path IS NOT NULL AND (? IS NULL OR p.template_id = ?)
-          AND NOT EXISTS (SELECT 1 FROM estimates e WHERE e.production_id = p.id)`,
+          AND NOT EXISTS (
+                SELECT 1 FROM estimates e WHERE e.production_id = p.id
+                   AND e.created_at > COALESCE((SELECT MAX(b.created_at) FROM builds b WHERE b.production_id = p.id), '')
+              )`,
     )
     .all(templateId ?? null, templateId ?? null) as Array<{ id: string }>;
   return rows.map((r) => r.id).filter((id) => !inFlight.has(id));

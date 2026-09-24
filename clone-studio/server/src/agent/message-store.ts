@@ -16,6 +16,12 @@ export const INTERCEPT_TYPE = "host_intercept";
 /** 宿主记下的「交给会话的那句话」（任务提示 / 继续 / 打回意见）在消息流里的类型名 */
 export const PROMPT_TYPE = "host_prompt";
 
+/**
+ * 打回意见在排队那一刻就落一笔（开跑时才有 host_prompt）：排队中被中止、或后端在它开跑前重启，
+ * 「继续」靠它把意见接着交给会话（7.2 审查第二轮 S2-M1）。抽屉不画它
+ */
+export const REWORK_PENDING_TYPE = "host_rework_pending";
+
 /** 宿主停下一段运行的记录在消息流里的类型名 */
 export const STOP_TYPE = "host_stop";
 
@@ -92,6 +98,10 @@ export function appendIntercept(jobId: string, denial: InterceptRecord): { seq: 
  */
 export function appendPrompt(jobId: string, run: { kind: string; prompt: string }): { seq: number; type: string } {
   return insert(jobId, "user", PROMPT_TYPE, { kind: run.kind, text: run.prompt });
+}
+
+export function appendReworkPending(jobId: string, prompt: string): void {
+  insert(jobId, null, REWORK_PENDING_TYPE, { text: prompt });
 }
 
 /** 落一条「宿主在这里停下了这段运行」：抽屉据此把会话收尾那条 result 当成「被停下」而不是出错 */

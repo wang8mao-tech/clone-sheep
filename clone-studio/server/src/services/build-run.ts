@@ -16,6 +16,7 @@ import {
   type BuildView,
 } from "./build-store.js";
 import { currentEstimate } from "./estimate-store.js";
+import { estimateProduction } from "./estimate-run.js";
 
 /**
  * 出片执行器的队列一侧（REQ-006 出片、REQ-009 台账）：排队中、闸门放行（auto 或人已确认）的出片单位，
@@ -46,9 +47,17 @@ function renderConcurrency(): number {
   return Math.max(1, row?.render_concurrency ?? 1);
 }
 
+/**
+ * 闸门放行了没有：最新一次估价是 auto，或 confirm 且人已确认；而且这次估价要晚于这条的上一次 build——
+ * 一次放行只管一次出片，「重试出片」必须重新估价过闸门（Task 7.2），旧结论不能被顺手拿去再起一次
+ */
 function released(productionId: string): boolean {
   const est = currentEstimate(productionId);
-  return est !== undefined && (est.decision === "auto" || (est.decision === "confirm" && est.confirmedAt !== null));
+  if (!est) return false;
+  const last = latestBuildRow(productionId);
+  // 相等也不行：估价落库与它放行的那次 build 常在同一毫秒（7.2 审查 S2-H1），相等说明就是那一次的放行
+  if (last && est.createdAt <= last.created_at) return false;
+  return est.decision === "auto" || (est.decision === "confirm" && est.confirmedAt !== null);
 }
 
 /** 闸门放行了的（auto，或 confirm 且人已确认）、还排着队的出片单位，按建立先后 */
@@ -177,7 +186,7 @@ export async function cancelOrphanedBuilds(
   return cancelled;
 }
 
-/** 「重试出片」：出过片但失败 / 中断的回到排队，走一遍闸门放行（估价结论还在）后由 pump 起 */
+/** 「重试出片」：出过片但失败 / 中断的回到排队，重新估价过闸门（旧的放行不再作数，Task 7.2） */
 export function retryBuild(productionId: string): { queued: boolean } {
   const production = readProduction(productionId);
   if (!production) throw new BuildError("出片单位不存在", "PRODUCTION_NOT_FOUND", 404);
@@ -187,8 +196,12 @@ export function retryBuild(productionId: string): { queued: boolean } {
   if (!hasBuild(productionId)) {
     throw new BuildError("这条还没出过片：是估价没过，用「重新估价」", "NOT_RETRYABLE", 409);
   }
+  // 回到排队、重新估价过闸门：限额内由估价结果自动起片，超限停在「待确认花费」等人确认（Task 7.2）
   setProductionStatus(productionId, "queued");
-  return { queued: pumpBuilds() > 0 };
+  estimateProduction(productionId).catch((error: unknown) =>
+    log.error({ productionId, error }, "重试出片的重新估价没跑起来"),
+  );
+  return { queued: true };
 }
 
 export function latestBuild(productionId: string): BuildView | undefined {

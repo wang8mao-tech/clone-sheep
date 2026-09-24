@@ -29,6 +29,12 @@ export function assertContinuable(job: AgentJobRow): void {
   }
 }
 
+/** 能打回的：会话做完了（验货打回只对「完成」的那次说），而且会话还在——意见要 resume 进原会话 */
+export function assertReworkable(job: AgentJobRow): asserts job is AgentJobRow & { session_id: string } {
+  if (job.status !== "done") throw new SchedulerError("NOT_REWORKABLE", "只有已完成的任务可以打回");
+  if (!job.session_id) throw new SchedulerError("NO_SESSION", "这个任务的会话没起来，接不上打回意见");
+}
+
 /** 能重跑的：已经结束了，而且留着任务提示原文。完成的不许——那会清掉一份可能已验货通过的稿子 */
 export function assertRerunnable(job: AgentJobRow): asserts job is AgentJobRow & { prompt: string } {
   if (!RERUNNABLE_STATUSES.includes(job.status)) {

@@ -187,7 +187,7 @@ describe("侧栏树与统计", () => {
     expect(stats.totalCostUsd).toBeCloseTo(0.92, 6);
     expect(stats.costIsEstimate).toBe(true);
     // 验货通过后这条复刻片就是第一条成片；变体不看模板状态
-    expect(archive.templateStats({ ...template, status: "approved" }).outputs).toBe(1);
+    expect(archive.templateStats({ ...template, status: "approved", approved_replica_id: "p1" }).outputs).toBe(1);
     d.prepare(
       `INSERT INTO productions (id, template_id, kind, status, created_at, updated_at)
        VALUES ('p2', ?, 'variant', 'done', ?, ?)`,

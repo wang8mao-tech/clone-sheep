@@ -1,6 +1,6 @@
 # 产品需求规范：Clone Studio（暂定名）
 
-> 版本 v1.9.4 · 2026-09-24 · 内核：Hypit 0.2.6（本地副本 `hypit-main/`）· 技术调研见 `Hypit-Research.md`
+> 版本 v1.9.5 · 2026-09-24 · 内核：Hypit 0.2.6（本地副本 `hypit-main/`）· 技术调研见 `Hypit-Research.md`
 > Phase 0 先行验证结论见 `clone-studio/docs/spike-notes.md`，本版据其回写。
 
 ## 0. AI 使用说明
@@ -294,6 +294,9 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 
 - 判据由宿主在 Agent 报告完成后自己核，不采信 Agent 自述；每一次完成都核一次，结论落库并绑定到那一次完成。未通过（含核的过程本身出错）时任务改判「失败」，停止原因写明缺哪个文件或 check 的报错首行，横条给「继续 / 重跑」；「继续」时把未通过的原因交给会话。进程在核的过程中退出的，重启后补核（不起新任务）。
 - 自动启动只对新发生的「证据准备完成」生效，已有模板不补跑；从没有过复刻任务的模板在 ②复刻 给「开始复刻」。复刻任务运行中不允许换参考视频或重试证据步骤（先中止）。换参考视频时即作废尚未出片的复刻片；新一轮复刻开始前清掉上一轮的 Agent 产物。
+- ③验货 列的是「这一轮」的复刻片版本：当前复刻任务建起来之后的 v1、v2 …（打回是 resume 同一个任务，版本都在这一轮里）；换参考视频或重跑会起新任务，之前的版本按旧稿子出，不再列出。
+- 「通过」只对最新一版已出片的复刻片可用：④变体 从工作目录里当前的稿子出发，那正是最新一版；旧版本只供对比。通过时记下是哪一版，只有这一版作为成片入库、计入成片数。
+- 「打回」只在模板等验货、最新一版已出片、复刻会话还在时可用。意见去掉首尾空白后 1-2000 字，作为新一轮（抽屉分隔线「打回意见 #n」，第一次复刻是第 1 轮）resume 原会话；模板回到「复刻中」，之后照 ②复刻 的路子走：会话完成 → 宿主核判据 → 估价过闸门 → 出下一版复刻片 → 回到「等验货」。打回这一轮运行中同样不允许换参考视频（先中止）；已验货的模板不能打回。打回这一轮中止 / 熔断 / 失败照 REQ-003 给「继续 / 重跑」；打回意见在排队那一刻就记下，还没开跑就被中止或后端重启，「继续」仍按这条意见接着改、仍算这一轮打回。换参考视频清掉「通过的是哪一版」。
 
 **规则：**
 - MUST 未"通过"验货的模板，④变体 与 ⑤成片 两步均锁定并说明原因。验货是质量闸门，没过之前不产出可交付的东西——复刻片在 ③验货 的并排播放器里看得到，不需要靠 ⑤成片 去看。
@@ -361,6 +364,7 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 - MUST 把当前可用的能力清单（哪些模型能用、哪些不能）写进 Agent 系统提示，要求 Agent 只用可用能力写 SVML；plan 出现无 Provider 可解析的请求时标失败并指明缺哪种能力。
 - MUST 渲染并发受 `hyperframes.local` 的 `workers` 与全局渲染任务数限制，默认 workers=1、全局同时 1 个 build（本机实测 workers=2 起渲染进程崩溃、1 稳定；设置页可调）。
 - MUST 出片执行器：`build --json` 提交后 build-id 立刻落台账；`status --watch --json --verbose` 的进度行与 `activity --watch --jsonl` 给结构化进度；判成败只看 `result.outcome`，不看 `work.state`；成功后 `get` 导出到工作目录 `output/`；出片前重新生成 Runtime Profile；失败时完整展示 `failure` 原文、记下当时可用内存，可「重试出片」；出片进行中不允许换参考视频。
+- MUST 「重试出片」重新估价过闸门：一次放行只管一次出片（估价要严格晚于这条的上一次 build 才能放行；重启时排队里的估价不晚于上一次 build 的补估一次），限额内自动起片，超限停在「待确认花费」。批次「已花」= 批次里其它出片单位已放行的估价 + 批次里已经提交给 hypit 却没出成（失败 / 取消）的 build 的估价，含这条自己之前的尝试。
 - MUST 任何时候停下（人取消、跟进度的进程超时或出错、后端重启后发现上次还在跑的 build）都让 hypit 取消那条 build，不让 Worker 继续渲染、继续花钱。人取消的那次 build 记「已取消」，出片单位回到「失败」可重试（出片单位的「已取消」只表示作废）。
 - MUST 记录花费到台账。**build 的实际花费拿不到**：hypit 的 Result 只有不含金额的 `receipt: { id, url? }`，全仓库无任何金额字段。故生成侧花费一律按"请求数 × 自维护单价"记账并标"估"，不谎称账单。
 
@@ -567,7 +571,7 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 | 实体 | 描述 | 关键字段 |
 |---|---|---|
 | Client | 客户 | id, name, created_at |
-| Template | 一条参考视频及其复刻模板 | id, client_id, name, language, default_video_channel, source_kind(file/url), source_url, workspace_path, status(importing/cloning/awaiting_review/approved/failed), note |
+| Template | 一条参考视频及其复刻模板 | id, client_id, name, language, default_video_channel, source_kind(file/url), source_url, workspace_path, status(importing/cloning/awaiting_review/approved/failed), note, approved_replica_id（通过验货的那一版复刻片） |
 | Production | 一条要出的片：复刻片或变体 | id, template_id, kind(replica/variant), batch_id, brief, name, status, run_path, version |
 | Batch | 一次批量提交 | id, template_id, note, target_language, budget_usd, spent_usd |
 | AgentJob | 一次 Agent 会话 | id, owner(template/production), session_id, status, started_at, ended_at, cost_usd, cost_is_estimate, stop_reason, profile_name, model_id（后两项为快照，不随档案删除而变） |

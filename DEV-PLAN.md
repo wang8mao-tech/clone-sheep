@@ -520,9 +520,33 @@ start / continue / auto_resume，`continueJob(jobId, note)` 区分不了打回�
 - 实现"打回并写意见"：意见 resume 原 Agent 会话 → 重新 check → 重新过闸出片 → 新版本
 - "通过验货"后模板状态置已验货并解锁 ④变体
 
+**Task 拆分（2026-09-24）**，按序做，每个走 review→fix 循环，两阶段 PASS 后单独 commit：
+
+| Task | 内容 | 覆盖 | 状态 |
+|---|---|---|---|
+| 7.1 | 并排同步播放器 CMP-004（web）：两路 `<video>` 共享进度条与控制、播放/暂停/拖动/倍速一致、逐帧前后键、声音来源切换默认原片、任一路缓冲两路同停、9:16 按高适配。由云端会话在分支 `feat/phase7-sync-players` 实现，本地拉下来审查、改到两阶段 PASS 再合进 `feat/clone-studio`；分支不可用就本地自己写 | AC-011、REQ-004 播放器 MUST | |
+| 7.2 | 验货后端（server）：`GET /api/templates/:id/review`（历次复刻片版本 + 每版出片结果、哪版可通过）；`GET /api/productions/:id/video`（复刻片 mp4，与参考视频共用一套 range / 数据根内读取）；`POST .../approve`（只准通过最新一版已出片的复刻片，模板置 `approved`、记下是哪一版，成片数只算这一版）；`POST .../rework`（意见 1-2000 字，`host_prompt` 分出 `rework` kind，resume 原会话，模板回到 `cloning`，之后照 6.x 的判据 → 估价 → 出片出下一版）；重试出片重过闸门（6.4 第三轮 M2：重试前重估，这条出片单位之前提交过的 build 估价计入它自己的「已花」）。Spec 同步 | REQ-004、REQ-006、AC-013 后端、AC-040 后端 | ✅ 三轮 review→fix，第三轮两阶段 PASS（首轮 1 HIGH：重试闸门同一毫秒会复用旧放行；第二轮 2 MEDIUM：排队中的打回意见被中止 / 重启后丢失、「打回被取消」分支走不到已删；第三轮只剩 LOW，L-1 当场收）。变异自检 32 条全杀（独立拷贝） |
+| 7.3 | ③ 验货页（web）SCREEN-005：左原片右复刻片 vN（CMP-004）、版本分段控件、时长差与分辨率差（取播放器元数据）、底部固定操作区「打回」（次按钮，展开意见框，1-2000 字计数）与「通过验货」（主按钮，只对最新一版可用）；渲染中 / 出片失败沿用 CMP-007 出片卡；通过后跳到 ④；抽屉按 `rework` 画「打回意见 #n」分隔；未通过时 ④ / ⑤ 的锁定说明「先通过验货」 | SCREEN-005、AC-011/012/013/040、Design-Brief §A.1 | |
+| 7.4 | Phase 7 真机验收与收口：14 秒参考视频在隔离环境走到复刻片已出 → 并排播放拖动同步取 currentTime 证据 → 打回一次（真实会话）→ v2 出片、v1/v2 可切换播放 → 通过验货后 ④ 解锁；Phase 四步验证 | Phase 7 验收标准 | |
+
 **关键文件**：
-- `clone-studio/server/src/routes/review.ts`
-- `clone-studio/web/src/pages/template/ReviewStep.tsx`、`web/src/components/SyncPlayers.tsx`
+- `clone-studio/server/src/services/review.ts` — 验货（7.2）：`reviewState`（这一轮的版本 = 当前复刻任务 `created_at` 之后、未作废的复刻片；
+  每版带最新 build 与播放地址；`approvable` = 模板等验货且最新一版已出片；`reworkable` 再加上复刻任务完成且会话还在；`nextRound` = 已打回次数 + 2）、
+  `approveReplica`（只准最新一版已出片的；`templates.approved_replica_id` 记下是哪一版，迁移 v8 给存量已验货模板补上；`templateStats` 成片数只算这一版）、
+  `reworkReplica`（意见去首尾空白 1-2000 字 → `rejectPrompt(意见, 轮次)` → `scheduler.rework` resume 原会话、运行类型 `rework` → 模板回到 `cloning`；
+  之后 6.1 的核判据、6.3 的估价闸门、6.4 的执行器原样接手，`ensureReplica` 看到最新一版已出片就建下一版）。
+  状态变了往 `global` 推 `archive`、往 `template:<id>` 推 `review` 事件。
+- `clone-studio/server/src/routes/review.ts` — `GET /api/templates/:id/review`、`POST .../approve`（`NOT_REVIEWING` / `NOT_LATEST` / `AGENT_ACTIVE`）、
+  `POST .../rework`（`INVALID_NOTE` / `NOT_REVIEWING` / `NOT_REWORKABLE`；会话没了 / 任务被取代在 service 里先判成 `NOT_REWORKABLE`，调度器的 `NO_SESSION` / `SUPERSEDED` 是兜底）、`GET /api/productions/:id/video`（最新一次 build 出完的 mp4，`NO_OUTPUT`）。
+  `routes/video-file.ts` — 参考视频与复刻片共用的 range 发送（数据根内真实路径校验、按魔数回类型），从 `media.ts` 抽出来。
+- `agent/scheduler.ts` `rework()` + `job-guards.ts` `assertReworkable`（只接已完成、有会话的最新任务）；`RunKind` 加 `rework`，`Pending.kind` 明说运行类型。
+- 打回意见落库（7.2 第二轮审查 S2-M1）：`reworkReplica` 排队后记一条 `host_rework_pending`（抽屉不画）；`review.ts` `pendingRework` 看它有没有以同文的 rework 提示交出去过，
+  没交出去（排队中被中止、开跑前重启）时 `POST /api/agent-jobs/:id/continue` 用它、运行类型仍是 `rework`（`scheduler.continueJob` 第三参数）。
+  第一轮加过「打回被取消回到等验货」，第二轮审查指出界面与删除只会「中止」（→ 中断）、取消走不到，已删掉；中断的打回照 REQ-003 继续。
+- 重试出片重过闸门（6.4 第三轮 M2，7.2 定下）：`build-run.ts` `released()` 要求估价**严格**晚于这条的上一次 build（同一毫秒也不行，7.2 审查 S2-H1），
+  重启补估 `unestimatedQueued` 也收「最新估价不晚于上一次 build」的排队项（S2-M1），`retryBuild` 放回排队后调 `estimateProduction`；
+  `estimate-run.ts` 批次「已花」加上批次里已提交却失败 / 取消的 build 估价。复刻片没有批次，重试只是重估（超单条限额就停在待确认）。
+- `clone-studio/web/src/pages/steps/ReviewStep.tsx`（7.3）、`web/src/components/SyncPlayers.tsx` + `useSyncPlayback.ts`（7.1）
 
 **验收标准**：
 - AC-011、AC-012、AC-013 通过

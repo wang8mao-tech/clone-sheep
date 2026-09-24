@@ -22,7 +22,8 @@ export function spendOf(carry: number, latestCost: number | undefined, costBefor
 }
 
 /** 这一段运行算哪种（抽屉的「用户消息」按它画分隔）：自动续跑带着已跑掉的时长，人发起的不带；从没开始过的是第一次 */
-export function runKind(pending: { elapsedMs?: number }, startedAt: string | null): RunKind {
+export function runKind(pending: { elapsedMs?: number; kind?: RunKind }, startedAt: string | null): RunKind {
+  if (pending.kind) return pending.kind;
   if (pending.elapsedMs !== undefined) return "auto_resume";
   return startedAt ? "continue" : "start";
 }

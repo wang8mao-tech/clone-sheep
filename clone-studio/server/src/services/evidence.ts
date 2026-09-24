@@ -80,7 +80,7 @@ export async function startEvidence(args: StartArgs): Promise<EvidenceState> {
     .prepare(
       `UPDATE templates
           SET source_kind = ?, source_url = ?, source_path = NULL, language = ?, note = ?,
-              status = 'importing', updated_at = ?
+              status = 'importing', approved_replica_id = NULL, updated_at = ?
         WHERE id = ?`,
     )
     .run(

@@ -128,6 +128,44 @@ describe("加列迁移", () => {
     expect(d.prepare("SELECT render_workers FROM settings WHERE id = 1").get()).toEqual({ render_workers: 3 });
   });
 
+  it("v8：老库的 templates 补上 approved_replica_id；已验货的存量模板按最新一版已出片的补上（Task 7.2）", async () => {
+    const { db, migrate } = await freshModules();
+    const d = db();
+    migrate();
+    const now = "2026-09-24T00:00:00.000Z";
+    d.prepare("INSERT INTO clients (id, name, created_at) VALUES ('c', 'c', ?)").run(now);
+    for (const [id, status] of [
+      ["ta", "approved"],
+      ["tr", "awaiting_review"],
+    ] as const) {
+      d.prepare(
+        "INSERT INTO templates (id, client_id, name, status, created_at, updated_at) VALUES (?, 'c', ?, ?, ?, ?)",
+      ).run(id, id, status, now, now);
+    }
+    for (const [id, tpl, version, status] of [
+      ["a1", "ta", 1, "done"],
+      ["a2", "ta", 2, "done"],
+      ["a3", "ta", 3, "failed"],
+      ["r1", "tr", 1, "done"],
+    ] as const) {
+      d.prepare(
+        `INSERT INTO productions (id, template_id, kind, version, run_path, status, created_at, updated_at)
+         VALUES (?, ?, 'replica', ?, 'reference.svrun', ?, ?, ?)`,
+      ).run(id, tpl, version, status, now, now);
+    }
+    d.exec("ALTER TABLE templates DROP COLUMN approved_replica_id");
+    d.prepare("DELETE FROM schema_migrations WHERE version = 8").run();
+
+    migrate();
+    expect(columnsOf(d, "templates")).toContain("approved_replica_id");
+    const rows = d.prepare("SELECT id, approved_replica_id FROM templates ORDER BY id").all();
+    // 已验货的取最新一版已出片的（a2，不是失败的 a3）；没验货的留空
+    expect(rows).toEqual([
+      { id: "ta", approved_replica_id: "a2" },
+      { id: "tr", approved_replica_id: null },
+    ]);
+  });
+
   it("6.1 首版建的 clone_verdicts 补上 job_ended_at，已有结论原样保留（Task 6.1 复审）", async () => {
     const { db, migrate } = await freshModules();
     const d = db();

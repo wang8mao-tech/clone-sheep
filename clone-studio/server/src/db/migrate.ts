@@ -84,6 +84,21 @@ const STEPS: ReadonlyArray<{ version: number; run: (d: ReturnType<typeof db>) =>
       d.prepare("UPDATE settings SET render_workers = 1 WHERE id = 1 AND render_workers = 4").run();
     },
   },
+  {
+    // Task 7.2：记下通过验货的是哪一版复刻片。已经是「已验货」的存量模板按最新一版已出片的补上
+    version: 8,
+    run: (d) => {
+      const columns = d.prepare("PRAGMA table_info(templates)").all() as Array<{ name: string }>;
+      if (columns.length > 0 && !columns.some((c) => c.name === "approved_replica_id")) {
+        d.exec("ALTER TABLE templates ADD COLUMN approved_replica_id TEXT");
+      }
+      d.exec(`UPDATE templates SET approved_replica_id = (
+                SELECT id FROM productions p
+                 WHERE p.template_id = templates.id AND p.kind = 'replica' AND p.status = 'done'
+                 ORDER BY p.version DESC LIMIT 1)
+              WHERE status = 'approved' AND approved_replica_id IS NULL`);
+    },
+  },
 ];
 
 /** agent_jobs 补列：老库里那张表已经存在，schema.sql 的 CREATE TABLE IF NOT EXISTS 不会给它加列 */

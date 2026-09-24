@@ -122,6 +122,8 @@ export interface TemplateRow {
   workspace_path: string | null;
   note: string | null;
   status: TemplateStatus;
+  /** 通过验货的那一版复刻片；没通过是 null */
+  approved_replica_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -237,14 +239,14 @@ export interface TemplateStats {
 
 export function templateStats(template: TemplateRow): TemplateStats {
   const d = db();
-  // 成片数：变体出完就算；复刻片要「通过验货」之后才算第一条成片（REQ-004），没验货前不计
+  // 成片数：变体出完就算；复刻片只算「通过验货」的那一版（REQ-004：它是第一条成片），打回前的旧版本不算
   const outputs = (
     d
       .prepare(
         `SELECT COUNT(*) AS n FROM productions
-          WHERE template_id = ? AND status = 'done' AND (kind = 'variant' OR ? = 'approved')`,
+          WHERE template_id = ? AND status = 'done' AND (kind = 'variant' OR (? = 'approved' AND id = ?))`,
       )
-      .get(template.id, template.status) as { n: number }
+      .get(template.id, template.status, template.approved_replica_id) as { n: number }
   ).n;
 
   const agent = d

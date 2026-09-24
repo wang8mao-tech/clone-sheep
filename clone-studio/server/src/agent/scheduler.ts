@@ -1,27 +1,22 @@
 import { Breaker, systemClock, type Clock, type Verdict } from "./breaker.js";
 import { createJob, requireJob, updateJob, type AgentJobRow, type NewJob, type OwnerKind } from "./job-store.js";
-import { assertContinuable, assertLatest, assertOwnerFree, assertRerunnable } from "./job-guards.js";
+import { assertContinuable, assertLatest, assertOwnerFree, assertRerunnable, assertReworkable } from "./job-guards.js";
 import { runKind, settle, spendOf } from "./outcome.js";
 import { planQuotaResume, type Spend } from "./quota.js";
 import { continuePrompt } from "./prompts.js";
 import type { RunOutcome } from "./runner.js";
-import { SchedulerError, type Pending, type Running, type SchedulerDeps } from "./scheduler-types.js";
+import { SchedulerError, type Pending, type RunKind, type Running, type SchedulerDeps } from "./scheduler-types.js";
 import { stopJob, stopOwnerJobs, type StopContext } from "./stop-job.js";
 
 export { SchedulerError, type SchedulerDeps } from "./scheduler-types.js";
 export { STOP_TIMEOUT_MS } from "./stop-job.js";
 
 /**
- * Agent 任务调度（Spec REQ-003，DEV-PLAN Task 5.2）：并发上限、排队、取消、中止、继续、重跑，
- * 熔断与等待额度后的自动续跑。
- *
+ * Agent 任务调度（Spec REQ-003，DEV-PLAN Task 5.2）：并发上限、排队、取消、中止、继续、重跑、打回，熔断与等待额度后的自动续跑。
  * 队列只在内存里：后端重启时库里未结束的任务一律标「中断」（migrate.ts），由人点「继续」。
- * 每次由人发起的运行（开始 / 继续 / 重跑）拿满额的墙钟与花费；等待额度后的自动续跑属于
- * 同一次运行，只拿剩下的（maxBudgetUsd 只算本次 query() 起的花费，所以传剩余额度）。
- * 被宿主停下的运行也拿得到花费：runner 用 interrupt() 停，会收到带 total_cost_usd 的 result。
- *
- * 同一对象同一时刻只许一个未结束的任务，继续 / 重跑只许对它最新的任务做——两个 Agent
- * 同时写一个工作目录、或者 resume 一个产物已被重跑清掉的旧会话，都会写坏稿子。
+ * 由人发起的运行（开始 / 继续 / 重跑 / 打回）拿满额的墙钟与花费；等待额度后的自动续跑属于同一次运行，只拿剩下的
+ * （maxBudgetUsd 只算本次 query() 起的花费，所以传剩余额度）。被宿主停下的运行也拿得到花费：runner 用 interrupt() 停。
+ * 同一对象同一时刻只许一个未结束的任务，继续 / 重跑 / 打回只许对它最新的任务做：两个 Agent 同写一个工作目录、或 resume 产物已被清掉的旧会话，都会写坏稿子。
  */
 export class Scheduler {
   private readonly queue: Pending[] = [];
@@ -43,18 +38,15 @@ export class Scheduler {
     return requireJob(job.id);
   }
 
-  /**
-   * 继续：resume 同一会话（熔断、中断、失败之后）。会话没起来的（重启时还在排队、刚开跑就被
-   * 停）没有可 resume 的东西，也没写出任何产物：原样重发任务提示。
-   */
-  continueJob(jobId: string, customPrompt?: string): AgentJobRow {
+  /** 继续：resume 同一会话（熔断、中断、失败之后）。会话没起来的没有可 resume 的、也没写出产物：原样重发任务提示 */
+  continueJob(jobId: string, customPrompt?: string, kind?: RunKind): AgentJobRow {
     const prompt = customPrompt ?? continuePrompt();
     const job = requireJob(jobId);
     assertContinuable(job);
     assertLatest(job);
     assertOwnerFree(job.owner_kind, job.owner_id);
     let next: Pending;
-    if (job.session_id) next = { jobId, prompt, resume: job.session_id, ...this.fullAllowance() };
+    if (job.session_id) next = { jobId, prompt, resume: job.session_id, kind, ...this.fullAllowance() };
     else if (customPrompt !== undefined) {
       // 打回意见这类话是说给原会话听的，会话没了就没有上下文可接：宁可报错也不能悄悄丢掉
       throw new SchedulerError("NO_SESSION", "这个任务的会话没起来，接不上你的意见，只能重跑");
@@ -62,6 +54,18 @@ export class Scheduler {
     else throw new SchedulerError("NO_SESSION", "这个任务的会话没起来，也没有保存任务提示，只能重跑");
     this.patch(jobId, { status: "queued", stop_reason: null, ended_at: null, resume_at: null });
     this.queue.push(next);
+    this.pump();
+    return requireJob(jobId);
+  }
+
+  /** 打回（REQ-004）：把验货意见作为新一轮 resume 进原会话；只对最新的、已完成的任务 */
+  rework(jobId: string, prompt: string): AgentJobRow {
+    const job = requireJob(jobId);
+    assertReworkable(job);
+    assertLatest(job);
+    assertOwnerFree(job.owner_kind, job.owner_id);
+    this.patch(jobId, { status: "queued", stop_reason: null, ended_at: null, resume_at: null });
+    this.queue.push({ jobId, prompt, resume: job.session_id, kind: "rework", ...this.fullAllowance() });
     this.pump();
     return requireJob(jobId);
   }

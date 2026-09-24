@@ -5,6 +5,7 @@ import { latestJobOf, requireJob } from "../agent/job-store.js";
 import { lastSeq, listMessages, listMessagesBefore, listRecentMessages, PAGE_LIMIT } from "../agent/message-store.js";
 import { requireTemplate } from "../services/archive.js";
 import { continuePromptFor } from "../services/clone.js";
+import { pendingRework } from "../services/review.js";
 import { archiveErrorHandler } from "./errors.js";
 
 /**
@@ -101,11 +102,16 @@ export async function agentJobRoutes(app: FastifyInstance): Promise<void> {
     return { job: present(await agentScheduler().abort(jobId)) };
   });
 
-  /** 继续：resume 同一会话；带 note 时把它当作说给 Agent 的话（验货打回，Phase 7 用） */
+  /**
+   * 继续：resume 同一会话。带 note 时把它原样交给会话（验货打回走自己的 /api/templates/:id/rework，不走这里）。
+   * 打回意见排了队还没交出去（排队中被中止 / 后端重启）：接着交那条意见，这一轮仍记成 rework
+   */
   app.post("/api/agent-jobs/:jobId/continue", (request) => {
     const { jobId } = request.params as { jobId: string };
     const { note } = z.object({ note: z.string().min(1).max(2_000).optional() }).parse(request.body ?? {});
     // 复刻判据没过之后的继续：把没过的原因交给会话，而不是一句通用的「接着做」（Task 6.1 S2-M3）
+    const rework = note === undefined ? pendingRework(jobId) : undefined;
+    if (rework) return { job: present(agentScheduler().continueJob(jobId, rework, "rework")) };
     return { job: present(agentScheduler().continueJob(jobId, note ?? continuePromptFor(jobId))) };
   });
 

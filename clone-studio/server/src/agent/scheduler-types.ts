@@ -5,7 +5,8 @@ import type { Denial } from "./guard.js";
 import type { AgentJobRow } from "./job-store.js";
 import type { RunInput, RunOutcome } from "./runner.js";
 
-export type RunKind = "start" | "continue" | "auto_resume";
+/** `rework` 是验货打回：把人的意见 resume 进原会话（REQ-004），抽屉按它画「打回意见 #n」 */
+export type RunKind = "start" | "continue" | "auto_resume" | "rework";
 
 /** 调度器的外部依赖：全部注入，测试换成假的，生产在 Task 5.3 接线 */
 export interface SchedulerDeps {
@@ -63,6 +64,8 @@ export interface Pending {
    * 虚高，按计划等待时长预先挪又会变成未来时间、用时显示成负数（复审 S1-M1(r6)）。
    */
   elapsedMs?: number;
+  /** 由人明说的运行类型（打回）。不给就按 elapsedMs / started_at 推 */
+  kind?: RunKind;
 }
 
 export interface Running {

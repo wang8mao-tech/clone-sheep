@@ -3,7 +3,7 @@
 > 本文件记录项目的开发阶段划分、当前进度和剩余工作。
 > 新 session 启动时应首先阅读此文件，了解项目状态后再继续开发。
 >
-> **当前进度（2026-09-22）**：Phase 0 ✅· Phase 1 ✅ · Phase 2 ✅（带两项遗留）· Phase 3 ✅ · **Phase 4 ✅**（五个 Task 交付，4.3 过六轮、4.4 / 4.5 各过四轮 review→fix；AC-004 / AC-005 / AC-006 真机浏览器实跑通过，用户实测确认）· **Phase 5 ✅**（五个 Task，review→fix 共 5.1 五轮 / 5.2 七轮 / 5.3 七轮 / 5.4 四轮 / 5.5 两轮；AC-007～010 真机通过，AC-002 自动化通过、真机转 Phase 13）· 下一步 Phase 6（「本机渲染不通」09-23 复测已不复现，改为偶发风险）。
+> **当前进度（2026-09-22）**：Phase 0 ✅· Phase 1 ✅ · Phase 2 ✅（带两项遗留）· Phase 3 ✅ · **Phase 4 ✅**（五个 Task 交付，4.3 过六轮、4.4 / 4.5 各过四轮 review→fix；AC-004 / AC-005 / AC-006 真机浏览器实跑通过，用户实测确认）· **Phase 5 ✅**（五个 Task，review→fix 共 5.1 五轮 / 5.2 七轮 / 5.3 七轮 / 5.4 四轮 / 5.5 两轮；AC-007～010 真机通过，AC-002 自动化通过、真机转 Phase 13）· **Phase 6 ✅**（2026-09-24：五个 Task，review→fix 共 6.1 四轮 / 6.2 两轮 / 6.3 两轮 / 6.4 三轮 / 6.5 真机；一条真实参考视频导入 → 复刻 → 估价闸门两条路径 → 出片 mp4 经 ffprobe 核对，Agent 等价花费 $4.53）· 下一步 Phase 7。
 > 分支 `feat/clone-studio`。「本机渲染不通」2026-09-23 复测两种失败都不再复现（900 帧与 4112 帧本地渲染均成功、ffprobe 核对通过），
 > 不再阻塞 Phase 6，改记为偶发风险，见「已知风险」。
 >
@@ -435,7 +435,25 @@ start / continue / auto_resume，`continueJob(jobId, note)` 区分不了打回�
 | 6.2 | ② 复刻页（web）：左 60% 分析摘要 / 时间线（时间码点击联动参考播放器）/ 校验结果三个折叠区，随文件产生逐个出现；右 40% 参考视频小播放器 + 估价卡位；运行中「复刻进行中」+ 用时 / 花费 / 模型；熔断沿用 `BreakerBar`、任务数据用 `useTemplateAgent()`；加载 / 空 / 错误态 | SCREEN-004 | ✅ 两轮 review→fix，第二轮两阶段 PASS（6 条 LOW，5 条已修）。审查员在独立端口起服务按设计稿逐值比对（1440 / 1280 + 抽屉）；变异自检 33 条全杀（独立拷贝） |
 | 6.3 | 估价与花钱闸门：费率表（能力 → 单价，设置页可编辑）；`plan` / `pricing` 解析成估价（needs 字段 × 单价、请求数）；`gate.ts` 纯函数判定单条 / 批次限额，估价拿不到按超限、未解析请求直接失败；估价卡 CMP-006（明细、价格页链接、「将自动出片」或「确认出片 $x.xx」）；确认出片接口 | REQ-006 估价与规则、AC-017 / 018 / 019 | ✅ 两轮 review→fix，第二轮两阶段 PASS（首轮 2 HIGH 全修：估价途中作废不回拉、负时长不计价；第二轮 2 MEDIUM 当场修：批次已花现算、单价 4 位小数）。变异自检服务端 / 前端全杀（独立拷贝）；审查员在 4411 端口真跑 hypit plan 核过确认 / 重估 / 拿不到三条路径 |
 | 6.4 | 出片执行器与台账：出片前重生 Runtime Profile；`build --json` 提交拿 id + `status --watch --json --verbose` 跟到底 + `activity --watch --jsonl` 结构化进度（原计划的 `build --follow` 在 JSON 模式下到结束才给 id，取消没法告诉 hypit，第二轮审查后改）；判成败看 `result.outcome`；`get` 导出到 `output/`（`output` 进 `WORKSPACE_DIRS`）；key 只进 hypit 子进程；全局渲染并发默认 1、`hyperframes.local` workers 默认改 1（Spec 同步 + 存量迁移）；失败原文完整展示、「重试出片」、失败时记可用内存；台账（builds 估价 / build-id / receipt、Agent 花费）标「估」；出片进度 CMP-007；出片进行中拒绝换参考视频（6.1 只作废未出片的复刻片，渲染中的那条要这里保护）；复刻片出片完成后模板从 `cloning` 置 `awaiting_review`（6.1 判据通过时模板仍留在 `cloning`，没有别的 Task 管这次转换）；模板卡「成片数」只数变体与已验货的复刻片（`archive.ts` `templateStats` 现在数全部 done，复刻片出完会被提前计入，与 REQ-004「通过验货时作为第一条成片」冲突） | REQ-006 出片、REQ-009、AC-020（mp4 部分） | ✅ 三轮 review→fix，第三轮两阶段 PASS（首轮 2 HIGH：人取消后复刻片从 ② 页消失、估价 blocked 的复刻片没了估价卡；第二轮 1 HIGH：`status` 不带 `--verbose` 记不到 receipt，执行器改成提交拿 id + `status --watch`；第三轮 3 MEDIUM / 7 LOW 当场收，M2 转 Phase 7）。变异自检服务端 46 / web 20 全杀（独立拷贝）；审查员在 4412 / 5412 真起服务核过四条路由、复刻快照与三张卡的渲染；顺手把 `cli.test.ts` 进程树用例的固定睡眠改成轮询（整套并行跑时两次撞上） |
-| 6.5 | Phase 6 真机验收与收口：一条真实参考视频导入 → 复刻完成 → 三个区块与估价卡；出片得 mp4 并 ffprobe；限额内自动出片与超限待确认各走一次；Phase 四步验证 | Phase 6 验收标准 | |
+| 6.5 | Phase 6 真机验收与收口：一条真实参考视频导入 → 复刻完成 → 三个区块与估价卡；出片得 mp4 并 ffprobe；限额内自动出片与超限待确认各走一次；Phase 四步验证 | Phase 6 验收标准 | ✅ 2026-09-24 真机全部走通（隔离数据根 + 4413 / 5174 端口 + 真 Agent 订阅登录，见下「6.5 真机验收记录」）；顺手修了 activity watcher 在 Worker 未起时退出后不重起的问题（补测试与变异） |
+
+**6.5 真机验收记录（2026-09-24）**：
+- 环境：`CLONE_STUDIO_DATA_ROOT=C:\Users\wacin\AppData\Local\Temp\cs-acc6`（第一次用 scratchpad 下的长路径，tiles 步 `mkdtemp` 报 ENAMETOOLONG，见「已知风险」），后端 `tsx src/index.ts` 在 4413，vite 用独立配置在 5174（`root` 指向工作区源码、`cacheDir` 在 scratch，代理到 4413），真实服务 4310 / 5173 未动；WhisperX 复用本机 8765 上已在跑的那个。
+- 参考视频：`clone video/pt4DcHaEU5HQUi4N.MP4`（720×1280、30fps、13.978s、1.77 MB）。导入 09:20:33 起，fetch / probe / transcribe / tiles 09:20:51 全部 done，复刻任务随即自动起（01:20:49Z），**不是补跑**（模板是这次新建的）。
+- 复刻会话：Opus（默认档案，订阅登录、未设 API key），01:33:51Z 完成，用时 13 分钟，等价花费 **$4.53（估）**，$5 熔断未触发但已接近——14 秒的片子就用掉 $4.5，长片要么提高 `agent_budget_usd`，要么提示词再省（Phase 7 注意）。文件出现顺序：`reference.svrun` 09:30:46 → `ANALYSIS.md` 09:32:55 → `TIMELINE.md` 09:33:39，② 页三个折叠区块随之逐个出现（分析摘要 / 时间线（时间码可点）/ 校验结果「hypit check 通过 · reference.svrun · 1 个目标」）。宿主判据通过：`{ok:true, targets:["final.video"]}`，复刻片 v1 排队。
+- 超限待确认（两次）：① 先给 `render-visual` 设按秒 $0.5 的费率——真实 plan 里本地渲染的 `needs[].summary.fields` 是空的（帧范围要到 build 时才定），按秒时长拿不到 → 结论「估价拿不到，按超限处理」，卡片给「确认出片（估价拿不到）」+「重新估价」，符合 Spec REQ-006「拿不到时长也按估价拿不到」；② 改成按次 $2 再估 → `totalUsd 2, decision confirm, reasons over_item_limit`，估价卡靠 SSE 自己刷新成「$2.00 · 待确认 · 超过单条限额 · 确认出片 $2.00」，单条限额进度条超出。
+- 限额内自动出片：删掉费率、重估 → `$0, auto` → 执行器自动起片。09:36:30 提交，09:36:41 台账已有 `bld_20260924T013632683Z_F8D042CAC5`，进度行 `0/5 steps` → `preparing resources` → `rendering frames 21/418…` → `encoding video`，09:38:08 done（1 分 38 秒）。导出 `output/replica-v1-1d837e8d.mp4`（2,848,848 字节）；**ffprobe**：h264 720×1280、`avg_frame_rate=30/1`、`nb_read_frames=418`、13.933s，aac 13.933s——与文档一致（`reference.svml` 720×1280，ANALYSIS「画面 418 帧（13.933s）」）。模板转 `awaiting_review`，复刻快照 `replica.status=done` 带 `buildId`，出片卡显示文件名、`$0.00 估`、hypit build id；本地渲染无 receipt。
+- 真机抓到并当场修的：第一次出片 `activity` 全程为 null——watcher 在提交前就起了，那时 Runtime Worker 还没起来，`hypit activity` 直接退出，没人重起。改成进程退出后 2 秒重起（只要该目录还在被看），补用例「watcher 重起」与变异「not respawned」；`hypit runtime down` 停掉 Worker 后重启后端再起一条（v3），activity 从第一帧就有（`requests 5/0` → `preparing resources` → `rendering frames · 6/418 frames` → `encoding video`）。注意 activity 的阶段名里带进度（`rendering frames · 7/418 frames`），前端 `activityLabel` 按前缀匹配。另修出片卡「花费」标签在窄栏被拆成两行（`shrink-0`）；`cli.test.ts` 进程树用例整套并行跑时约一半概率红：改名探测正好撞上孙进程 spawn 的瞬间（cwd 被改走 → ENOENT），改成看孙进程写的 started 标记再探测，连跑三遍全绿。
+- 取消 / 重试 / 删除前取消 / 重启孤儿：真机只验了「提交后 10 秒内 id 落台账」这一前提，取消与孤儿路径靠 6.4 的单测与变异（46 条全杀）。`hypit cancel` 对本地 Worker 不需要凭据（手动 `hypit cancel` 一条正在渲染的 build 即停）；TokenDance 侧待 Phase 7 有 key 时核。
+- 花费合计：Agent $4.53（估）+ 出片 $0（本地）；未调用任何付费生成服务。验收后临时数据根已删、后端与 vite 已按 PID 停掉。
+
+**给 Phase 7 的交接（Phase 6）**：
+- ③ 验货读 `builds.output_path`（`GET /api/productions/:id/build`），复刻片出完模板已是 `awaiting_review`；通过验货时把模板置 `approved`——`templateStats` 的成片数才会把复刻片算进去。
+- 「重试出片」不重过闸门（6.4 第三轮 M2，见上）；批次「已花」按估价算一次。
+- 按秒计价的本地渲染在 plan 阶段拿不到时长（needs 字段为空）；付费 Provider（Seedance 等）的 needs 带 duration，按秒才算得出。变体的估价卡可以考虑用参考视频时长兜底，但那是估「本地」，本来就 $0。
+- Agent 预算：14 秒片子的复刻一轮 $4.5，默认 $5 对长片不够；变体会话更短（改词不改结构），但要盯。
+- activity 帧的 `requests {total, completed}` 已进 `BuildView.activity`，④ 变体的「生成素材 n/m」直接用。
+- 删除模板会先取消正在跑的出片（含 hypit 侧）；后端重启会取消上次留在 Worker 上的 build。
 
 **关键文件**：
 - `clone-studio/server/src/services/clone.ts` — 复刻编排与完成判据（`clone-starter.ts` 是证据流水线调它的注册点；
@@ -689,6 +707,8 @@ start / continue / auto_resume，`continueJob(jobId, note)` 区分不了打回�
 | `model_profiles` | Phase 10 | Agent 模型档案（token 存 secrets.json，不入库） |
 
 ## 已知风险
+
+- **Windows 路径长度（260）**：数据根太深时 hypit 在 `references/` 下 `mkdtemp` 会 ENAMETOOLONG（6.5 真机第一次用 scratchpad 深路径撞上，换到 `%TEMP%\cs-acc6` 即好）。默认数据根 `~/.clone-studio` 够短；设置页若允许改数据根，要提示或校验长度。
 
 - **本机渲染偶发失败（原「本机渲染不通」，2026-09-23 复测不再复现，不再阻塞 Phase 6）。** 2026-09-20 同一段时间里 `hyperframes.local`
   连出四次失败：三次 `Rendered visual frame rate differs from its document`（900 帧与完整片都有）、一次 `Page.captureScreenshot timed out`，

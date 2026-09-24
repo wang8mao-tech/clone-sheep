@@ -128,7 +128,7 @@ function Done({ build }: { build: BuildView }) {
         {build.outputPath?.split(/[\\/]/).pop() ?? "—"}
       </p>
       <div className="flex items-center gap-2 text-caption text-text-secondary">
-        <span>花费</span>
+        <span className="shrink-0">花费</span>
         <span className="font-mono text-text tabular-nums">
           {build.estimateUsd === null ? "—" : formatUsd(build.estimateUsd)}
         </span>

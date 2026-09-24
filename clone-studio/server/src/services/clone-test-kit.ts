@@ -171,10 +171,17 @@ export async function boot(options: { register?: boolean } = {}) {
   const rates = await import("./rates.js");
   const build = await import("./build-run.js");
   const activity = await import("./build-activity.js");
-  const watcher = { started: 0, stopped: 0, push: (_line: string) => undefined as void };
-  activity.setActivitySpawner((_dir, onLine) => {
+  const watcher = {
+    started: 0,
+    stopped: 0,
+    push: (_line: string) => undefined as void,
+    /** 模拟 watcher 进程自己退出（Worker 还没起来时 hypit activity 就是这样） */
+    exit: () => undefined as void,
+  };
+  activity.setActivitySpawner((_dir, onLine, onExit) => {
     watcher.started += 1;
     watcher.push = onLine;
+    watcher.exit = onExit;
     return {
       stop: () => {
         watcher.stopped += 1;

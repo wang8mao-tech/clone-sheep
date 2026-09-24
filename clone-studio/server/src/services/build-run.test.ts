@@ -152,11 +152,29 @@ describe("进度、取消、重试", () => {
     );
     expect(b.build.latestBuild(id)?.activity).toBeNull();
 
+    // watcher 进程自己退了（真机：提交前 Worker 还没起来，hypit activity 直接退出）：帧清掉、2 秒后再起一个
+    b.watcher.exit();
+    expect(b.build.latestBuild(id)?.activity).toBeNull();
+    await until(() => b.watcher.started === 2, "watcher 重起");
+    b.watcher.push(
+      JSON.stringify({
+        format: "hypit.cli-activity@1",
+        at: 4,
+        worker: "running",
+        builds: [{ id: "bld_test_0001", work: {}, phases: { "encoding video": 1 } }],
+      }),
+    );
+    expect(b.build.latestBuild(id)?.activity).toEqual({ phases: { "encoding video": 1 }, requests: null });
+
     release({ lines: [], json: BUILD_OK });
     await until(() => productionStatus(b, id) === "done", "出片完成");
     expect(b.watcher.stopped).toBe(1);
     expect(b.build.latestBuild(id)?.activity).toBeNull();
-  });
+    // 停了之后进程再退也不会再起
+    b.watcher.exit();
+    await new Promise((r) => setTimeout(r, 2_300));
+    expect(b.watcher.started).toBe(2);
+  }, 15_000);
 
   it("重试出片：失败的回到排队，执行器再起一次，新 build 记录", async () => {
     const b = await boot();

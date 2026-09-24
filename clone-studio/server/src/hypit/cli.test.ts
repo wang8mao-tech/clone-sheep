@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -24,7 +24,7 @@ beforeEach(() => {
   writeFileSync(
     path.join(hypitRoot, "bin", "hypit.mjs"),
     `import { spawn } from "node:child_process";\n` +
-      `spawn(process.execPath, ["-e", "setTimeout(()=>{}, 60000)"], ` +
+      `spawn(process.execPath, ["-e", "require('node:fs').writeFileSync('started', '1'); setTimeout(()=>{}, 60000)"], ` +
       `{ cwd: ${JSON.stringify(held)}, stdio: "ignore", detached: true });\n` +
       `setTimeout(() => {}, 60000);\n`,
   );
@@ -85,20 +85,22 @@ describe.runIf(process.platform === "win32")("runHypit 的超时收尸", () => {
       }
     };
 
-    // 等孙进程真的占住目录再让它超时：固定睡 800ms 在整套测试并行跑、机器忙时不够（6.4 收尾时 pnpm check 两次撞上）
-    const settle = async (want: boolean, deadlineMs: number): Promise<boolean> => {
+    // 等孙进程真的起来再探测：固定睡 800ms 在整套测试并行跑、机器忙时不够；而在它起来之前就用改名探测，
+    // 会正好撞上它 spawn 的那一刻（cwd 被改走 → spawn ENOENT），所以起没起来看它写的 started 文件，不改名
+    const wait = async (ready: () => boolean, deadlineMs: number): Promise<boolean> => {
       const until = Date.now() + deadlineMs;
       while (Date.now() < until) {
-        if (locked() === want) return true;
+        if (ready()) return true;
         await new Promise((r) => setTimeout(r, 50));
       }
-      return locked() === want;
+      return ready();
     };
     const call = runHypit(["builds"], { cwd: dataRoot, timeoutMs: 6_000 });
-    expect(await settle(true, 5_000), "前提：孙进程起来了并占着目录").toBe(true);
+    expect(await wait(() => existsSync(path.join(held, "started")), 5_000), "前提：孙进程起来了").toBe(true);
+    expect(locked(), "前提：孙进程占着目录").toBe(true);
 
     await expect(call).rejects.toMatchObject({ code: "TIMEOUT" });
-    // 只杀 hypit 自己的话，这里永远等不到 false
-    expect(await settle(false, 5_000)).toBe(true);
+    // 只杀 hypit 自己的话，这里永远等不到解锁
+    expect(await wait(() => !locked(), 5_000)).toBe(true);
   }, 30_000);
 });

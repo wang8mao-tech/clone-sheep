@@ -24,10 +24,13 @@ export interface ActivityFrame {
   builds: ActivityBuild[];
 }
 
-export type ActivitySpawner = (dir: string, onLine: (line: string) => void) => { stop: () => void };
+export type ActivitySpawner = (dir: string, onLine: (line: string) => void, onExit: () => void) => { stop: () => void };
+
+/** watcher 进程退出后多久再起一个：Worker 还没起来时 `hypit activity` 会直接退出，提交完 Worker 起来了就能接上 */
+const RESPAWN_DELAY_MS = 2_000;
 
 /** 真实的 watcher：spawn hypit 子进程，按行读 stdout。测试里换成假的 */
-const realSpawner: ActivitySpawner = (dir, onLine) => {
+const realSpawner: ActivitySpawner = (dir, onLine, onExit) => {
   // 与 hypit/cli.ts 同一种起法：node <hypit.mjs> …，shell: false，清掉 Agent SDK 留下的 NODE_OPTIONS
   const child: ChildProcess = spawn(
     process.execPath,
@@ -49,6 +52,7 @@ const realSpawner: ActivitySpawner = (dir, onLine) => {
     pending = lines.pop() ?? "";
     for (const line of lines) if (line.trim()) onLine(line);
   });
+  child.on("exit", onExit);
   return {
     stop: () => {
       void procs.killTree(child.pid ?? -1);
@@ -57,7 +61,10 @@ const realSpawner: ActivitySpawner = (dir, onLine) => {
 };
 
 let spawner: ActivitySpawner = realSpawner;
-const watchers = new Map<string, { handle: { stop: () => void }; latest: ActivityFrame | null }>();
+const watchers = new Map<
+  string,
+  { handle: { stop: () => void }; latest: ActivityFrame | null; respawn: NodeJS.Timeout | null }
+>();
 
 export function setActivitySpawner(next: ActivitySpawner | null): void {
   spawner = next ?? realSpawner;
@@ -66,9 +73,13 @@ export function setActivitySpawner(next: ActivitySpawner | null): void {
 /** 这个工作目录有 build 在跑时保证 watcher 开着 */
 export function ensureActivityWatcher(dir: string): void {
   if (watchers.has(dir)) return;
-  const state = { handle: { stop: () => undefined as void }, latest: null as ActivityFrame | null };
+  const state = {
+    handle: { stop: () => undefined as void },
+    latest: null as ActivityFrame | null,
+    respawn: null as NodeJS.Timeout | null,
+  };
   watchers.set(dir, state);
-  state.handle = spawner(dir, (line) => {
+  const onLine = (line: string): void => {
     try {
       const frame = JSON.parse(line) as Partial<ActivityFrame> & { format?: unknown };
       if (frame.format !== "hypit.cli-activity@1" || !Array.isArray(frame.builds)) return;
@@ -80,15 +91,31 @@ export function ensureActivityWatcher(dir: string): void {
     } catch {
       // 不是 JSON 的行（hypit 的提示）跳过
     }
-  });
+  };
+  const start = (): void => {
+    state.handle = spawner(dir, onLine, () => {
+      // 进程自己退了（Worker 还没起来、或被 hypit 关掉）：只要这个目录还在被看，过一会儿再起
+      if (watchers.get(dir) !== state) return;
+      state.latest = null;
+      state.respawn = setTimeout(() => {
+        state.respawn = null;
+        if (watchers.get(dir) === state) start();
+      }, RESPAWN_DELAY_MS);
+      state.respawn.unref?.();
+    });
+  };
+  start();
 }
 
 /** 停掉某个工作目录的 watcher；不带参数停全部（进程退出、测试收尾） */
 export function stopActivityWatcher(dir?: string): void {
   const dirs = dir === undefined ? [...watchers.keys()] : [dir];
   for (const d of dirs) {
-    watchers.get(d)?.handle.stop();
+    const state = watchers.get(d);
+    if (!state) continue;
     watchers.delete(d);
+    if (state.respawn) clearTimeout(state.respawn);
+    state.handle.stop();
   }
 }
 

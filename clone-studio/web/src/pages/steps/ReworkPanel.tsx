@@ -9,11 +9,16 @@ import { REWORK_NOTE_MAX } from "../../lib/review.js";
  */
 export function ReworkPanel({
   round,
+  label,
+  placeholder = "写清楚哪里不像、要怎么改，例如：主持人太小，放大到画面一半；第 3 秒转场要硬切",
   blocked,
   busy,
   onSubmit,
 }: {
-  round: number;
+  /** ③ 验货的轮次（标题写成「打回意见 #n」）；④ 素材审核没有轮次，给 label */
+  round?: number;
+  label?: string;
+  placeholder?: string;
   /** 不能打回的原因；有值时按钮禁用并在提示里说明 */
   blocked: string | undefined;
   busy: boolean;
@@ -39,12 +44,12 @@ export function ReworkPanel({
   return (
     <div className="flex w-full max-w-[560px] flex-col gap-2">
       <Textarea
-        label={`打回意见 #${round}`}
+        label={label ?? `打回意见 #${round ?? 1}`}
         rows={4}
         value={note}
         autoFocus
         onChange={(e) => setNote(e.currentTarget.value)}
-        placeholder="写清楚哪里不像、要怎么改，例如：主持人太小，放大到画面一半；第 3 秒转场要硬切"
+        placeholder={placeholder}
         hint={`${length} / ${REWORK_NOTE_MAX}`}
         error={tooLong ? `超过 ${REWORK_NOTE_MAX} 字了（${length}）` : undefined}
       />

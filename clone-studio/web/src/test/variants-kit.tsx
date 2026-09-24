@@ -33,6 +33,7 @@ export const variant = (n: number, over: Partial<VariantView> = {}): VariantView
   estimate: null,
   build: null,
   needsMe: false,
+  approved: false,
   ...over,
 });
 

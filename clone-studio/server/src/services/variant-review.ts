@@ -103,7 +103,8 @@ export function reviewState(id: string): VariantReviewState {
     script: raw === null ? null : raw.slice(0, SCRIPT_VIEW_MAX),
     scriptTruncated: raw !== null && raw.length > SCRIPT_VIEW_MAX,
     perItemLimitUsd: limits.per_item_limit_usd,
-    batch: variant.batch_id ? { id: variant.batch_id, ...batchBudget(variant.batch_id) } : null,
+    // 不含这条自己放行过的估价：估价卡会把这条的估价加上去画限额条，和闸门算的是同一个数（8.4 审查 S1-M2）
+    batch: variant.batch_id ? { id: variant.batch_id, ...batchBudget(variant.batch_id, variant.id) } : null,
     approveBlocked: !reviewing ? "只有素材待审的变体能通过" : gaps > 0 ? `还有 ${gaps} 个缺口没补，先上传` : null,
     reworkBlocked: !reviewing ? "只有素材待审的变体能打回" : null,
   };

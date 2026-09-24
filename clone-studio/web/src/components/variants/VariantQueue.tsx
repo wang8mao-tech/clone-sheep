@@ -44,7 +44,7 @@ export function VariantQueue({ batches, now, hrefFor, busy, onAction, error }: P
     .filter((g) => g.variants.length > 0);
 
   return (
-    <section aria-label="变体队列" className="flex flex-col gap-3">
+    <section aria-label="变体队列" tabIndex={-1} className="flex flex-col gap-3 outline-none">
       <div role="group" aria-label="筛选" className="flex items-center gap-1">
         {FILTERS.map((f) => (
           <button

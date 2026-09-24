@@ -1,7 +1,15 @@
-import { describeStop, nextActions } from "../../lib/agent-status.js";
+import { nextActions } from "../../lib/agent-status.js";
 import { formatUsd } from "../../lib/format.js";
 import { formatRunElapsed } from "../../lib/run-elapsed.js";
-import { spentOf, STOPPED, type VariantStatus, type VariantView } from "../../lib/variants.js";
+import {
+  buildFailed,
+  CANCELLABLE,
+  spentOf,
+  stopReason,
+  STOPPED,
+  type VariantStatus,
+  type VariantView,
+} from "../../lib/variants.js";
 import { TaskRow } from "../TaskRow.js";
 import { Button } from "../ui/Button.js";
 import { StatusMark } from "../ui/StatusMark.js";
@@ -18,18 +26,6 @@ interface Props {
   onAction: (action: RowAction) => void;
 }
 
-/** 没结束的都能取消（停下的也能：作废它，之后不再花钱） */
-const CANCELLABLE: ReadonlySet<VariantStatus> = new Set([
-  "queued",
-  "agent_running",
-  "awaiting_quota",
-  "asset_review",
-  "awaiting_cost_confirm",
-  "building",
-  "failed",
-  "tripped",
-  "interrupted",
-]);
 /** 服务端能重跑的变体状态（server/src/services/variant-review.ts RERUNNABLE） */
 const RERUNNABLE: ReadonlySet<VariantStatus> = new Set(["failed", "tripped", "interrupted", "asset_review"]);
 
@@ -39,35 +35,6 @@ const RERUNNABLE: ReadonlySet<VariantStatus> = new Set(["failed", "tripped", "in
  */
 function inPipeline(v: VariantView): boolean {
   return v.estimate !== null || v.build !== null;
-}
-
-/** 出片失败 / 被取消、或渲染到一半后端重启（中断）：可以「重试出片」，不重跑 Agent（FLOW-003、REQ-006） */
-function buildFailed(v: VariantView): boolean {
-  return (
-    (v.status === "failed" || v.status === "interrupted") &&
-    v.build !== null &&
-    (v.build.status === "failed" || v.build.status === "cancelled")
-  );
-}
-
-/** 失败行就地展开的原文：先说哪一步失败，再给原文（Design-Brief §6.2、REQ-005「阶段、错误 code」） */
-function errorDetail(v: VariantView): string | undefined {
-  if (!STOPPED.has(v.status)) return undefined;
-  // 估价比最近一次出片新、而且没过（重试出片时重新估价被拦）：原因在估价上，先说它（8.3 第二轮审查 S1-M1）
-  const blocked = v.estimate?.decision === "blocked" ? v.estimate : null;
-  if (blocked && (!v.build || blocked.createdAt > v.build.createdAt)) {
-    return ["估价没过，不出片", blocked.reason ?? blocked.error].filter(Boolean).join("\n");
-  }
-  if (buildFailed(v) && v.build) {
-    return [`出片失败${v.build.errorCode ? ` · ${v.build.errorCode}` : ""}`, v.build.errorMessage]
-      .filter(Boolean)
-      .join("\n");
-  }
-  if (v.agent) {
-    const why = describeStop(v.agent);
-    return why ? `Agent 写稿停下：${why}` : undefined;
-  }
-  return undefined;
 }
 
 /**
@@ -92,7 +59,7 @@ export function VariantRow({ variant: v, now, href, busy, onAction }: Props) {
       }
       title={v.name ?? v.brief ?? v.id}
       {...(href ? { href, openLabel: `打开变体 ${v.name ?? v.id}` } : {})}
-      errorDetail={errorDetail(v)}
+      errorDetail={stopReason(v)?.text}
       columns={[
         { label: "模型", content: v.agent?.modelId ?? "订阅默认", width: "128px" },
         { label: "Agent 用时", content: v.agent ? formatRunElapsed(v.agent, now) : "—", width: "56px", numeric: true },

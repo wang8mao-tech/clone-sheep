@@ -149,6 +149,8 @@ export interface VariantView {
   build: BuildView | null;
   /** 要人动手：素材待审、待确认花费（SCREEN-006 置顶） */
   needsMe: boolean;
+  /** 素材审核通过过、交给了估价与出片（有运行文件）：界面据此分「写稿前的排队」和「通过后等估价的排队」 */
+  approved: boolean;
 }
 
 export interface BatchView {
@@ -181,6 +183,7 @@ export function presentVariant(row: VariantRow): VariantView {
     estimate: row.run_path ? (currentEstimate(row.id) ?? null) : null,
     build: row.run_path ? (latestBuild(row.id) ?? null) : null,
     needsMe: NEEDS_ME.has(row.status),
+    approved: row.run_path !== null,
   };
 }
 

@@ -77,6 +77,72 @@ describe("重跑与估价 / 重试出片（M1 / M2）", () => {
   });
 });
 
+describe("审核状态里的批次已花（8.4 审查 S1-M2）", () => {
+  it("不含这条自己放行过的估价：估价卡会把它加上去，和闸门看的是同一个数", async () => {
+    const b = await bootVariants();
+    b.rates.upsertRate({ capability: "@hypit/seedance@2#generate-video", unit: "second", usd: 0.18 });
+    b.setPlan({
+      format: "hypit.cli-plan@1",
+      ok: true,
+      providerRequestCount: 1,
+      unresolvedRequestCount: 0,
+      unsupportedRequestCount: 0,
+      providers: [
+        {
+          request: "r1",
+          capability: "@hypit/seedance@2#generate-video",
+          status: "resolved",
+          endpoint: "td",
+          pricing: { kind: "page", url: "https://x.test" },
+        },
+      ],
+      needs: [{ request: "r1", summary: { fields: { duration: 5 } } }],
+      preflight: { ok: true, diagnostics: [] },
+    });
+    b.setWatch(() => new Promise(() => undefined));
+    const { id, review, assetId } = await inReview(b);
+    await review.replaceAsset(assetId("assets/02-gap.jpg"), upload(b, "g.png", 10, 10));
+    review.approveAssets(id);
+    await until(() => b.statusOf(id) === "building", "放行出片");
+    expect(review.reviewState(id).batch?.spentUsd).toBe(0);
+    expect(b.variants.listVariants(b.templateId).batches[0]?.spentUsd).toBeCloseTo(0.9, 6);
+  });
+});
+
+describe("重跑之后旧稿的估价不再占批次已花（8.4 第三轮审查顺带查出）", () => {
+  it("估价放行过、出片没提交就失败：重跑后批次已花回到 0，变体视图标成未交给出片", async () => {
+    const b = await bootVariants();
+    b.rates.upsertRate({ capability: "@hypit/seedance@2#generate-video", unit: "second", usd: 0.18 });
+    b.setPlan({
+      format: "hypit.cli-plan@1",
+      ok: true,
+      providerRequestCount: 1,
+      unresolvedRequestCount: 0,
+      unsupportedRequestCount: 0,
+      providers: [
+        {
+          request: "r1",
+          capability: "@hypit/seedance@2#generate-video",
+          status: "resolved",
+          endpoint: "td",
+          pricing: { kind: "page", url: "https://x.test" },
+        },
+      ],
+      needs: [{ request: "r1", summary: { fields: { duration: 5 } } }],
+      preflight: { ok: true, diagnostics: [] },
+    });
+    b.setSubmit(new Error("提交就炸了"));
+    const { id, review, assetId } = await inReview(b);
+    await review.replaceAsset(assetId("assets/02-gap.jpg"), upload(b, "g.png", 10, 10));
+    review.approveAssets(id);
+    await until(() => b.statusOf(id) === "failed", "出片失败");
+    expect(b.variants.presentVariant(b.vstore.findVariant(id) as never).approved).toBe(true);
+    review.rerunVariant(id);
+    expect(b.variants.listVariants(b.templateId).batches[0]?.spentUsd).toBe(0);
+    expect(b.variants.presentVariant(b.vstore.findVariant(id) as never).approved).toBe(false);
+  });
+});
+
 describe("替换单张的边角", () => {
   it("素材不存在 / 不在素材待审：上传的文件照样删掉（M3）", async () => {
     const b = await bootVariants();

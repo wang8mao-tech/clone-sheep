@@ -1,4 +1,5 @@
 import { api } from "./api.js";
+import { describeStop } from "./agent-status.js";
 import type { AgentJobView } from "./agent.js";
 import type { BuildView } from "./build.js";
 import type { EstimateRecord } from "./estimate.js";
@@ -30,6 +31,8 @@ export interface VariantView {
   estimate: EstimateRecord | null;
   build: BuildView | null;
   needsMe: boolean;
+  /** 素材审核通过过、交给了估价与出片（服务端有运行文件） */
+  approved: boolean;
 }
 
 export interface BatchView {
@@ -68,8 +71,9 @@ export const variantApi = {
   models: () => api.get<{ models: AgentModelOption[] }>("/api/agent-models"),
   submit: (templateId: string, input: SubmitInput) =>
     api.post<{ batch: BatchView }>(`/api/templates/${templateId}/batches`, input, 30_000),
-  cancel: (id: string) => api.post<{ variant: VariantView }>(`/api/variants/${id}/cancel`, undefined, 30_000),
-  rerun: (id: string) => api.post<{ variant: VariantView }>(`/api/variants/${id}/rerun`),
+  cancel: (id: string) =>
+    api.post<{ variant: VariantView }>(`/api/variants/${encodeURIComponent(id)}/cancel`, undefined, 30_000),
+  rerun: (id: string) => api.post<{ variant: VariantView }>(`/api/variants/${encodeURIComponent(id)}/rerun`),
 };
 
 /* ── brief 实时校验：规则与 server/src/services/briefs.ts 一致，提交时以后端为准 ── */
@@ -132,8 +136,60 @@ export const FILTERS: ReadonlyArray<{ key: VariantFilter; label: string }> = [
 
 /** 自己会变的（页面据此轮询）：排队、写稿、等额度、渲染 */
 export const RUNNING: ReadonlySet<VariantStatus> = new Set(["queued", "agent_running", "awaiting_quota", "building"]);
+/** 没结束的都能取消（与服务端 variants.ts OPEN 一致）：队列行与素材审核面板共用 */
+export const CANCELLABLE: ReadonlySet<VariantStatus> = new Set([
+  "queued",
+  "agent_running",
+  "awaiting_quota",
+  "asset_review",
+  "awaiting_cost_confirm",
+  "building",
+  "failed",
+  "tripped",
+  "interrupted",
+]);
+
 /** 停下了、要人决定（「失败」筛选）：失败、熔断、中断 */
 export const STOPPED: ReadonlySet<VariantStatus> = new Set(["failed", "tripped", "interrupted"]);
+
+/** 出片失败 / 被取消、或渲染到一半后端重启（中断）：可以「重试出片」，不重跑 Agent（FLOW-003、REQ-006） */
+export function buildFailed(v: VariantView): boolean {
+  return (
+    (v.status === "failed" || v.status === "interrupted") &&
+    v.build !== null &&
+    (v.build.status === "failed" || v.build.status === "cancelled")
+  );
+}
+
+export interface StopReason {
+  /** 停在哪一步：估价闸门、出片、Agent 写稿 */
+  step: "estimate" | "build" | "agent";
+  text: string;
+}
+
+/**
+ * 停下的变体先说哪一步失败，再给原文（Design-Brief §6.2、REQ-005「阶段、错误 code」）。
+ * 队列行的展开原文和素材审核面板共用这一条，两处说法一致（8.4 第四轮审查 S1-M-1）
+ */
+export function stopReason(v: VariantView): StopReason | undefined {
+  if (!STOPPED.has(v.status)) return undefined;
+  // 估价比最近一次出片新、而且没过（重试出片时重新估价被拦）：原因在估价上，先说它（8.3 第二轮审查 S1-M1）
+  const blocked = v.estimate?.decision === "blocked" ? v.estimate : null;
+  if (blocked && (!v.build || blocked.createdAt > v.build.createdAt)) {
+    return { step: "estimate", text: ["估价没过，不出片", blocked.reason ?? blocked.error].filter(Boolean).join("\n") };
+  }
+  if (buildFailed(v) && v.build) {
+    const text = [`出片失败${v.build.errorCode ? ` · ${v.build.errorCode}` : ""}`, v.build.errorMessage]
+      .filter(Boolean)
+      .join("\n");
+    return { step: "build", text };
+  }
+  if (v.agent) {
+    const why = describeStop(v.agent);
+    return why ? { step: "agent", text: `Agent 写稿停下：${why}` } : undefined;
+  }
+  return undefined;
+}
 
 export function matchesFilter(v: VariantView, filter: VariantFilter): boolean {
   switch (filter) {

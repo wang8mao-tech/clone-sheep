@@ -32,6 +32,8 @@ export function batchSpentUsd(batchId: string, exceptProductionId: string): numb
            SELECT id FROM estimates WHERE production_id = p.id ORDER BY created_at DESC, rowid DESC LIMIT 1
          )
         WHERE p.batch_id = ? AND p.id <> ? AND p.status NOT IN ('cancelled', 'failed')
+          -- 估价绑在这一稿上：变体重跑后运行文件清掉了，旧稿的估价不再占钱（8.4 第三轮审查顺带查出）
+          AND p.run_path IS NOT NULL
           AND (e.decision = 'auto' OR e.confirmed_at IS NOT NULL)`,
     )
     .get(batchId, exceptProductionId) as { spent: number };
@@ -39,8 +41,8 @@ export function batchSpentUsd(batchId: string, exceptProductionId: string): numb
 }
 
 /** ④ 变体组头的「已花 / 限额」：和闸门同一个算法、同一个限额来源，界面上的数字就是闸门看的数字 */
-export function batchBudget(batchId: string): { limitUsd: number; spentUsd: number } {
-  return { limitUsd: batchLimitOf(batchId), spentUsd: batchSpentUsd(batchId, "") };
+export function batchBudget(batchId: string, exceptProductionId = ""): { limitUsd: number; spentUsd: number } {
+  return { limitUsd: batchLimitOf(batchId), spentUsd: batchSpentUsd(batchId, exceptProductionId) };
 }
 
 /** 批次限额以提交时定下的 budget 为准（Spec FLOW-003 步骤 1），没定的用设置里的批次限额 */

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useToast } from "../../components/ui/Toast.js";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "react-router";
+import { useParams, useSearchParams } from "react-router";
+import { AssetReviewPanel } from "../../components/variants/AssetReviewPanel.js";
 import { VariantQueue } from "../../components/variants/VariantQueue.js";
 import { SubmitPanel } from "../../components/variants/SubmitPanel.js";
 import { QueryErrorState } from "../../components/ui/QueryErrorState.js";
@@ -60,6 +61,8 @@ function VariantsBody({ templateId }: { templateId: string }) {
   const [formKey, setFormKey] = useState(0);
   const [busy, setBusy] = useState<{ id: string; action: RowAction } | null>(null);
   const [actionError, setActionError] = useState<{ id: string; message: string } | null>(null);
+  const [params, setParams] = useSearchParams();
+  const openVariant = params.get("variant");
 
   const refresh = (): void => void qc.invalidateQueries({ queryKey: variantKeys.list(templateId) });
   // 变体状态、估价、出片推在模板主题上：都让队列重拉
@@ -135,34 +138,60 @@ function VariantsBody({ templateId }: { templateId: string }) {
     );
   }
   const batches = list.data.batches;
+  // 返回队列：只去掉 variant 参数；焦点回到点开它的那一行（它一直挂着，只是藏起来了）
+  const closePanel = (): void => {
+    const id = openVariant;
+    setParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete("variant");
+      return next;
+    });
+    if (id) {
+      requestAnimationFrame(() =>
+        // 那一行可能已经被当前筛选滤掉：退到队列本身
+        (
+          document.querySelector<HTMLElement>(`a[href$="variant=${encodeURIComponent(id)}"]`) ??
+          document.querySelector<HTMLElement>('[aria-label="变体队列"]')
+        )?.focus(),
+      );
+    }
+  };
   const perItem = settings.data?.perItemLimitUsd ?? 1.5;
 
+  // 点开一条：素材审核全幅面板覆盖工作区（SCREEN-007），步骤条与侧栏保留。队列与提交区只是藏起来不卸载：
+  // 没提交的 brief 草稿、筛选都还在（8.4 第二轮审查 S2-M-A）
   return (
     <>
-      <SubmitPanel
-        key={formKey}
-        templateLanguage={template.data?.language ?? null}
-        models={models.data?.models}
-        defaultBudgetUsd={settings.data?.batchLimitUsd ?? 15}
-        perItemLimitUsd={perItem}
-        // 与服务端一致：设置只能往小调，封顶 20（REQ-005 / FLOW-003；8.3 审查 MEDIUM-2）
-        maxItems={Math.min(settings.data?.batchMaxItems || BATCH_MAX, BATCH_MAX)}
-        busy={submitting}
-        error={submitError}
-        onSubmit={(input) => void submit(input)}
-        defaultOpen={batches.length === 0}
-      />
-      {batches.length === 0 ? (
-        <p className="text-caption text-text-secondary">还没有变体。在上面写几条 brief 提交，变体会按批次排在这里。</p>
-      ) : (
-        <VariantQueue
-          batches={batches}
-          now={now}
-          busy={busy}
-          error={actionError}
-          onAction={(variant, action) => void act(variant, action)}
+      {openVariant ? <AssetReviewPanel templateId={templateId} variantId={openVariant} onClose={closePanel} /> : null}
+      <div hidden={openVariant !== null} className="flex flex-col gap-4">
+        <SubmitPanel
+          key={formKey}
+          templateLanguage={template.data?.language ?? null}
+          models={models.data?.models}
+          defaultBudgetUsd={settings.data?.batchLimitUsd ?? 15}
+          perItemLimitUsd={perItem}
+          // 与服务端一致：设置只能往小调，封顶 20（REQ-005 / FLOW-003；8.3 审查 MEDIUM-2）
+          maxItems={Math.min(settings.data?.batchMaxItems || BATCH_MAX, BATCH_MAX)}
+          busy={submitting}
+          error={submitError}
+          onSubmit={(input) => void submit(input)}
+          defaultOpen={batches.length === 0}
         />
-      )}
+        {batches.length === 0 ? (
+          <p className="text-caption text-text-secondary">
+            还没有变体。在上面写几条 brief 提交，变体会按批次排在这里。
+          </p>
+        ) : (
+          <VariantQueue
+            batches={batches}
+            now={now}
+            hrefFor={(id) => `?variant=${encodeURIComponent(id)}`}
+            busy={busy}
+            error={actionError}
+            onAction={(variant, action) => void act(variant, action)}
+          />
+        )}
+      </div>
     </>
   );
 }

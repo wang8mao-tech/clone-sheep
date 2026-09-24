@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -30,6 +30,23 @@ describe("能力清单（Spec：MUST 写进系统提示，只用可用能力）"
     expect(s).toContain("- @hypit/render-hyperframes@1#render-visual → hyperframes.local");
     expect(s).toContain("- @hypit/whisperx@1#whisperx-alignment → whisperx.local");
     expect(s).toContain("缺哪种能力");
+  });
+
+  it("变体的工作目录（模板目录下的 productions/<id>/）没有 profile：往上用模板目录那份", () => {
+    writeFileSync(path.join(ws, "hypit.runtime.json"), JSON.stringify({ bindings: { "cap#x": "local.x" } }));
+    const sub = path.join(ws, "productions", "v1");
+    mkdirSync(sub, { recursive: true });
+    expect(capabilitySection(sub)).toContain("- cap#x → local.x");
+  });
+
+  it("往上找到项目根（package.json）为止：项目根外面的 profile 不算这个项目的", () => {
+    writeFileSync(path.join(ws, "hypit.runtime.json"), JSON.stringify({ bindings: { "stray#x": "elsewhere" } }));
+    const project = path.join(ws, "project");
+    const sub = path.join(project, "productions", "v1");
+    mkdirSync(sub, { recursive: true });
+    writeFileSync(path.join(project, "package.json"), "{}");
+    expect(capabilitySection(sub)).not.toContain("stray#x");
+    expect(capabilitySection(sub)).toContain("hypit plan");
   });
 
   it("读不到 profile 时不编造，改为让它先 hypit plan", () => {

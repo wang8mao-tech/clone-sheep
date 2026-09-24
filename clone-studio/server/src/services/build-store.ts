@@ -93,8 +93,14 @@ export function readProduction(productionId: string): ProductionRow | undefined 
     .get(productionId) as ProductionRow | undefined;
 }
 
-export function setProductionStatus(productionId: string, status: string, at = new Date().toISOString()): void {
-  db().prepare("UPDATE productions SET status = ?, updated_at = ? WHERE id = ?").run(status, at, productionId);
+export function setProductionStatus(
+  productionId: string,
+  status: string,
+  at = new Date().toISOString(),
+  options: { unlessCancelled?: boolean } = {},
+): void {
+  const guard = options.unlessCancelled ? " AND status <> 'cancelled'" : "";
+  db().prepare(`UPDATE productions SET status = ?, updated_at = ? WHERE id = ?${guard}`).run(status, at, productionId);
 }
 
 const BUILD_COLUMNS = new Set([

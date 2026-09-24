@@ -2,6 +2,8 @@ import { setAgentStopper } from "../services/agent-stopper.js";
 import { requireTemplate } from "../services/archive.js";
 import { sseHub } from "../lib/sse.js";
 import { resetAgentProducts } from "../hypit/workspace.js";
+import { resetVariantProducts, variantDir } from "../services/variant-files.js";
+import { productionTemplateId, userReplacedFiles } from "../services/variant-store.js";
 import { settingsFromDb } from "./agent-settings.js";
 import { latestJobOf, requireJob, updateJob, type AgentJobRow } from "./job-store.js";
 import { appendIntercept, appendMessage, appendPrompt, appendStop } from "./message-store.js";
@@ -29,7 +31,11 @@ export function agentScheduler(options: AgentServiceOptions = {}): Scheduler {
     run: runAgent,
     settings: settingsFromDb,
     workspaceOf: (job) => workspaceOf(job),
-    resetWorkspace: (job) => resetAgentProducts(workspaceOf(job)),
+    // 变体重跑只清 Agent 的产物：模板原稿与用户替换过的图留着（Task 5.2 复审 S1-M4）
+    resetWorkspace: (job) =>
+      job.owner_kind === "production"
+        ? resetVariantProducts(workspaceOf(job), userReplacedFiles(job.owner_id), templateDirOf(job.owner_id))
+        : resetAgentProducts(workspaceOf(job)),
     onMessage: (jobId, message) => {
       const stored = appendMessage(jobId, message);
       announce(jobId, stored);
@@ -137,17 +143,22 @@ export function resetAgentScheduler(): void {
 }
 
 /**
- * 任务的工作目录。模板就是它自己的工程目录；变体（production）的目录在 Phase 8 定，
- * 现在明确报错，不猜一个路径出来——猜错会把 Agent 放进别人的目录里写。
+ * 任务的工作目录。模板就是它自己的工程目录；变体（production）是模板目录下的 `productions/<id>/`
+ * （REQ-005）：Agent 只能写这里，hypit 在这里跑时按最近的 package.json 认模板目录为项目根。
  */
+/** 变体所属模板的工作目录（重跑时从这里重新复制原稿） */
+function templateDirOf(productionId: string): string | undefined {
+  const templateId = productionTemplateId(productionId);
+  return templateId ? (requireTemplate(templateId).workspace_path ?? undefined) : undefined;
+}
+
 export function workspaceOf(job: Pick<AgentJobRow, "owner_kind" | "owner_id">): string {
-  if (job.owner_kind !== "template") {
-    throw new Error(`变体任务的工作目录要等 Phase 8 定：${job.owner_kind}/${job.owner_id}`);
-  }
-  const template = requireTemplate(job.owner_id);
+  const templateId = job.owner_kind === "template" ? job.owner_id : productionTemplateId(job.owner_id);
+  if (!templateId) throw new Error(`出片单位不存在：${job.owner_id}`);
+  const template = requireTemplate(templateId);
   // 以库里记的路径为准，和上传、播放那几处同一个来源：目录迁移过之后按 id 拼出来的是旧路径
   if (!template.workspace_path) throw new Error(`模板还没有工作目录：${template.id}`);
-  return template.workspace_path;
+  return job.owner_kind === "template" ? template.workspace_path : variantDir(template.workspace_path, job.owner_id);
 }
 
 /** 给界面的任务形状。前端直接按它写类型，别各自再抄一份 */

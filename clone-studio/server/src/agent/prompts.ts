@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { HYPIT_SKILL } from "./plugin.js";
 
@@ -52,9 +52,28 @@ export function capabilitySection(workspace: string): string {
   ].join("\n");
 }
 
+/**
+ * 找 Runtime Profile：工作目录里没有就往上找（变体的工作目录是模板目录下的 productions/<id>/，
+ * hypit 在那里跑时同样按上级的项目根选 Runtime）
+ */
+function findProfile(workspace: string): string | undefined {
+  let dir = path.resolve(workspace);
+  for (;;) {
+    const candidate = path.join(dir, "hypit.runtime.json");
+    if (existsSync(candidate)) return candidate;
+    // 到项目根（最近的 package.json）为止，和 hypit 选 Runtime 的边界一致；再往上的不是这个项目的（8.1 第二轮审查 S2-L1）
+    if (existsSync(path.join(dir, "package.json"))) return undefined;
+    const parent = path.dirname(dir);
+    if (parent === dir) return undefined;
+    dir = parent;
+  }
+}
+
 function readBindings(workspace: string): Record<string, string> | undefined {
+  const file = findProfile(workspace);
+  if (!file) return undefined;
   try {
-    const profile = JSON.parse(readFileSync(path.join(workspace, "hypit.runtime.json"), "utf8")) as {
+    const profile = JSON.parse(readFileSync(file, "utf8")) as {
       bindings?: Record<string, unknown>;
     };
     const entries = Object.entries(profile.bindings ?? {}).filter(
@@ -129,18 +148,60 @@ export function cloneRetryPrompt(reason: string): string {
 
 export interface VariantPromptInput {
   brief: string;
-  templateSource: string;
+  /** 台词用的语言：批次指定的目标语言，没指定就是模板的语言 */
+  language: string;
+  /** 批次备注：附加给这一批的每一条 */
+  batchNote?: string;
 }
 
-/** 写变体（REQ-005）。Phase 8 接上批量与素材审核前，这里先定下提示的骨架 */
+/**
+ * 写变体（REQ-005、FLOW-003 步骤 3）。会话的工作目录就是这条变体自己的目录，模板原稿已复制进来。
+ * 完成判据由宿主核（variant-flow.ts）：variant.svrun check 通过、SOURCES.json 能解析、SCRIPT.md 存在。
+ * SOURCES.json 的格式写死在这里，宿主按它解析素材卡；缺口要显式标出来，人在素材审核时上传。
+ */
 export function variantPrompt(input: VariantPromptInput): string {
   return [
-    `以模板 ${input.templateSource} 为基础，按下面的 brief 写一条新的变体。`,
+    "以当前目录里的模板原稿（reference.svml / reference.svs / reference.svrun，是已验货通过的复刻稿）为基础，按下面的 brief 写一条变体。",
     "",
     "Brief：",
     input.brief,
     "",
-    "保留模板的结构与节奏，替换内容；用到的素材在 SOURCES.json 里逐条写明来源，找不到可用素材的在里面标注缺口。",
-    "完成标准：变体的 .svrun `hypit check --json` 通过。通过后停下，不要出片。",
+    `台词与屏幕文字用这个语言：${input.language}`,
+    ...(input.batchNote ? ["", "这一批的公共备注（优先照此取舍）：", input.batchNote] : []),
+    "",
+    "要交付的文件（都写在当前目录）：",
+    "1. variant.svml / variant.svs / variant.svrun —— 保留模板的结构、节奏与画面语言，改台词、榜单条目与配图提示词。",
+    "   原稿是从模板目录复制来的：里面指向模板目录文件的相对路径要改成从这里出发（例如 ../../references/src/source.mp4），或者把要用的文件放进当前目录。",
+    "2. assets/ —— 条目图。联网找真实、能认出是谁 / 是什么的图，下载后用 ffmpeg 裁切缩放成统一的尺寸与比例（和模板里对应位置一致），",
+    "   文件名用序号加条目名，例如 assets/01-iphone.jpg。",
+    "3. SOURCES.json —— 每张图一条，格式：",
+    '   {"assets": [{"file": "assets/01-iphone.jpg", "label": "iPhone 17", "sourceUrl": "图片所在网页的 URL", "width": 1080, "height": 1080}]}',
+    "   - sourceUrl 写你拿到这张图的网页地址；不是联网拿的图（自己画的、纯色的）写 null。",
+    '   - 找不到可用图的条目也写一条，加 "gap": true：file 写它本该放的路径，width / height 写该有的尺寸，稿子里照样引用这个路径；',
+    "     在那个路径放一张同尺寸的纯色占位图让 check 能过，人会在素材审核时换成真图。",
+    "4. SCRIPT.md —— 台词与屏幕文字全文，按段落写，人审核时靠它一眼看出主题有没有跑偏。",
+    "",
+    "如果当前目录有 USER_ASSETS.json，里面列的图是人替换过的：原样保留、直接用，不要覆盖或删除。",
+    "",
+    "完成标准：`hypit check variant.svrun --json` 通过，SOURCES.json 与 SCRIPT.md 写好。通过后停下，不要出片。",
+  ].join("\n");
+}
+
+/** 变体素材审核打回（FLOW-003 分支）：作为新消息 resume 该变体的会话 */
+export function variantReworkPrompt(feedback: string): string {
+  return [
+    "素材审核打回意见：",
+    feedback,
+    "",
+    "按意见重新找图或改稿，同步更新 SOURCES.json 与 SCRIPT.md。USER_ASSETS.json 里列的图是人替换过的，不要动。",
+    "改到 `hypit check variant.svrun --json` 通过为止。不要出片。",
+  ].join("\n");
+}
+
+/** 变体判据没过之后的「继续」：把没过的原因交给会话（同 cloneRetryPrompt） */
+export function variantRetryPrompt(reason: string): string {
+  return [
+    `宿主核对完成判据没有通过：${reason}`,
+    "在当前目录已有产物的基础上补齐：`hypit check variant.svrun --json` 通过，SOURCES.json 与 SCRIPT.md 写好。通过后停下，不要出片。",
   ].join("\n");
 }

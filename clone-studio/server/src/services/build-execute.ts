@@ -47,7 +47,8 @@ export async function execute(production: ProductionRow, entry: RunningBuild, ho
   const finish = (patch: Record<string, unknown>, productionStatus: string): void => {
     const now = new Date().toISOString();
     updateBuild(entry.buildId, { ...patch, ended_at: now });
-    setProductionStatus(production.id, productionStatus, now);
+    // 渲染中被作废（④ 变体「取消」= 出片单位记已取消）：收尾不能把它改回失败 / 完成
+    setProductionStatus(production.id, productionStatus, now, { unlessCancelled: true });
   };
   const context = () => JSON.stringify(contextNow(entry));
   const fail = (code: string, message: string, extra: Record<string, unknown> = {}): void => {

@@ -88,6 +88,27 @@ export function activeJobsOf(ownerKind: OwnerKind, ownerId: string): AgentJobRow
     .all(ownerKind, ownerId, ...ACTIVE_STATUSES) as AgentJobRow[];
 }
 
+/** 出片单位上起 Agent 任务之前要看的两样：是否已作废、是否已交给出片流水线（有运行文件路径） */
+export function productionAgentGate(id: string): { status: string; run_path: string | null } | undefined {
+  return db().prepare("SELECT status, run_path FROM productions WHERE id = ?").get(id) as
+    { status: string; run_path: string | null } | undefined;
+}
+
+/**
+ * 模板下各条变体上还没结束的任务（Task 5.2 复审 S2-L7）。模板的继续 / 重跑 / 打回会改写或清掉
+ * reference.* 与证据，而变体会话正读着它们（原稿是复制过去的，但会话可能回头去读模板目录）：
+ * 模板这边要把它们也算进「未结束任务」
+ */
+export function activeVariantJobsOf(templateId: string): AgentJobRow[] {
+  const marks = ACTIVE_STATUSES.map(() => "?").join(", ");
+  return db()
+    .prepare(
+      `SELECT j.* FROM agent_jobs j JOIN productions p ON p.id = j.owner_id
+        WHERE j.owner_kind = 'production' AND p.template_id = ? AND j.status IN (${marks})`,
+    )
+    .all(templateId, ...ACTIVE_STATUSES) as AgentJobRow[];
+}
+
 /**
  * 对象最新的一个任务。继续 / 重跑只许对它做：重跑开了新任务之后，旧任务的会话对应的
  * 产物已经被清掉，再 resume 它只会在别人的目录里接着写一份过时的稿子。

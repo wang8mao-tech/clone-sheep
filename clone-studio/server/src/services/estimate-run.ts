@@ -9,9 +9,11 @@ import { estimateFromPlan, type Estimate } from "./estimate.js";
 import { decideGate, type GateDecision, type GateReason } from "./gate.js";
 import { listRates } from "./rates.js";
 import { pumpBuilds } from "./build-run.js";
+import { batchLimitOf, batchSpentUsd } from "./batch-budget.js";
 import { currentEstimate, EstimateError, pricingUrlsOf, type EstimateRecord } from "./estimate-store.js";
 
 export { currentEstimate, EstimateError, type EstimateRecord } from "./estimate-store.js";
+export { batchBudget } from "./batch-budget.js";
 
 /**
  * 估价与花钱闸门的编排（REQ-006、FLOW-002 步骤 4-5 / FLOW-003 步骤 5）。
@@ -122,42 +124,10 @@ function hasBuild(productionId: string): boolean {
   return db().prepare("SELECT 1 FROM builds WHERE production_id = ? LIMIT 1").get(productionId) !== undefined;
 }
 
-/**
- * 批次「已花」：现算，不靠谁去累加一个字段——两部分相加：
- * 1. 批次里其它出片单位最新一次估价里已放行的（auto 或人已确认）之和，作废 / 失败 / 排队待估的不算；
- * 2. 批次里所有已经提交给 hypit、却没出成（失败 / 取消）的 build 的估价——包括这条自己之前的尝试。
- *    「重试出片」会再花一次钱，旧的那次不能当没发生过（6.4 第三轮审查 M2，Task 7.2）。
- * build 拿不到实际金额（REQ-009），估价就是这次会花的钱
- */
-function batchSpentUsd(batchId: string, exceptProductionId: string): number {
-  const attempts = db()
-    .prepare(
-      `SELECT COALESCE(SUM(b.estimate_usd), 0) AS spent
-         FROM builds b JOIN productions p ON p.id = b.production_id
-        WHERE p.batch_id = ? AND b.hypit_build_id IS NOT NULL AND b.status IN ('failed', 'cancelled')`,
-    )
-    .get(batchId) as { spent: number };
-  const row = db()
-    .prepare(
-      `SELECT COALESCE(SUM(e.total_usd), 0) AS spent
-         FROM productions p
-         JOIN estimates e ON e.id = (
-           SELECT id FROM estimates WHERE production_id = p.id ORDER BY created_at DESC, rowid DESC LIMIT 1
-         )
-        WHERE p.batch_id = ? AND p.id <> ? AND p.status NOT IN ('cancelled', 'failed')
-          AND (e.decision = 'auto' OR e.confirmed_at IS NOT NULL)`,
-    )
-    .get(batchId, exceptProductionId) as { spent: number };
-  return row.spent + attempts.spent;
-}
-
 function gateInput(production: ProductionRow, estimateUsd: number | null) {
   const limits = db().prepare("SELECT per_item_limit_usd, batch_limit_usd FROM settings WHERE id = 1").get() as Limits;
   if (!production.batch_id) return { estimateUsd, perItemLimitUsd: limits.per_item_limit_usd };
-  // 批次限额以提交时定下的 budget 为准（Spec FLOW-003 步骤 1），没定的用设置里的批次限额
-  const batch = db().prepare("SELECT budget_usd FROM batches WHERE id = ?").get(production.batch_id) as
-    { budget_usd: number } | undefined;
-  const batchLimit = batch && batch.budget_usd > 0 ? batch.budget_usd : limits.batch_limit_usd;
+  const batchLimit = batchLimitOf(production.batch_id);
   // 批次里**更早**的一条还停在「待确认花费」、且是因为批次限额停的：之后的全部停（AC-019）。
   // 只看仍在等确认的（已取消 / 已确认 / 失败的不再挡后面），只看比这条早的（重估更早那条时后面的挡不到它）
   const halted = db()

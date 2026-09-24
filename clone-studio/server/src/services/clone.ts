@@ -11,6 +11,7 @@ import { setCloneStarter } from "./clone-starter.js";
 import { saveVerdict, verdictFor, type CloneVerdict } from "./clone-verdicts.js";
 import { cancelOpenReplicas, ensureReplica } from "./replicas.js";
 import { estimateProduction, unestimatedQueued } from "./estimate-run.js";
+import { variantContinuePrompt } from "./variant-flow.js";
 
 export { latestReplica, type ReplicaRow } from "./replicas.js";
 
@@ -193,6 +194,7 @@ function failureReason(verdict: CloneVerdict): string {
  */
 export function continuePromptFor(jobId: string): string | undefined {
   const job = requireJob(jobId);
+  if (job.owner_kind === "production") return variantContinuePrompt(job);
   if (job.owner_kind !== "template" || !job.session_id) return undefined;
   const verdict = verdictFor(job.id, job.ended_at);
   if (!verdict || verdict.ok || !job.stop_reason) return undefined;

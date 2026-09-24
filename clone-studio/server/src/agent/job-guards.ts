@@ -1,5 +1,7 @@
 import {
   activeJobsOf,
+  activeVariantJobsOf,
+  productionAgentGate,
   CONTINUABLE_STATUSES,
   latestJobOf,
   RERUNNABLE_STATUSES,
@@ -13,6 +15,26 @@ import { SchedulerError } from "./scheduler-types.js";
 export function assertOwnerFree(ownerKind: OwnerKind, ownerId: string): void {
   if (activeJobsOf(ownerKind, ownerId).length > 0) {
     throw new SchedulerError("JOB_ACTIVE", "这个对象已有未结束的 Agent 任务，先等它结束或中止");
+  }
+  if (ownerKind === "template" && activeVariantJobsOf(ownerId).length > 0) {
+    throw new SchedulerError("VARIANTS_ACTIVE", "这个模板下还有变体任务没结束，先等它们结束或取消");
+  }
+  if (ownerKind === "production") assertProductionOpen(ownerId);
+}
+
+/**
+ * 变体上起 Agent 任务（新建 / 继续 / 重跑 / 打回）之前：已取消的是作废了，不能再花钱把它救活；
+ * 已经交给估价与出片的（有运行文件路径）不能再让 Agent 改它正要出的稿子（8.1 审查 HIGH-1）。
+ * ④ 变体的「重跑」先清掉运行文件路径再起任务，所以走得通
+ */
+function assertProductionOpen(id: string): void {
+  const gate = productionAgentGate(id);
+  if (!gate) return;
+  if (gate.status === "cancelled") {
+    throw new SchedulerError("VARIANT_CANCELLED", "这条变体已取消（作废），不能再起 Agent 任务");
+  }
+  if (gate.run_path !== null) {
+    throw new SchedulerError("VARIANT_IN_PIPELINE", "这条变体已交给估价与出片；要重新写稿，在 ④ 变体里点重跑");
   }
 }
 

@@ -1,6 +1,6 @@
 # 产品需求规范：Clone Studio（暂定名）
 
-> 版本 v1.9.5 · 2026-09-24 · 内核：Hypit 0.2.6（本地副本 `hypit-main/`）· 技术调研见 `Hypit-Research.md`
+> 版本 v1.9.6 · 2026-09-24 · 内核：Hypit 0.2.6（本地副本 `hypit-main/`）· 技术调研见 `Hypit-Research.md`
 > Phase 0 先行验证结论见 `clone-studio/docs/spike-notes.md`，本版据其回写。
 
 ## 0. AI 使用说明
@@ -317,6 +317,16 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 **优先级：** P0　**关联任务：** TASK-003　**关联流程：** FLOW-003
 
 **行为：** 每条 brief 复制模板源文件到 `productions/<variant-id>/`，启动变体 Agent（REQ-003）。Agent 改台词、榜单条目、配图提示词，联网搜真实可识别的条目图并裁切统一。完成后进素材审核。
+- 变体 Agent 的工作目录就是 `productions/<variant-id>/`，只能写这里；hypit 按最近的 `package.json` 认模板目录为项目根，Runtime 用模板的，源文件里的相对引用按声明它的文件解析。
+- 交付：`variant.svml / .svs / .svrun`、`assets/`、`SOURCES.json`、`SCRIPT.md`（台词与屏幕文字全文，审核界面展示）。
+  `SOURCES.json` 格式 `{"assets":[{"file","label","sourceUrl","width","height","gap"}]}`：图都放在 `assets/` 下；`sourceUrl` 只认 http / https，其余与空的一样标「无来源」；找不到图的条目写 `"gap": true` 并放同尺寸占位图，审核界面显示为缺口等人上传。
+- 变体的默认名称取 brief 前 20 字（同 REQ-007）。重跑时从模板目录重新复制原稿。
+- 完成判据由宿主核：`variant.svrun` 的 `hypit check` 通过、`SOURCES.json` 能解析且列的图都在变体目录里、`SCRIPT.md` 存在。不过就把任务改判失败写明原因，「继续」时把原因交给会话。
+- 任务状态同步到变体：排队 / Agent 写稿 / 等待额度 / 熔断 / 中断 / 失败 / 已取消；核过进「素材待审」。
+- 取消：Agent 在跑就停会话，渲染中就让 hypit 取消那条 build，变体记「已取消」（作废：之后不再估价、不再出片、不能再起 Agent 任务，它的估价不再占批次已花；已经提交给 hypit 的那次出片照 REQ-006 仍计入批次已花，钱可能已经花了）。
+  只有 ④ 的「取消」作废变体；抽屉里中止一个还没开跑的任务、停任务超时，变体记「中断」或「失败」，照 REQ-003 继续或重跑。
+- 模板的继续 / 重跑 / 打回、换参考视频，都要等该模板下的变体任务结束。
+- 提交时可选 Agent 模型；模型档案（REQ-010）落地前只能在本机订阅下选模型 id，写不出合法稿子的模型列出但不可选。
 
 **规则：**
 - MUST 每张联网获取的图在 `SOURCES.json` 记录来源页 URL；无来源的图在审核界面标黄。

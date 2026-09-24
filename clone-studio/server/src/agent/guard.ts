@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { isInside, isReallyInside } from "../lib/safe-path.js";
 import { containsPath, resolveFrom, samePath } from "./guard-paths.js";
@@ -158,8 +159,26 @@ function protectedInCommand(command: string, ctx: GuardContext): Denial | undefi
   return undefined;
 }
 
+/**
+ * 生效的 Runtime Profile 在哪：工作目录自己的，加上 hypit 认的项目根（最近的 package.json 所在目录）的。
+ * 变体会话的工作目录是模板目录下的 productions/<id>/，它跑 hypit 时用的是模板目录那份（8.1 审查 MEDIUM-3）
+ */
+function profileRoots(workspace: string): string[] {
+  const roots = [path.resolve(workspace)];
+  let dir = path.resolve(workspace);
+  for (;;) {
+    if (existsSync(path.join(dir, "package.json"))) {
+      if (!roots.includes(dir)) roots.push(dir);
+      return roots;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) return roots;
+    dir = parent;
+  }
+}
+
 function isProfile(workspace: string, p: string): boolean {
-  return PROFILE_FILES.some((f) => samePath(p, path.join(workspace, f)));
+  return profileRoots(workspace).some((root) => PROFILE_FILES.some((f) => samePath(p, path.join(root, f))));
 }
 
 function profileDenial(detail: string): Denial {

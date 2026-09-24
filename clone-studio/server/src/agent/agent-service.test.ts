@@ -52,9 +52,9 @@ describe("workspaceOf", () => {
     expect(() => service.workspaceOf({ owner_kind: "template", owner_id: template.id })).toThrow(/还没有工作目录/);
   });
 
-  it("变体任务：Phase 8 才定，现在明确报错而不是猜一个目录", async () => {
+  it("变体任务：出片单位不存在就明确报错，不猜一个目录（存在时的目录见 variant-flow.test.ts）", async () => {
     const { service } = await load();
-    expect(() => service.workspaceOf({ owner_kind: "production", owner_id: "p1" })).toThrow(/Phase 8/);
+    expect(() => service.workspaceOf({ owner_kind: "production", owner_id: "p1" })).toThrow(/出片单位不存在/);
   });
 });
 

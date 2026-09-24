@@ -254,6 +254,23 @@ describe("judgeToolCall", () => {
       expect(judgeToolCall("Bash", { command: "cat hypit.runtime.json" }, ctx())).toBeUndefined();
     });
 
+    it("变体会话（工作目录在项目根下的 productions/<id>/）：项目根那份 Runtime Profile 同样不许用 Bash 改（8.1 审查 MEDIUM-3）", () => {
+      writeFileSync(path.join(ws, "package.json"), "{}");
+      const sub = path.join(ws, "productions", "v1");
+      mkdirSync(sub, { recursive: true });
+      const sctx = { workspace: sub };
+      for (const command of [
+        "echo {} > ../../hypit.runtime.json",
+        "cd ../.. && echo {} > hypit.runtime.json",
+        "echo other > ../../.hypit/runtime",
+        "echo {} > hypit.runtime.json",
+      ]) {
+        expect(judgeToolCall("Bash", { command }, sctx)?.rule, command).toBe("protected-path");
+      }
+      expect(judgeToolCall("Bash", { command: "cat ../../hypit.runtime.json" }, sctx)).toBeUndefined();
+      expect(judgeToolCall("Bash", { command: "echo x > notes.md" }, sctx)).toBeUndefined();
+    });
+
     it("全局安装的其他写法（复审 S1-L8）", () => {
       for (const command of ["npm install --location=global x", "npm -g install x"]) {
         expect(judgeToolCall("Bash", { command }, ctx())?.rule, command).toBe("protected-path");

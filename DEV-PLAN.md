@@ -606,12 +606,30 @@ start / continue / auto_resume，`continueJob(jobId, note)` 区分不了打回�
 - 实现素材审核全幅面板：素材卡 CMP-005（已替换 / 无来源 / 缺口角标、看大图、替换上传）、台词全文、估价卡、打回、取消、素材通过（有缺口时禁用）、版权提示
 - 失败行就地展开错误原文，提供"重试出片"与"重跑"
 
-**关键文件**：
-- `clone-studio/server/src/routes/batches.ts`、`server/src/routes/productions.ts`、`server/src/routes/assets.ts`
-- `clone-studio/server/src/services/variant.ts` — 变体编排与状态机
-- `clone-studio/server/src/services/assets.ts` — SOURCES.json 解析、替换图规格化（保持文件名与尺寸）
-- `clone-studio/web/src/pages/template/VariantsStep.tsx`、`web/src/pages/template/AssetReviewPanel.tsx`
-- `clone-studio/web/src/components/BriefEditor.tsx`、`web/src/components/AssetCard.tsx`
+**Task 拆分（2026-09-24）**，按序做，每个走 review→fix 循环，两阶段 PASS 后单独 commit：
+
+| Task | 内容 | 覆盖 | 状态 |
+|---|---|---|---|
+| 8.1 | 变体编排后端（server）：brief 解析校验（空行忽略、每行 5-500 字、1-20 条，超 20 整批拒绝不建任何记录）；`POST /api/templates/:id/batches`（只对已验货模板，批次记录 + 目标语言 / 备注 / 模型 / 批次限额，每条建 variant 出片单位、复制模板源文件到 `productions/<id>/`、入队变体 Agent 任务，并发沿用调度器上限 2）；变体任务的工作目录 = `productions/<id>/`（Agent 只能写这里，hypit 按最近的 `package.json` 认模板目录为项目根）；变体提示（改台词 / 条目 / 提示词、联网找图统一裁切、`SOURCES.json` 记来源与缺口、`SCRIPT.md` 台词全文、写到 `variant.svrun` check 通过）；任务状态 ↔ 出片单位状态同步（排队 / Agent 写稿 / 等待额度 / 熔断 / 中断 / 失败 / 已取消），完成后宿主核判据（`variant.svrun` check 通过、`SOURCES.json` 能解析、`SCRIPT.md` 存在）→ 解析素材入 `assets` → 素材待审，不过则改判失败；重启时对齐状态；取消变体；模板的继续 / 重跑 / 打回把该模板下未结束的变体任务算进「未结束任务」；`GET /api/templates/:id/variants`（按批次分组、批次已花 / 限额）与 `GET /api/variants/:id`（单条，素材审核面板的页头用）；`GET /api/agent-models`（过渡用的模型清单，Phase 10 换成档案）。Spec 同步 | REQ-005、FLOW-003 步骤 1-3、AC-014、AC-016 后端 | ✅ 四轮 review→fix，第四轮两阶段 PASS（首轮 1 HIGH：已取消的变体能被重跑 / 继续救活、抽屉里中止会作废变体，外加 3 MEDIUM：取消与批次已花的 Spec 措辞、默认名称、变体会话能改模板的 Runtime Profile；第二轮 1 HIGH：重跑清理顺着 assets junction 删到目录外；第三轮 1 HIGH：重跑复制原稿顺着硬链接写到目录外；第四轮只剩 LOW，L3 当场收）。变异自检 41 条：杀 37、等价 4（独立拷贝） |
+| 8.2 | 素材审核与出片后端（server）：`GET /api/productions/:id/assets`（素材、台词全文、估价、批次）；素材图片读取（数据根内）；替换单张（jpg / png / webp ≤20 MB，ffprobe 读原图尺寸、ffmpeg 缩放裁切回原尺寸、写回原文件名，标「已替换」、清缺口，不起 Agent）；「素材通过」（有缺口拒绝；写入运行文件路径、回排队，交给 6.3 的估价闸门与 6.4 的执行器，批次限额停靠沿用）；打回（resume 该变体会话，意见 1-2000 字）；重跑（只删 Agent 抓来的素材与稿子，保留用户替换的图并告诉新会话）；出片完成 / 失败 / 重试出片沿用执行器 | REQ-005、REQ-006、FLOW-003 步骤 4-6 与分支、AC-015、AC-017/018/019 | |
+| 8.3 | ④ 变体页（web）SCREEN-006：提交区（等宽行号文本框、实时「N 条」、红字校验不提交、空状态三条示例点击填入、目标语言、批次备注、Agent 模型下拉、批次限额与已花 CMP-006 迷你版、「提交 N 条变体」）；按批次分组的队列（CMP-002 行、CMP-003 状态、模型、Agent 耗时、估价 / 花费、行尾动作）；需处理的行置顶带左侧竖线；五个筛选；批次限额用尽的组头琥珀提示；失败行就地展开错误原文、重试出片 / 重跑；取消走二次确认；未验货整页锁定 | SCREEN-006、AC-014/016 前端 | |
+| 8.4 | 素材审核全幅面板（web）SCREEN-007：左 65% 素材网格 CMP-005（缩略图、条目名、来源域名链接、悬停出替换 / 看大图、无来源黄角标、已替换强调色角标、缺口红虚线 + 上传）；右 35% 台词全文 + 估价卡 CMP-006 + 动作区（素材通过、有缺口禁用并写明原因；打回写意见；取消）；超限后动作区变「确认出片 $x.xx」；出片进度 CMP-007；底部版权提示 | SCREEN-007、CMP-005/006/007、AC-015/018 前端 | |
+| 8.5 | Phase 8 真机验收与收口：隔离环境准备已验货模板 → 提交 3 条 brief → 只在素材审核处人工介入（至少替换一张图）→ 至少 2 条出 mp4 并 ffprobe 核对 → 替换的那条用了新图且 Agent 花费没增加；AC-016 页面提交 21 行；AC-014 / AC-018 / AC-019 用假 runner 与自动化测试取证；四步验证 | Phase 8 验收标准 | |
+
+**关键文件**（原计划的文件名按实际落地改写）：
+- `clone-studio/server/src/services/briefs.ts` — brief 解析校验（空行忽略、每行 5-500 字按码点、1-20 条，上限取设置与 20 的较小值）、默认名称取前 20 字（REQ-007）。
+- `clone-studio/server/src/services/variants.ts` + `routes/variants.ts`（8.1）— 批量提交（只对已验货模板；先复制模板原稿再落库，落库失败清目录；同批变体 created_at 逐条错开 1 毫秒，批次闸门靠它分先后）、
+  队列（`GET /api/templates/:id/variants` 按批次分组、批次已花 / 限额与闸门同一算法 `batch-budget.ts`）、单条、取消（先作废再停任务与出片：只从未结束的状态改，停任务的状态同步不再闪「中断」）。
+  `GET /api/agent-models` 是 REQ-010 档案落地前的过渡清单（`agent/agent-models.ts`，Haiku 列出但不可选）。
+- `clone-studio/server/src/services/variant-flow.ts`（8.1）— 任务状态 → 变体状态（排队 / 写稿 / 等额度 / 熔断 / 中断 / 失败；任务「已取消」记中断，变体的已取消只由 ④ 的取消设），
+  只管还没交给出片流水线（run_path 为空）的；完成后宿主核判据（`variant.svrun` check 在变体目录里跑、`--workspace` 指模板目录；`SOURCES.json` 能解析、列的图都在 `assets/` 下且是普通文件；`SCRIPT.md` 存在），
+  过了按清单建素材行进素材待审，不过就把任务改判失败（原因前缀「变体未达完成判据」，「继续」时交给会话）；核的过程中被取消 / 交出的不改判。重启时按最新任务对齐一遍。
+- `clone-studio/server/src/services/variant-files.ts`（8.1）— 变体目录 = `<模板目录>/productions/<id>/`（hypit 按最近的 package.json 认模板目录为项目根，源文件相对引用按声明它的文件解析）；
+  `SOURCES.json` 解析（路径规范化、Windows 下查重不分大小写、来源只认 http / https）；重跑清理 `resetVariantProducts`：先验真实路径在数据根 `clients` 下且父目录叫 productions，逐项 lstat、链接只拆不进，
+  原稿删了重拷、写前先删目录项（不顺着硬链接写出去，8.1 第二、三轮审查 HIGH），留下用户替换过的图并写 `USER_ASSETS.json` 交给新会话。
+- `clone-studio/server/src/agent/job-guards.ts` — 模板的继续 / 重跑 / 打回要等该模板下的变体任务结束（Task 5.2 复审 S2-L7）；已作废、已交给出片的变体不能再起 Agent 任务。
+  `agent/guard.ts` 同时保护项目根的 Runtime Profile（变体会话在子目录里，生效的是模板那份）；`agent/prompts.ts` 找可用能力时往上找到项目根为止。
+- `clone-studio/server/src/services/batch-budget.ts` — 批次已花 / 限额（从 estimate-run.ts 拆出守 300 行）。
 
 **验收标准**：
 - AC-014、AC-015、AC-016、AC-018、AC-019 通过
@@ -770,6 +788,9 @@ start / continue / auto_resume，`continueJob(jobId, note)` 区分不了打回�
 | `model_profiles` | Phase 10 | Agent 模型档案（token 存 secrets.json，不入库） |
 
 ## 已知风险
+
+- **Agent 写文件的越界检查不识别硬链接**（8.1 第三轮审查 L1）：PreToolUse 按真实路径判写入目标，工作目录里的硬链接指到外面时 Write / Edit 会写穿出去。
+  junction / 符号链接都按真实路径拦了，硬链接的真实路径就是它自己。宿主这边凡是往 Agent 目录里写的都先删目录项再写（重跑复制原稿、替换素材图），不会替它写穿；Agent 自己写穿属于 REQ-003 已知的边界（Bash 写入路径本来就不全解析）。
 
 - **Windows 路径长度（260）**：数据根太深时 hypit 在 `references/` 下 `mkdtemp` 会 ENAMETOOLONG（6.5 真机第一次用 scratchpad 深路径撞上，换到 `%TEMP%\cs-acc6` 即好）。默认数据根 `~/.clone-studio` 够短；设置页若允许改数据根，要提示或校验长度。
 

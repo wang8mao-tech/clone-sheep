@@ -31,3 +31,6 @@ Thumbs.db
 # 用户提供的外部使用文档，可能含本机路径，不入库
 docs-inbox/
 clone video/
+
+# Claude Code 工作流框架（CLAUDE.md / skills / hooks / agents）：本地保留，不再入库
+.claude/

@@ -31,6 +31,11 @@ interface Props {
   openLabel?: string;
   /** 失败行的错误原文，给了就能就地展开 */
   errorDetail?: string;
+  /**
+   * 要人动手的行左侧 2px 竖线（SCREEN-006：素材待审强调色、待确认花费琥珀）。同一张表里别的行传 "none"
+   * （透明竖线，列还对得齐）；不传就没有竖线——客户页这类没有竖线的表不受影响（8.3 审查 S2-M1）
+   */
+  accent?: "primary" | "warning" | "none";
 }
 
 /**
@@ -45,11 +50,22 @@ interface Props {
  * 嵌套，读屏在浏览模式下会把菜单整个吞掉。行尾动作靠 z-10 浮在链接之上。
  * 侧栏的模板行也是用 NavLink 做的，两处同一套先例。
  */
-export function TaskRow({ lead, title, columns, actions, href, openLabel, errorDetail }: Props) {
+export function TaskRow({ lead, title, columns, actions, href, openLabel, errorDetail, accent }: Props) {
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <li className="group border-b border-border/60 last:border-b-0">
+    <li
+      className={[
+        "group border-b border-b-border/60 last:border-b-0",
+        accent === undefined
+          ? ""
+          : accent === "primary"
+            ? "border-l-2 border-l-primary"
+            : accent === "warning"
+              ? "border-l-2 border-l-warning"
+              : "border-l-2 border-l-transparent",
+      ].join(" ")}
+    >
       {/* relative 挂在这一行上而不是 li 上：挂 li 的话，展开错误原文后 li 变高，
           整行覆盖层跟着罩住展开区，点那片留白会跳走 */}
       <div className="relative flex h-9 items-center gap-3 px-3 text-[13px]">

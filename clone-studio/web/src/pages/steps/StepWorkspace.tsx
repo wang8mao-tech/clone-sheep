@@ -3,22 +3,21 @@ import { isStepKey, type StepKey } from "../../lib/steps.js";
 import { CloneStep } from "./CloneStep.js";
 import { ReferenceStep } from "./ReferenceStep.js";
 import { ReviewStep } from "./ReviewStep.js";
+import { VariantsStep } from "./VariantsStep.js";
 
 /** 每一步的工作区各自在哪个 Phase 落地，写清楚免得看的人以为忘了做 */
-const OWNER: Record<Exclude<StepKey, "reference" | "clone" | "review">, string> = {
-  variants: "Phase 8：批量变体与素材审核",
+const OWNER: Record<Exclude<StepKey, "reference" | "clone" | "review" | "variants">, string> = {
   outputs: "Phase 9：成片库、下载与花费明细",
 };
 
-const TITLE: Record<Exclude<StepKey, "reference" | "clone" | "review">, string> = {
-  variants: "④ 变体",
+const TITLE: Record<Exclude<StepKey, "reference" | "clone" | "review" | "variants">, string> = {
   outputs: "⑤ 成片",
 };
 
 /**
  * 步骤工作区。
  *
- * ①参考 在 Phase 4 落地、②复刻 在 Phase 6、③验货 在 Phase 7；其余两块分别属于后面的 Phase，这里如实标出归属，
+ * ①参考 在 Phase 4 落地、②复刻 在 Phase 6、③验货 在 Phase 7、④变体 在 Phase 8；⑤成片属于 Phase 9，这里如实标出归属，
  * 而不是放一句含糊的「敬请期待」。
  */
 export function StepWorkspace() {
@@ -29,6 +28,7 @@ export function StepWorkspace() {
   if (step === "reference") return <ReferenceStep />;
   if (step === "clone") return <CloneStep />;
   if (step === "review") return <ReviewStep />;
+  if (step === "variants") return <VariantsStep />;
 
   return (
     <section aria-label={`${TITLE[step]} 工作区`} className="rounded-md border border-dashed border-border p-6">

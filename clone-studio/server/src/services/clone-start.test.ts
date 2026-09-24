@@ -101,4 +101,29 @@ describe("换参考视频", () => {
     const statuses = b.db().prepare("SELECT status FROM productions WHERE template_id = ?").all(b.templateId);
     expect(statuses).toEqual([{ status: "cancelled" }]);
   });
+
+  it("出片被重启打断的复刻片（interrupted）活不到下一轮：新一轮作废它、判据通过后建 v2（7.3 第三轮审查 S-M1）", async () => {
+    const b = await boot();
+    b.setPlan(new Error("plan 挂了"));
+    b.setStatus("cloning");
+    b.clone.startClone(b.templateId);
+    b.writeProducts();
+    await b.finishRun();
+    await until(() => b.clone.latestReplica(b.templateId) !== undefined, "旧复刻片建出来");
+    // 渲染到一半后端重启：迁移把出片单位记成 interrupted（db/migrate.ts），模板还停在复刻中
+    b.db().prepare("UPDATE productions SET status = 'interrupted' WHERE template_id = ?").run(b.templateId);
+
+    b.clone.startClone(b.templateId);
+    expect(b.clone.latestReplica(b.templateId)).toBeUndefined();
+    b.writeProducts();
+    await b.finishRun(1);
+    await until(() => b.clone.latestReplica(b.templateId) !== undefined, "新一轮的复刻片建出来");
+    // 不然新一轮会复用上一轮那条（版本号、创建时间都是旧的），③ 只认这一轮建的版本，成了死路
+    expect(b.clone.latestReplica(b.templateId)?.version).toBe(2);
+    const rows = b
+      .db()
+      .prepare("SELECT version, status FROM productions WHERE template_id = ? ORDER BY version")
+      .all(b.templateId);
+    expect(rows[0]).toEqual({ version: 1, status: "cancelled" });
+  });
 });

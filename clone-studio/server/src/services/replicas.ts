@@ -35,14 +35,16 @@ export function latestReplica(templateId: string): ReplicaRow | undefined {
 }
 
 /**
- * 作废还没开始出片的复刻片：它们是按旧参考视频 / 上一轮稿子建的，留着会被估价、自动出片当成现在的。
+ * 作废还没出成片的复刻片：它们是按旧参考视频 / 上一轮稿子建的，留着会被估价、自动出片当成现在的。
+ * 出片被重启 / 删除失败打断的（interrupted）也算：留着的话 `ensureReplica` 会复用它、新一轮不建版本，
+ * 重试出片出的是新稿子却挂在旧版本上，③ 只认这一轮建的版本就成了死路（7.3 第三轮审查 S-M1）。
  * 渲染中与已出片的不动（渲染中的那条由 Task 6.4 拒绝换参考视频来保护）。
  */
 export function cancelOpenReplicas(templateId: string): number {
   return db()
     .prepare(
       `UPDATE productions SET status = 'cancelled', updated_at = ?
-        WHERE template_id = ? AND kind = 'replica' AND status IN ('queued', 'awaiting_cost_confirm', 'failed')`,
+        WHERE template_id = ? AND kind = 'replica' AND status IN ('queued', 'awaiting_cost_confirm', 'failed', 'interrupted')`,
     )
     .run(new Date().toISOString(), templateId).changes;
 }
@@ -52,6 +54,8 @@ export function cancelOpenReplicas(templateId: string): number {
  * 不该多出一条）；已出片的（打回后重做）建下一版。版本号跟着全部历史走，作废的也占号。
  * 失败的（估价 blocked、或出片失败）是按上一版稿子来的：作废它、建下一版，重新走估价与闸门，
  * 不复用（复用会留在 failed 里，永远不再估价 / 出片）。
+ * 中断的（interrupted）在这里照样复用：同一轮里它由「重试出片」接着出；新一轮开始前 `cancelOpenReplicas`
+ * 已经作废了它，打回又要求最新一版已出片，所以这里碰不到上一轮留下的中断行（7.4 S-M1）。
  */
 export function ensureReplica(templateId: string): void {
   const current = latestReplica(templateId);

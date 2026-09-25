@@ -145,6 +145,11 @@ function Tables({ data }: { data: OutputCosts }) {
                   >
                     {b.channel ?? "本机渲染"}
                     {b.model ? <span className="block font-mono break-all text-text-tertiary">{b.model}</span> : null}
+                    {/* Codex 订阅生图零价，台账记张数（REQ-011）。记的是放行时的请求数：只有出片完成才真出了这么多张，
+                        失败 / 取消的不写（11.2 审查 L4） */}
+                    {b.codexImages && b.status === "done" ? (
+                      <span className="block text-text-tertiary">Codex 生图 {b.codexImages} 张</span>
+                    ) : null}
                   </td>
                   <td className={`${td} text-right ${N_LABEL}`} data-label="估价">
                     <Money usd={b.estimateUsd} estimate />

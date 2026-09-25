@@ -23,6 +23,8 @@ export interface CheckResult {
   fix?: string | null;
   /** P0 未过时要出琥珀横幅并挡住相关操作 */
   blocking: boolean;
+  /** 可选项专用：虽没全过，但能启用（Codex：CLI 与登录都好，只差 Provider 包没同步上，启用或试图会重试同步） */
+  ready?: boolean;
 }
 
 const NODE_MIN_MAJOR = 22;
@@ -199,17 +201,20 @@ export async function checkCodex(): Promise<CheckResult> {
   const base = { id: "codex", name: "Codex CLI（订阅生图，可选）", blocking: false } as const;
   const pkg = codexPackageProblem();
   if (r.ready && pkg) {
-    // CLI 与登录都好，但 Provider 包没进数据根：开着也不会绑定出图（11.2 审查 M1）
+    // CLI 与登录都好，但 Provider 包没进数据根：开着也不会绑定出图（11.2 审查 M1）。修法不是一条命令——
+    // 打开开关、试出一张图都会当场重试同步，所以 ready 仍为 true（11.3 审查 S1-M1）
     return {
       ...base,
       status: "warn",
-      detail: `codex-cli ${r.version ?? ""} · 已登录 · ${pkg}`,
-      fix: "重启后端，或把开关关掉再打开",
+      detail: `codex-cli ${r.version ?? ""} · 已登录 · ${pkg}（打开开关或试出一张图会重试同步）`,
+      fix: null,
+      ready: true,
     };
   }
-  if (r.ready) return { ...base, status: "pass", detail: `codex-cli ${r.version ?? ""} · 已登录`, fix: null };
+  if (r.ready)
+    return { ...base, status: "pass", detail: `codex-cli ${r.version ?? ""} · 已登录`, fix: null, ready: true };
   const version = r.version ? `codex-cli ${r.version} · ` : "";
-  return { ...base, status: "warn", detail: `${version}${r.problem ?? "没准备好"}`, fix: r.fix };
+  return { ...base, status: "warn", detail: `${version}${r.problem ?? "没准备好"}`, fix: r.fix, ready: false };
 }
 
 async function checkClaudeLogin(): Promise<CheckResult> {

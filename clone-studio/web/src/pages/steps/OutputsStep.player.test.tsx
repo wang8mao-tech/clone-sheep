@@ -60,6 +60,34 @@ describe("花费明细 CMP-008（AC-024）", () => {
     expect(within(dialog).getByRole("region", { name: "花费明细" })).toHaveTextContent("合计$0.80估");
   });
 
+  it("出片走了 Codex 订阅生图：通道格下写张数，花费仍是 $0（REQ-011）", async () => {
+    outputsBackend([output(1)], {
+      "/api/productions/:id/costs": { body: costs({ builds: [{ ...costs().builds[0]!, codexImages: 2 }] }) },
+    });
+    const { dialog } = await openCard("播放 成片 1");
+    const builds = await within(dialog).findByRole("table", { name: "出片花费" });
+    expect(builds).toHaveTextContent("Codex 生图 2 张");
+    expect(builds).toHaveTextContent("$0.00估");
+  });
+
+  it("出片失败：估价里的张数没真出来，不写（11.2 审查 L4）", async () => {
+    outputsBackend([output(1)], {
+      "/api/productions/:id/costs": {
+        body: costs({ builds: [{ ...costs().builds[0]!, status: "failed", codexImages: 2 }] }),
+      },
+    });
+    const { dialog } = await openCard("播放 成片 1");
+    const builds = await within(dialog).findByRole("table", { name: "出片花费" });
+    expect(builds).not.toHaveTextContent("Codex 生图");
+  });
+
+  it("没走 Codex：不写张数", async () => {
+    outputsBackend([output(1)]);
+    const { dialog } = await openCard("播放 成片 1");
+    const builds = await within(dialog).findByRole("table", { name: "出片花费" });
+    expect(builds).not.toHaveTextContent("Codex 生图");
+  });
+
   it("复刻片的共用会话标「共用」；有 receipt 链接就给出去；没有任何花费写明", async () => {
     outputsBackend([output(1, { kind: "replica" }), output(2)], {
       "/api/productions/:id/costs": (_req, url) =>

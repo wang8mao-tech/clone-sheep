@@ -3,20 +3,19 @@ import { useState } from "react";
 import { Plus, RotateCw } from "lucide-react";
 import { Badge } from "../components/ui/Badge.js";
 import { Button } from "../components/ui/Button.js";
-import { Input } from "../components/ui/Input.js";
 import { useToast } from "../components/ui/Toast.js";
 import { HealthRow } from "../components/HealthRow.js";
 import { ModelProfilePanel, type PanelTarget } from "../components/settings/ModelProfilePanel.js";
 import { ModelProfiles } from "../components/settings/ModelProfiles.js";
+import { GenerationServices } from "../components/settings/GenerationServices.js";
 import { RatesTable } from "../components/settings/RatesTable.js";
 import { NumberSetting, Section } from "../components/settings/SettingsFields.js";
 import { api, TIMEOUT_MS, ApiError } from "../lib/api.js";
-import type { HealthSummary, Settings, VerifyResult } from "../lib/types.js";
+import type { HealthSummary, Settings } from "../lib/types.js";
 
 export function SettingsPage() {
   const qc = useQueryClient();
   const toast = useToast();
-  const [tokenDraft, setTokenDraft] = useState("");
   /** 添加 / 编辑模型档案的右侧表单面板（SCREEN-009） */
   const [panel, setPanel] = useState<PanelTarget | null>(null);
 
@@ -28,48 +27,14 @@ export function SettingsPage() {
 
   const patch = useMutation({
     mutationFn: (body: Partial<Settings>) => api.patch<Settings>("/api/settings", body),
-    onSuccess: (next) => qc.setQueryData(["settings"], next),
+    onSuccess: (next, body) => {
+      qc.setQueryData(["settings"], next);
+      // 开关 Codex 时服务端会重试同步 Provider 包：体检行的「包没同步上」要跟着变（11.3 第二轮审查 R2-L3）
+      if (body.codexProviderEnabled !== undefined) void qc.invalidateQueries({ queryKey: ["health", "checks"] });
+    },
     onError: (e: unknown) => {
       const err = e as ApiError;
       toast.push("danger", err.message, err.detail);
-    },
-  });
-
-  const saveSecret = useMutation({
-    // 后端注册的是 PUT（设置某个具名凭据，幂等替换）。这里曾经发的是 POST，
-    // 结果是一路 404，而下面原本没有 onError，失败被完全吞掉——用户点保存
-    // 毫无反应，接着验证又说"未配置 key"，看上去像两个 bug
-    mutationFn: (value: string | null) =>
-      api.put<{ masked: string | null }>("/api/settings/secret", { key: "tokendance.apiKey", value }),
-    onSuccess: (_result, value) => {
-      setTokenDraft("");
-      toast.push("success", value === null ? "已清除 TokenDance key" : "已保存，接着点「验证」");
-      void qc.invalidateQueries({ queryKey: ["settings"] });
-      void qc.invalidateQueries({ queryKey: ["health", "checks"] });
-    },
-    onError: (e: unknown) => {
-      const err = e as ApiError;
-      toast.push("danger", "保存失败", err.detail ?? err.message);
-    },
-  });
-
-  const verify = useMutation({
-    mutationFn: () => api.post<VerifyResult>("/api/settings/verify/tokendance", undefined, TIMEOUT_MS.verify),
-    onSuccess: (result) => {
-      if (result.ok) {
-        toast.push("success", "TokenDance key 验证通过");
-      } else {
-        // 验证失败要显示服务端返回的原因原文（AC-023）
-        const reason =
-          [result.status ? `HTTP ${result.status}` : null, result.detail, result.error].filter(Boolean).join("\n") ||
-          "未给出原因";
-        toast.push("danger", "TokenDance key 验证失败", reason);
-      }
-      void qc.invalidateQueries({ queryKey: ["health", "checks"] });
-    },
-    onError: (e: unknown) => {
-      const err = e as ApiError;
-      toast.push("danger", "验证请求失败", err.detail ?? err.message);
     },
   });
 
@@ -136,50 +101,12 @@ export function SettingsPage() {
           </Section>
 
           <Section id="services" title="生成服务">
-            <div className="flex flex-col gap-3">
-              <div className="flex items-end gap-3">
-                <div className="w-80">
-                  <Input
-                    label="TokenDance API key"
-                    mono
-                    type="password"
-                    autoComplete="off"
-                    placeholder={s?.credentials.tokendance ?? "未配置"}
-                    value={tokenDraft}
-                    onChange={(e) => setTokenDraft(e.target.value)}
-                    hint={
-                      s?.credentials.tokendance ? `已保存：${s.credentials.tokendance}` : "只存在本机，界面只回打码值"
-                    }
-                  />
-                </div>
-                <Button
-                  variant="secondary"
-                  loading={saveSecret.isPending}
-                  disabled={tokenDraft.trim().length === 0}
-                  disabledReason="先填入 key"
-                  onClick={() => saveSecret.mutate(tokenDraft)}
-                >
-                  保存
-                </Button>
-                <Button
-                  variant="primary"
-                  loading={verify.isPending}
-                  disabled={!s?.credentials.tokendance}
-                  disabledReason="先保存一个 key"
-                  onClick={() => verify.mutate()}
-                >
-                  验证
-                </Button>
-                {s?.credentials.tokendance ? (
-                  <Button variant="ghost" onClick={() => saveSecret.mutate(null)} loading={saveSecret.isPending}>
-                    清除
-                  </Button>
-                ) : null}
-              </div>
-              <p className="text-caption text-text-tertiary">
-                HypiHub（可选，补配音 TTS 等）的浏览器授权连接在 Phase 6 接入。
-              </p>
-            </div>
+            <GenerationServices
+              settings={s}
+              codexCheck={health.data?.checks.find((c) => c.id === "codex")}
+              saving={patch.isPending}
+              onPatch={(body) => patch.mutate(body)}
+            />
           </Section>
 
           <Section

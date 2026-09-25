@@ -125,6 +125,8 @@ export const healthStubs: Record<string, RouteStub> = {
     },
   },
   "/api/health/checks": { body: { checks: [], passed: 0, total: 0, blockingFailures: [] } },
+  // 设置页的 Codex「试出一张图」：默认还没试过
+  "/api/codex/try": { body: { try: null } },
   "/api/health": {
     body: {
       ok: true,

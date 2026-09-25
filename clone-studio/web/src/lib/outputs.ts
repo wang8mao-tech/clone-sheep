@@ -60,6 +60,8 @@ export interface BuildCostLine {
   isEstimate: boolean;
   receiptId: string | null;
   receiptUrl: string | null;
+  /** 这次出片走 Codex 订阅生图的张数（REQ-011：零价，台账记张数）；没走是 null */
+  codexImages: number | null;
   createdAt: string;
 }
 

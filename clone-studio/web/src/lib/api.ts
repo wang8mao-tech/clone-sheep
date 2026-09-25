@@ -70,6 +70,8 @@ export const TIMEOUT_MS = {
   createTemplate: 30_000,
   /** 删除最坏要等 10 秒杀进程 + 2 秒强杀宽限，再加移目录与落盘删除 */
   deletion: 60_000,
+  /** 试出一张图：开始前要 spawn codex --version、runtime down 上一次的试图工程（最长 60 秒） */
+  codexTry: 90_000,
 } as const;
 
 export const api = {

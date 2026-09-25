@@ -64,6 +64,7 @@ export const costs = (over: Partial<OutputCosts> = {}): OutputCosts => ({
       channel: null,
       model: null,
       status: "done",
+      codexImages: null,
       estimateUsd: 0,
       actualUsd: null,
       costUsd: 0,

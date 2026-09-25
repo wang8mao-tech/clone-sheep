@@ -153,9 +153,15 @@ describe("体检行", () => {
       blocking: false,
       detail: "codex-cli 0.153.4 · 未登录",
       fix: "codex login",
+      ready: false,
     });
     readiness = READY;
-    expect(await checkCodex()).toMatchObject({ status: "pass", detail: "codex-cli 0.153.4 · 已登录", fix: null });
+    expect(await checkCodex()).toMatchObject({
+      status: "pass",
+      detail: "codex-cli 0.153.4 · 已登录",
+      fix: null,
+      ready: true,
+    });
   });
 
   it("CLI 与登录都好、Provider 包没同步上：不算通过，写出原因（11.2 审查 M1）", async () => {
@@ -163,8 +169,11 @@ describe("体检行", () => {
     const { checkCodex } = await import("../health/checks.js");
     expect(await checkCodex()).toMatchObject({
       status: "warn",
-      detail: "codex-cli 0.153.4 · 已登录 · Provider 包没同步上：找不到 Codex Provider 源码",
-      fix: "重启后端，或把开关关掉再打开",
+      detail:
+        "codex-cli 0.153.4 · 已登录 · Provider 包没同步上：找不到 Codex Provider 源码（打开开关或试出一张图会重试同步）",
+      fix: null,
+      // 打开开关、试出一张图都会当场重试同步：界面据此照样让点（11.3 审查 S1-M1）
+      ready: true,
     });
   });
 });
@@ -306,7 +315,12 @@ describe("试出一张图：后端重启留下的工程（11.2 审查 M2）", ()
       const stale = path.join(dataRoot, "codex-try", "locked-1");
       mkdirSync(stale, { recursive: true });
       // 有进程的当前目录在里面，Windows 上就删不掉（孤儿 Worker 占着工程目录时就是这样，审查实测 EPERM）
-      const holder = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { cwd: stale, stdio: "ignore" });
+      const holder = spawn(process.execPath, ["-e", "console.log('ready'); setTimeout(() => {}, 30000)"], {
+        cwd: stale,
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      // 等它真的起来、占住目录再发请求：机器忙时 spawn 返回了、进程还没进到这个目录（全套并行时偶发失败过）
+      await new Promise<void>((resolve) => holder.stdout.once("data", () => resolve()));
       try {
         const res = await server.inject({ method: "POST", url: "/api/codex/try" });
         expect(res.statusCode).toBe(500);

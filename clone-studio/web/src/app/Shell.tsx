@@ -45,6 +45,8 @@ export function Shell() {
       invalidateArchive();
       return;
     }
+    // 设置页「试出一张图」自己订阅这个事件；一张图的进度不该让整页体检（spawn 子进程）重跑
+    if (event === "codex-try") return;
     void health.refetch();
     void checks.refetch();
   });

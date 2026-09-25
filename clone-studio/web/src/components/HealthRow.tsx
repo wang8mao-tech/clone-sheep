@@ -10,6 +10,8 @@ export interface CheckResult {
   detail: string;
   fix?: string | null;
   blocking: boolean;
+  /** 可选项专用：虽没全过，但能启用（Codex：CLI 与登录都好，只是 Provider 包没同步上，启用时会重试同步） */
+  ready?: boolean;
 }
 
 function Icon({ status }: { status: CheckStatus }) {

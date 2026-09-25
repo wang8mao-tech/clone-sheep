@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
+import { jobProfile, type CostBasis } from "./profile-env.js";
 
 /**
  * agent_jobs 的读写（Spec REQ-003 状态：排队 / 运行中 / 等待额度 / 已熔断 / 中断 / 完成 / 已取消，
@@ -22,8 +23,10 @@ export interface AgentJobRow {
   cost_usd: number;
   cost_is_estimate: number;
   stop_reason: string | null;
+  profile_id: string | null;
   profile_name: string | null;
   model_id: string | null;
+  cost_basis: CostBasis | null;
   prompt: string | null;
   resume_at: string | null;
   /** 本次运行**这一段**的起点（只在运行中有意义）；started_at 是任务第一次开始的时间 */
@@ -45,18 +48,39 @@ export interface NewJob {
   ownerKind: OwnerKind;
   ownerId: string;
   prompt: string;
-  modelId?: string;
+  /** 用哪个模型档案（REQ-010）；不给用默认档案 */
+  profileId?: string | undefined;
+  /** Phase 8 的过渡做法：内置订阅 + 指定模型 id（老任务重跑、④ 老接口） */
+  modelId?: string | undefined;
 }
 
+/** 建任务时记下档案快照（名称与模型 id 不随档案删改而变，AC-030）；档案不能用就抛，不建任务 */
 export function createJob(input: NewJob): AgentJobRow {
+  const snapshot = jobProfile({
+    ownerKind: input.ownerKind,
+    profileId: input.profileId,
+    legacyModelId: input.modelId ?? null,
+  });
   const now = new Date().toISOString();
   const id = randomUUID();
   db()
     .prepare(
-      `INSERT INTO agent_jobs (id, owner_kind, owner_id, status, prompt, model_id, created_at, updated_at)
-       VALUES (?, ?, ?, 'queued', ?, ?, ?, ?)`,
+      `INSERT INTO agent_jobs (id, owner_kind, owner_id, status, prompt, profile_id, profile_name, model_id, cost_basis,
+         created_at, updated_at)
+       VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(id, input.ownerKind, input.ownerId, input.prompt, input.modelId ?? null, now, now);
+    .run(
+      id,
+      input.ownerKind,
+      input.ownerId,
+      input.prompt,
+      snapshot.profile_id,
+      snapshot.profile_name,
+      snapshot.model_id,
+      snapshot.cost_basis,
+      now,
+      now,
+    );
   return requireJob(id);
 }
 
@@ -135,6 +159,7 @@ type Patch = Partial<
     | "cost_usd"
     | "stop_reason"
     | "resume_at"
+    | "cost_basis"
   >
 >;
 
@@ -148,6 +173,7 @@ const PATCHABLE = new Set<keyof Patch>([
   "cost_usd",
   "stop_reason",
   "resume_at",
+  "cost_basis",
 ]);
 
 /** 只改给出的字段，顺带刷新 updated_at；列名来自白名单，值走参数 */

@@ -1,6 +1,6 @@
 # 产品需求规范：Clone Studio（暂定名）
 
-> 版本 v1.10.0 · 2026-09-25 · 内核：Hypit 0.2.6（本地副本 `hypit-main/`）· 技术调研见 `Hypit-Research.md`
+> 版本 v1.10.1 · 2026-09-25 · 内核：Hypit 0.2.6（本地副本 `hypit-main/`）· 技术调研见 `Hypit-Research.md`
 > Phase 0 先行验证结论见 `clone-studio/docs/spike-notes.md`，本版据其回写。
 
 ## 0. AI 使用说明
@@ -469,8 +469,16 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 **规则：**
 - 档案管理：内置订阅档案不可改、不可删，只能设为默认（它不指定模型，用订阅的默认模型）；另可添加「本机订阅 · 指定模型」档案：同样走本机登录态、不注入任何变量，只指定主模型 id（如 Sonnet），供按任务选订阅下的模型；删除默认档案后默认回到内置订阅；还有未结束任务（排队、运行、等待额度）在用的档案不能删；改 base_url、token、模型 id，或把「支持看图」打开后，「已验证」清掉，要重新测试（看图要带图测过才算）；token 只回打码值，编辑时不填就沿用原 token；token 只收可见 ASCII 字符（不含空白），报错信息里也不回显 token。
 - 测试连接：订阅档案跑一次最小 SDK 会话；其余档案直接向 `{base_url}/v1/messages`（Anthropic key 档案是官方地址）发一条 16 token 以内的请求，兼容端点用 Bearer、官方 key 用 x-api-key。上游回 2xx 且响应是一条 Messages API 消息才算成功，失败时回上游 HTTP 状态与响应原文，档案标「未验证」；成功标「已验证 + 时间」。测试途中档案被改过的，结论不落到新配置上。
+- 运行（Task 10.2）：
+  - 注入：内置订阅与「本机订阅 · 指定模型」不注入任何变量（后者只把模型交给 SDK）；Anthropic key 档案注入 `ANTHROPIC_API_KEY`（填了快速模型再把 haiku 档映到它）；兼容端点注入 `ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_MODEL` 与 opus / sonnet 两档映射到主模型、haiku 档与子 Agent 模型映射到快速模型（空则主模型），并关掉 Claude Code 的非必要外联。非订阅档案一律不带本机订阅令牌，免得订阅凭据被发到第三方端点。每个会话单独算环境，不改宿主进程的环境变量。
+  - 任务建立时记下档案 id、档案名与模型 id（快照）；继续、打回、等额度续跑都按这份快照与原档案跑。原档案已删或 key 没了：继续与打回拒绝并说明「只能重跑（可重选档案）」，等额度到点续跑的任务改判失败写明原因。
+  - 重跑可带档案（模板与变体都行），不带就用原档案，原档案没了用默认档案。
+  - ①参考 导入时选的档案（没选就是当时的默认档案，同样要支持看图）记在模板上，证据做完自动起复刻时用它；到那时它被删了、或被改成不支持看图，就用内置订阅（快照照实记下）。
+  - 不支持联网搜索的档案：会话里禁用 WebSearch 工具，并在系统提示里说明改用 Bash（curl 等）与 WebFetch 找图。
+  - 凭据不外泄：Agent 点名读凭据变量或整份导出环境变量的命令（printenv、env、set、`dir env:`、process.env 整体之类，含 sudo / sh -c / cmd /c 等包一层的写法）一律拦下，读单个普通变量照常；Claude Code 自己的登录凭据文件（`~/.claude/.credentials.json` 与 CLAUDE_CONFIG_DIR 下的）同宿主密钥文件一样不许碰；万一消息、停因或拦截记录里出现了注入的 key，落库、推界面前换成打码。不用 Claude Code 的 `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`：它会把权限模式强制改回 default，无头会话里每个工具调用都会卡住等批准。
+  - 花费：订阅与 Anthropic key 档案用 SDK 的估算；兼容端点填了单价的，按每次调用的 token 用量 × 单价折算并以此熔断；没填单价的不做 $ 熔断、花费记「未知（没填单价）」。口径按每一段开跑时档案的单价定（中途补填或清掉单价，从下一段起换口径，已记下的花费不动）。
 - MUST 只支持 API key 接入。ChatGPT Plus、Gemini Advanced、豆包 App 这类聊天订阅不提供 API，界面在预设旁明说"需要 API key，聊天订阅不可用"。
-- MUST 每个档案带"支持看图"开关。复刻任务必须看帧，选中不支持看图的档案启动复刻时拦截并说明；变体任务仅警告。
+- MUST 每个档案带"支持看图"开关。复刻任务必须看帧，选中不支持看图的档案启动复刻时拦截并说明（①参考 提交与模板重跑时拒绝，不建 AgentJob）；变体任务仅警告。
 - MUST 每个档案带"支持联网搜索"开关。Anthropic 的 WebSearch 是服务端工具，第三方端点下不可用；该开关为关时，运行器在系统提示里告知 Agent 改用 Bash（curl / yt-dlp 等）与 WebFetch 找图，并在素材审核界面提示"该模型无原生搜索，素材缺口可能偏多"。
 - MUST "测试连接"按钮：用该档案发一次最小会话，回显成功/失败与错误原文；若档案声明支持看图，附一张测试图验证。
 - MUST key 的存储与回显规则同 REQ-008；key 只注入 Agent SDK 子进程，不落工作目录。
@@ -485,7 +493,7 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 |---|---|---:|---|
 | 档案名 | string | Yes | 1-30 字，不重名 |
 | base_url | url | 除订阅/Anthropic 外必填 | http/https |
-| auth token | secret | 除订阅外必填 | 非空 |
+| auth token | secret | 除订阅外必填 | 至少 8 个可见 ASCII 字符（不含空白） |
 | 主模型 id | string | 除内置订阅档案外必填（「本机订阅 · 指定模型」也要填） | 非空 |
 | 快速模型 id | string | No | 映射 haiku 档，空则同主模型 |
 | 支持看图 / 支持联网搜索 | bool | Yes | 预设给默认值，可改 |

@@ -141,15 +141,17 @@ export async function agentJobRoutes(app: FastifyInstance): Promise<void> {
    */
   app.post("/api/agent-jobs/:jobId/rerun", (request) => {
     const { jobId } = request.params as { jobId: string };
+    // 重跑可重选档案（REQ-010、CMP-009 的确认框里放 CMP-010）；不给用原档案
+    const { profileId } = z.object({ profileId: z.string().min(1).optional() }).parse(request.body ?? {});
     const job = requireJob(jobId);
     if (job.owner_kind === "production") {
       // 同调度器的重跑：只认最新的那个任务（别的标签页里看着的旧任务不能拿来重跑）
       assertLatest(job);
-      rerunVariant(job.owner_id);
+      rerunVariant(job.owner_id, profileId);
       const next = latestJobOf("production", job.owner_id);
       if (!next) throw new EvidenceError("JOB_NOT_FOUND", "重跑之后没有找到新任务", 500);
       return { job: present(next) };
     }
-    return { job: present(agentScheduler().rerun(jobId)) };
+    return { job: present(agentScheduler().rerun(jobId, profileId)) };
   });
 }

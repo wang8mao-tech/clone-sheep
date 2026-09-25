@@ -27,6 +27,8 @@ const StartBody = z
       .optional(),
     /** 上传接口（Task 4.3）落盘后把临时路径交过来 */
     uploadPath: z.string().min(1).optional(),
+    /** Agent 模型档案（REQ-010、CMP-010）；不给用默认档案 */
+    profileId: z.string().min(1).optional(),
   })
   .refine((v) => Boolean(v.url) !== Boolean(v.uploadPath), {
     message: "链接与上传文件二选一",
@@ -57,6 +59,7 @@ export async function referenceRoutes(app: FastifyInstance): Promise<void> {
       source: body.url ? { kind: "url", url: body.url } : { kind: "file", path: body.uploadPath as string },
       language: body.language,
       ...(body.note ? { note: body.note } : {}),
+      ...(body.profileId ? { profileId: body.profileId } : {}),
     });
   });
 

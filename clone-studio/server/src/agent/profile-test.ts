@@ -108,7 +108,10 @@ export async function probeMessagesApi(row: ProfileRow, fetchImpl: typeof fetch 
 
 /** 响应原文与报错里万一带上了 token（上游回显、请求头报错），换成打码值再回界面（REQ-008） */
 function redact(text: string, token: string): string {
-  return token ? text.split(token).join("•".repeat(12)) : text;
+  if (!token) return text;
+  // 也换掉 JSON 转义后的样子：token 里有 " 或 \ 时，上游在 JSON 里回显的是转义形式（10.1 第二轮审查 N2）
+  const escaped = JSON.stringify(token).slice(1, -1);
+  return text.split(token).join("•".repeat(12)).split(escaped).join("•".repeat(12));
 }
 
 function isMessage(body: string): boolean {

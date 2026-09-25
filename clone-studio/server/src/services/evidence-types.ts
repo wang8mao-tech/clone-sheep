@@ -14,6 +14,8 @@ export interface StartArgs {
   source: EvidenceSource;
   language: string;
   note?: string;
+  /** ①参考 选的 Agent 模型档案（REQ-010）：记在模板上，证据做完起复刻时用；不给用默认档案 */
+  profileId?: string | undefined;
 }
 
 export class EvidenceError extends Error {

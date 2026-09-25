@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import path from "node:path";
 import type { HookCallback, Options } from "@anthropic-ai/claude-agent-sdk";
 import { judgeToolCall, type Denial, type GuardContext } from "./guard.js";
@@ -21,6 +22,8 @@ export interface SessionInput {
   hypitRoot?: string;
   /** 不给就用 Claude Code 订阅的默认模型 */
   model?: string;
+  /** 这次会话用的模型档案（REQ-010）：要注入的变量、是不是订阅、有没有原生联网搜索 */
+  profile?: SessionProfile;
   /** 花费熔断（美元），走 SDK 原生 maxBudgetUsd + error_max_budget_usd，不自己累加 */
   maxBudgetUsd: number;
   /** 续上已有会话（继续 / 打回） */
@@ -153,7 +156,34 @@ export function agentEnv(parent: NodeJS.ProcessEnv = process.env, binDir?: strin
   return env;
 }
 
+/** Claude Code 的登录凭据文件（默认在 ~/.claude，CLAUDE_CONFIG_DIR 可以改位置）：交给 guard 保护 */
+export function claudeCredentialFiles(env: NodeJS.ProcessEnv = process.env): string[] {
+  const dirs = [path.join(homedir(), ".claude"), ...(env.CLAUDE_CONFIG_DIR ? [env.CLAUDE_CONFIG_DIR] : [])];
+  return dirs.map((dir) => path.join(dir, ".credentials.json"));
+}
+
+export interface SessionProfile {
+  env: Record<string, string>;
+  subscription: boolean;
+  webSearch: boolean;
+}
+
+/**
+ * 会话环境 = 放行名单里的系统变量 + 档案注入的变量。非订阅档案去掉本机订阅令牌：
+ * 否则 Claude Code 可能把订阅凭据发到第三方端点（REQ-010）。只在这次会话的 env 里改，不碰 process.env
+ */
+export function sessionEnv(base: Record<string, string>, profile?: SessionProfile): Record<string, string> {
+  if (!profile) return base;
+  const env = { ...base };
+  if (!profile.subscription) {
+    for (const name of Object.keys(env)) if (name.toUpperCase() === "CLAUDE_CODE_OAUTH_TOKEN") delete env[name];
+  }
+  return { ...env, ...profile.env };
+}
+
 export function buildSessionOptions(input: SessionInput): Options {
+  // 没有原生联网搜索的档案（第三方端点）：WebSearch 是 Anthropic 服务端工具，调了只会报错，直接不给（REQ-010）
+  const webSearch = input.profile?.webSearch ?? true;
   const options: Options = {
     cwd: input.workspace,
     // 不继承用户 ~/.claude 的权限规则与 hooks：Phase 0 实测不传时消息流里出现 system:hook_started
@@ -165,7 +195,7 @@ export function buildSessionOptions(input: SessionInput): Options {
     // 完整能力直接可用（无头下没人点批准）；拦截全靠 hook——hook 在 bypass 下照样生效（实测）
     permissionMode: "bypassPermissions",
     allowDangerouslySkipPermissions: true,
-    disallowedTools: [...SUBAGENT_TOOLS],
+    disallowedTools: [...SUBAGENT_TOOLS, ...(webSearch ? [] : ["WebSearch"])],
     hooks: {
       PreToolUse: [
         {
@@ -176,6 +206,7 @@ export function buildSessionOptions(input: SessionInput): Options {
                 pluginDir: input.pluginDir,
                 ...(input.binDir ? { binDir: input.binDir } : {}),
                 ...(input.secretsFile ? { secretsFile: input.secretsFile } : {}),
+                credentialFiles: claudeCredentialFiles(),
                 ...(input.hypitRoot ? { hypitRoot: input.hypitRoot } : {}),
               },
               input.onIntercept,
@@ -184,9 +215,13 @@ export function buildSessionOptions(input: SessionInput): Options {
         },
       ],
     },
-    systemPrompt: { type: "preset", preset: "claude_code", append: hostSystemAppend({ workspace: input.workspace }) },
+    systemPrompt: {
+      type: "preset",
+      preset: "claude_code",
+      append: hostSystemAppend({ workspace: input.workspace, webSearch }),
+    },
     maxBudgetUsd: input.maxBudgetUsd,
-    env: agentEnv(process.env, input.binDir),
+    env: sessionEnv(agentEnv(process.env, input.binDir), input.profile),
     ...(input.model ? { model: input.model } : {}),
     ...(input.resume ? { resume: input.resume } : {}),
     ...(input.abortController ? { abortController: input.abortController } : {}),

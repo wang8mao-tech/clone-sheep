@@ -12,6 +12,7 @@ import { batchBudget, currentEstimate, type EstimateRecord } from "./estimate-ru
 import { EvidenceError } from "./evidence-types.js";
 import { copyTemplateSources, variantDir } from "./variant-files.js";
 import { findVariant, setVariantStatus, type VariantRow } from "./variant-store.js";
+import { jobProfile } from "../agent/profile-env.js";
 
 /**
  * 批量变体（REQ-005、FLOW-003 步骤 1-2）：一次提交一批 brief → 批次记录 + 每条一个变体出片单位，
@@ -37,6 +38,8 @@ export interface SubmitInput {
   targetLanguage?: string | null;
   note?: string | null;
   modelId?: string | null;
+  /** Agent 模型档案（REQ-010、CMP-010）；给了就不看 modelId */
+  profileId?: string | null;
   /** 这一批的限额；不给用设置里的批次限额 */
   budgetUsd?: number | null;
 }
@@ -70,8 +73,12 @@ export function submitBatch(templateId: string, input: SubmitInput): BatchView {
   if (note && [...note].length > BATCH_NOTE_MAX) {
     throw new VariantError("INVALID_NOTE", `批次备注最多 ${BATCH_NOTE_MAX} 字`, 400);
   }
-  const modelId = input.modelId ?? null;
+  const profileId = input.profileId ?? undefined;
+  // 过渡做法（Phase 8 的模型下拉）：没给档案时仍收模型 id，走内置订阅
+  const modelId = profileId ? null : (input.modelId ?? null);
   if (!usableModel(modelId)) throw new VariantError("INVALID_MODEL", "这个模型不能用来写变体", 400);
+  // 档案不能用（不存在、没 key）在复制文件之前就拒；变体不要求看图（REQ-010：只提示）
+  jobProfile({ ownerKind: "production", profileId, legacyModelId: modelId });
   const budget = input.budgetUsd ?? settings.batch_limit_usd;
   if (!Number.isFinite(budget) || budget < settings.per_item_limit_usd || budget > 1000) {
     throw new VariantError("INVALID_BUDGET", `批次限额要在单条限额 $${settings.per_item_limit_usd} 到 $1000 之间`, 400);
@@ -124,6 +131,7 @@ export function submitBatch(templateId: string, input: SubmitInput): BatchView {
         ownerKind: "production",
         ownerId: id,
         prompt: variantPrompt({ brief, language, ...(note ? { batchNote: note } : {}) }),
+        ...(profileId ? { profileId } : {}),
         ...(modelId ? { modelId } : {}),
       });
     } catch {

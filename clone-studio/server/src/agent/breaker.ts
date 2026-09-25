@@ -91,6 +91,11 @@ export class Breaker {
     return this.clock.now() - this.startedAt;
   }
 
+  /** 外部判出来的熔断（按档案单价折算的花费到上限，REQ-010）：同样只报一次 */
+  trip(reason: TripReason, detail: string): void {
+    this.fire({ kind: "trip", reason, detail });
+  }
+
   observe(message: SDKMessage): void {
     if (this.done) return;
     this.armIdle();

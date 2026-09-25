@@ -63,7 +63,14 @@ describe("新建档案的校验（REQ-010 输入表）", () => {
 
   it("兼容端点的 base_url 必须 http / https，末尾斜杠去掉；官方 key 档案不收 base_url", async () => {
     const b = await bootProfiles();
-    for (const bad of ["", "api.deepseek.com", "ftp://x.com", "javascript:alert(1)"]) {
+    for (const bad of [
+      "",
+      "api.deepseek.com",
+      "ftp://x.com",
+      "javascript:alert(1)",
+      "https://x.com/a?v=1",
+      "https://x.com/a#top",
+    ]) {
       expect(code(() => b.profiles.createProfile({ ...COMPATIBLE, baseUrl: bad }))).toBe("BASE_URL_INVALID");
     }
     expect(b.profiles.createProfile(COMPATIBLE).base_url).toBe("https://api.deepseek.com/anthropic");
@@ -80,7 +87,13 @@ describe("新建档案的校验（REQ-010 输入表）", () => {
     const b = await bootProfiles();
     expect(code(() => b.profiles.createProfile({ ...COMPATIBLE, token: "  " }))).toBe("TOKEN_REQUIRED");
     // 带空白 / 控制字符 / 非 ASCII 的 key 不收：拼请求头时的报错会把明文带回界面（10.1 审查 M2）
-    for (const bad of ["sk-abc\ndef1234567", "sk-abc def1234567", "sk-abc\u0000def123", "sk-密钥abcdef123"]) {
+    for (const bad of [
+      "sk-abc\ndef1234567",
+      "sk-abc def1234567",
+      "sk-abc\u0000def123",
+      "sk-密钥abcdef123",
+      "sk-1234",
+    ]) {
       expect(
         code(() => b.profiles.createProfile({ ...COMPATIBLE, token: bad })),
         JSON.stringify(bad),

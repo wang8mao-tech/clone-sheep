@@ -61,7 +61,9 @@ export async function setup(settings: Partial<AgentSettings> = {}, options: Setu
   const resets: string[] = [];
   /** 调度器转出来的消息与拦截记录（Task 5.3 会拿它们落库、推 SSE） */
   const forwarded: Array<{ jobId: string; type: string }> = [];
-  const intercepts: Array<{ jobId: string; rule: string }> = [];
+  /** 转出来的消息原样（落库前的最后一站：凭据打码要在它之前） */
+  const forwardedMessages: Array<{ jobId: string; message: unknown }> = [];
+  const intercepts: Array<{ jobId: string; rule: string; detail?: string }> = [];
   /** 每段运行开跑时交给会话的那句话（抽屉的「用户消息」） */
   const runStarts: Array<{ jobId: string; kind: string; prompt: string }> = [];
   /** 宿主停下的那些段（抽屉据此把收尾的 result 当成「被停下」） */
@@ -90,8 +92,11 @@ export async function setup(settings: Partial<AgentSettings> = {}, options: Setu
     run,
     settings: () => current,
     workspaceOf: (job) => path.join(dataRoot, "ws", job.owner_id),
-    onMessage: (jobId, message) => forwarded.push({ jobId, type: message.type }),
-    onIntercept: (jobId, denial) => intercepts.push({ jobId, rule: denial.rule }),
+    onMessage: (jobId, message) => {
+      forwarded.push({ jobId, type: message.type });
+      forwardedMessages.push({ jobId, message });
+    },
+    onIntercept: (jobId, denial) => intercepts.push({ jobId, rule: denial.rule, detail: denial.detail }),
     onRunStart: (jobId, run) => runStarts.push({ jobId, ...run }),
     onRunStop: (jobId, stop) => runStops.push({ jobId, ...stop }),
     resetWorkspace: (job) => resets.push(job.id),
@@ -105,6 +110,7 @@ export async function setup(settings: Partial<AgentSettings> = {}, options: Setu
     current,
     resets,
     forwarded,
+    forwardedMessages,
     intercepts,
     runStarts,
     runStops,

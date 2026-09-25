@@ -12,7 +12,18 @@ import { HYPIT_SKILL } from "./plugin.js";
 
 export interface HostContext {
   workspace: string;
+  /** 档案有没有原生联网搜索；false 时加一段怎么找图 */
+  webSearch?: boolean;
 }
+
+/** 档案没有原生联网搜索时（REQ-010）：WebSearch 已禁用，告诉 Agent 怎么找图 */
+export const NO_WEB_SEARCH = [
+  "## 找图：这个模型没有原生联网搜索",
+  "",
+  "- WebSearch 工具不可用（已禁用），不要尝试调用它。",
+  "- 要找条目图或资料时，用 WebFetch 打开搜索结果页或官方页面，或用 Bash 跑 `curl` 下载图片；拿到的每张图照常在 SOURCES.json 记下来源页 URL。",
+  "- 实在找不到合适的图就按约定标缺口，不要编造来源。",
+].join("\n");
 
 export function hostSystemAppend(ctx: HostContext): string {
   return [
@@ -25,6 +36,7 @@ export function hostSystemAppend(ctx: HostContext): string {
     "- 没有人实时看着你：不要提问、不要等待确认，拿不准的地方按最合理的判断做，并把判断写进产物里说明。",
     "- 不要跑不会自己结束的命令：`hypit studio`、带 `--watch` 的 `status` / `activity`。宿主会把长时间没有新消息的会话判为卡死并停掉。",
     "",
+    ...(ctx.webSearch === false ? [NO_WEB_SEARCH, ""] : []),
     capabilitySection(ctx.workspace),
   ].join("\n");
 }

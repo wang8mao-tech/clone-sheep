@@ -12,6 +12,8 @@ import { saveVerdict, verdictFor, type CloneVerdict } from "./clone-verdicts.js"
 import { cancelOpenReplicas, ensureReplica } from "./replicas.js";
 import { estimateProduction, unestimatedQueued } from "./estimate-run.js";
 import { variantContinuePrompt } from "./variant-flow.js";
+import { SUBSCRIPTION_PROFILE_ID } from "../agent/profile-presets.js";
+import { defaultProfile, findProfile, profileToken } from "../agent/profiles.js";
 
 export { latestReplica, type ReplicaRow } from "./replicas.js";
 
@@ -91,7 +93,23 @@ export function startClone(templateId: string): AgentJobRow | undefined {
     language: template.language ?? "未知",
     ...(template.note ? { note: template.note } : {}),
   });
-  return agentScheduler().enqueue({ ownerKind: "template", ownerId: templateId, prompt });
+  return agentScheduler().enqueue({
+    ownerKind: "template",
+    ownerId: templateId,
+    prompt,
+    profileId: cloneProfile(template),
+  });
+}
+
+/**
+ * 复刻用 ①参考 选的档案（REQ-010）；它在导入之后被删了、被改成不支持看图、或 key 没了，就用内置订阅
+ * （复刻不能因为档案变了就卡在「复刻中」；用了哪个照实记在任务快照上）
+ */
+function cloneProfile(template: { agent_profile_id: string | null }): string {
+  const row = template.agent_profile_id ? findProfile(template.agent_profile_id) : defaultProfile();
+  const usable =
+    row && row.supports_vision === 1 && (row.kind === "subscription" || profileToken(row.id) !== undefined);
+  return usable ? row.id : SUBSCRIPTION_PROFILE_ID;
 }
 
 type Judgement = Omit<CloneVerdict, "jobId" | "jobEndedAt" | "createdAt">;

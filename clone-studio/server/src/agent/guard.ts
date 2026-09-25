@@ -41,6 +41,11 @@ export interface GuardContext {
   workspace: string;
   /** 宿主密钥文件：不许读、不许在命令里出现 */
   secretsFile?: string;
+  /**
+   * Claude Code 自己的凭据文件（`~/.claude/.credentials.json`、CLAUDE_CONFIG_DIR 下的同名文件）：同样不许碰。
+   * 第三方模型驱动会话时，读出来的订阅令牌会随下一次请求发给第三方端点（10.2 审查 S2-M2）
+   */
+  credentialFiles?: readonly string[];
   /** Agent 插件目录（hypit skill 所在）：改了它等于给之后的每次会话下毒 */
   pluginDir?: string;
   /** hypit 启动器目录（PATH 上的 hypit）：同理，改了它等于换掉宿主的 hypit */
@@ -75,10 +80,18 @@ export function judgeToolCall(toolName: string, input: unknown, ctx: GuardContex
     }
     const touched = protectedInCommand(args.command, ctx);
     if (touched) return touched;
+    if (readsCredentialEnv(args.command)) {
+      return protectedDenial(
+        args.command,
+        "模型档案的凭据只注入给 Claude Code 自己用（REQ-010），不许读取凭据变量或导出整份环境变量",
+      );
+    }
   }
 
-  if (ctx.secretsFile && readsSecrets(toolName, args, ctx.workspace, ctx.secretsFile)) {
-    return protectedDenial(JSON.stringify(args), "密钥文件由宿主保管，Agent 不许读取");
+  for (const file of [ctx.secretsFile, ...(ctx.credentialFiles ?? [])]) {
+    if (file && readsSecrets(toolName, args, ctx.workspace, file)) {
+      return protectedDenial(JSON.stringify(args), "密钥与登录凭据由宿主保管，Agent 不许读取");
+    }
   }
 
   const target = writeTarget(toolName, args);
@@ -136,15 +149,22 @@ function staticPrefix(pattern: string): string {
  * Runtime Profile 只在被写时拦——Agent 要运行 hypit、读 skill 的 references、把示例复制出来。
  */
 function protectedInCommand(command: string, ctx: GuardContext): Denial | undefined {
-  if (ctx.secretsFile) {
+  for (const file of [ctx.secretsFile, ...(ctx.credentialFiles ?? [])]) {
+    if (!file) continue;
     const flat = normalize(command).replace(/\\/g, "/").toLowerCase();
-    const name = path.basename(ctx.secretsFile).toLowerCase();
-    const stem = name.replace(/\.[^.]*$/, "").slice(0, 6);
+    const name = path.basename(file).toLowerCase();
+    const stem = name
+      .replace(/^\./, "")
+      .replace(/\.[^.]*$/, "")
+      .slice(0, 6);
     const short = new RegExp(`(^|[\\s"'/=:])${escapeRe(stem)}~\\d`, "i");
     const tokens = tokenize(normalize(command)).map((t) => resolveFrom(ctx.workspace, t));
-    if (flat.includes(name) || short.test(flat) || tokens.some((t) => samePath(t, ctx.secretsFile as string))) {
-      return protectedDenial(command, "密钥文件由宿主保管，Agent 不许读取或改动");
+    if (flat.includes(name) || short.test(flat) || tokens.some((t) => samePath(t, file))) {
+      return protectedDenial(command, "密钥与登录凭据由宿主保管，Agent 不许读取或改动");
     }
+  }
+  if (mentionsClaudeConfigDir(command, ctx.credentialFiles ?? [])) {
+    return protectedDenial(command, "Claude Code 的配置目录里有登录凭据，Agent 不许碰");
   }
   const written = writtenPaths(command, ctx.workspace);
   for (const [dir, why] of [
@@ -198,4 +218,63 @@ function escapeRe(s: string): string {
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
+}
+
+/**
+ * 读凭据变量或整份导出环境的命令（REQ-010：key 只进 SDK 子进程）。Agent 有完整 Bash，`printenv` 一下
+ * 就能把档案的 token 打进消息流、写进工作目录；消息流另有打码兜底（scheduler），这里先拦住。
+ * 只拦「整份导出」与「点名凭据变量」：读单个普通变量（`$env:PATH`、`process.env.HOME`）照常放行（10.2 审查 S2-L3）。
+ * 没用 Claude Code 的 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB：它会把权限模式强制改回 default（anthropics/claude-code#51258），
+ * 无头会话里的每个工具调用都会卡在等人批准
+ */
+/** 点名凭据变量；`${!ANTHROPIC*}` 这种按前缀列变量名的间接展开也算（数组下标 `${!arr[@]}` 不算） */
+const CREDENTIAL_VARS = /\b(ANTHROPIC_(AUTH_TOKEN|API_KEY)|CLAUDE_CODE_OAUTH_TOKEN)\b|\$\{!(?!\w+\[[@*]\]\})/i;
+/** 命令位置：行首、分隔符之后、`$(` 里，或跟在 sudo / time / nohup / sh -c / cmd /c（Git Bash 写成 //c）后面 */
+const AT_COMMAND = String.raw`(^|[;&|\x60]\s*|\$\(\s*|\b(sudo|time|nohup|command|exec|xargs|builtin)\s+|-c\s+["']?|\bcmd(\.exe)?\s+/{1,2}[ck]\s+["']?)(\S*[\\/])?`;
+/** 命令结束：行尾、分隔符、重定向、收尾的引号 / 括号 */
+const END = String.raw`\s*($|[;&|)\x60>"'}])`;
+/**
+ * 整份导出环境：env / printenv 只带选项（-0、-u NAME、--null…）、不跑别的命令也不点名；
+ * set / export / export -p / declare -p|-x / typeset -p|-x / compgen -e 不带参数（`set -e` 是设开关，不算）
+ */
+const ENV_DUMP = new RegExp(
+  `${AT_COMMAND}((env|printenv)(\\.exe)?(\\s+(-u\\s+\\S+|-C\\s+\\S+|--?[\\w-]+))*|(set|export(\\s+-p)?|declare\\s+-[px]+|typeset\\s+-[px]+|compgen\\s+-e)(\\.exe)?)${END}`,
+  "im",
+);
+/** cmd 的 `set 前缀` 会列出所有以它开头的变量（`cmd /c set ANTH` 就把 key 列出来了） */
+const CMD_SET = /\bcmd(\.exe)?\s+\/{1,2}[ck]\s+["']?\s*set(\s+[^\s=&|"']+)?\s*($|["'|&>])/i;
+/** 各语言里整体读环境的写法（点名读单个变量的不算：`$env:PATH`、`env:PATH`、process.env.HOME、os.environ['PATH']） */
+const ENV_READ = new RegExp(
+  [
+    String.raw`\b(Get-ChildItem|Get-Item|gci|gi|dir|ls)\s+(-(Path|LiteralPath)\s+)?["']?env:(?![\w])`,
+    String.raw`\b(Set-Location|Push-Location|cd|sl)\s+["']?env:`,
+    String.raw`\[(System\.)?Environment\]::GetEnvironmentVariables`,
+    String.raw`/proc/[^\s]*/environ`,
+    String.raw`\bprocess\s*(\.\s*env\b|\[\s*["']env["']\s*\])(?!\s*[.[])`,
+    String.raw`[)\]]\s*\.env\b(?!\s*[.[])`,
+    String.raw`\bos\.environ\b(?!\s*(\[|\.get\())`,
+    String.raw`\bSystem\.getenv\(\s*\)`,
+    String.raw`%ENV\b`,
+    String.raw`\bruby\b.*\bENV\b(?!\s*[[=.])`,
+  ].join("|"),
+  "i",
+);
+
+export function readsCredentialEnv(command: string): boolean {
+  return CREDENTIAL_VARS.test(command) || ENV_DUMP.test(command) || CMD_SET.test(command) || ENV_READ.test(command);
+}
+
+/**
+ * 命令里提到了 Claude Code 的配置目录（`~/.claude`、`$HOME/.claude`、CLAUDE_CONFIG_DIR 那一处）：不点凭据文件名、
+ * 用通配（`.cred*`）或整目录操作（`grep -r … ~/.claude`、`cp -r ~/.claude`）同样能读到登录凭据（10.2 第二轮审查 S2-L1）
+ */
+const HOME_CLAUDE =
+  /(^|[\s"'=:(])(~|\$home|\$\{home\}|%userprofile%|\$env:userprofile|[a-z]:\/users\/[^/\s"']+)\/\.claude(\/|[\s"')]|$)/i;
+
+function mentionsClaudeConfigDir(command: string, credentialFiles: readonly string[]): boolean {
+  const flat = normalize(command).replace(/\\/g, "/").toLowerCase();
+  if (HOME_CLAUDE.test(flat)) return true;
+  return credentialFiles
+    .map((file) => path.dirname(file).replace(/\\/g, "/").toLowerCase())
+    .some((dir) => flat.includes(dir));
 }

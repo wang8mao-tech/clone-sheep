@@ -292,3 +292,184 @@ describe("judgeToolCall", () => {
     expect(judgeToolCall("Write", { file_path: 42 }, { workspace: ws })).toBeUndefined();
   });
 });
+
+describe("凭据环境变量（REQ-010：key 只进 SDK 子进程）", () => {
+  const ctx = { workspace: "C:/ws", pluginDir: "C:/plugin" };
+  it("读凭据变量、整份导出环境：拦", async () => {
+    const { judgeToolCall } = await import("./guard.js");
+    for (const command of [
+      "printenv",
+      "env",
+      "env | grep ANTH",
+      "echo $ANTHROPIC_AUTH_TOKEN",
+      "echo ${ANTHROPIC_API_KEY}",
+      "printenv CLAUDE_CODE_OAUTH_TOKEN",
+      "cd x && set",
+      "export -p > vars.txt",
+      "declare -x",
+      "Get-ChildItem env:",
+      "$env:ANTHROPIC_AUTH_TOKEN",
+      'node -e "console.log(process.env)"',
+      "python -c 'import os; print(os.environ)'",
+      "cat /proc/self/environ",
+      "x=$(env)",
+    ]) {
+      expect(judgeToolCall("Bash", { command }, ctx)?.rule, command).toBe("protected-path");
+    }
+  });
+
+  it("正常命令不误伤：env 设变量再跑、set -e、curl 找图、export 一个变量", async () => {
+    const { judgeToolCall } = await import("./guard.js");
+    for (const command of [
+      "env NODE_OPTIONS= hypit check variant.svrun --json",
+      "set -e; hypit check reference.svrun --json",
+      'curl -L -A "Mozilla/5.0" "https://example.com/a.jpg" -o assets/a.jpg',
+      "export FOO=1 && echo ok",
+      "ls environment/",
+      "cat .env.example",
+    ]) {
+      expect(judgeToolCall("Bash", { command }, ctx), command).toBeUndefined();
+    }
+  });
+});
+
+describe("凭据环境变量：常见的绕法（10.2 审查 S2-M1）", () => {
+  const ctx = { workspace: "C:/ws", pluginDir: "C:/plugin" };
+  it("换个写法整份导出、点名读凭据：同样拦", async () => {
+    const { judgeToolCall } = await import("./guard.js");
+    for (const command of [
+      "export",
+      "declare -p",
+      "compgen -e",
+      "bash -c env",
+      "sh -c 'env'",
+      "sudo env",
+      "time env",
+      "nohup env > out.txt",
+      "/usr/bin/env",
+      "cmd /c set",
+      "cmd.exe /c SET",
+      "dir env:",
+      "Get-Item Env:*",
+      "[System.Environment]::GetEnvironmentVariables()",
+      `node -e "console.log(require('process').env)"`,
+      "perl -e 'print %ENV'",
+      'ruby -e "p ENV"',
+      "echo ${!ANTHROPIC*}",
+      "v=ANTHROPIC_AUTH; v=${v}_TOKEN; echo ${!v}",
+    ]) {
+      expect(judgeToolCall("Bash", { command }, ctx)?.rule, command).toBe("protected-path");
+    }
+  });
+
+  it("点名读普通变量不拦（10.2 审查 S2-L3）", async () => {
+    const { judgeToolCall } = await import("./guard.js");
+    for (const command of [
+      '$env:PATH = "$env:PATH;C:\\tools"; hypit check reference.svrun --json',
+      'node -e "console.log(process.env.HOME)"',
+      "python -c \"import os; print(os.environ['PATH'])\"",
+      "python -c \"import os; print(os.environ.get('HOME'))\"",
+      "docker run -e ENV=prod img",
+      "curl https://example.com/env/list.json -o assets/list.json",
+    ]) {
+      expect(judgeToolCall("Bash", { command }, ctx), command).toBeUndefined();
+    }
+  });
+});
+
+describe("Claude Code 的登录凭据文件（10.2 审查 S2-M2）", () => {
+  const credentials = "C:/Users/me/.claude/.credentials.json";
+  const ctx = { workspace: "C:/ws", pluginDir: "C:/plugin", credentialFiles: [credentials] };
+  it("Read / Grep / 命令里碰它：拦", async () => {
+    const { judgeToolCall } = await import("./guard.js");
+    expect(judgeToolCall("Read", { file_path: credentials }, ctx)?.rule).toBe("protected-path");
+    expect(judgeToolCall("Grep", { pattern: "token", path: "C:/Users/me/.claude" }, ctx)?.rule).toBe("protected-path");
+    expect(judgeToolCall("Bash", { command: "cat ~/.claude/.credentials.json" }, ctx)?.rule).toBe("protected-path");
+    expect(judgeToolCall("Bash", { command: `type "${credentials}"` }, ctx)?.rule).toBe("protected-path");
+    expect(judgeToolCall("Read", { file_path: "C:/ws/SCRIPT.md" }, ctx)).toBeUndefined();
+  });
+
+  it("会话配置把两处凭据文件都交给 guard（默认 ~/.claude 与 CLAUDE_CONFIG_DIR）", async () => {
+    const { claudeCredentialFiles } = await import("./session.js");
+    const files = claudeCredentialFiles({ CLAUDE_CONFIG_DIR: "D:/cfg" });
+    expect(files).toHaveLength(2);
+    expect(files[0]).toMatch(/[\\/]\.claude[\\/]\.credentials\.json$/);
+    expect(files[1]!.replace(/\\/g, "/")).toBe("D:/cfg/.credentials.json");
+  });
+});
+
+describe("凭据环境变量：第二轮审查列的写法（10.2 第二轮审查 S2-M1、S2-L1～L4）", () => {
+  const ctx = {
+    workspace: "C:/ws",
+    pluginDir: "C:/plugin",
+    credentialFiles: ["C:/Users/me/.claude/.credentials.json"],
+  };
+  it("带选项的导出、Git Bash 的 //c、带引号、cmd 的 set 前缀、PowerShell 的 -Path env:、按下标取 env：拦", async () => {
+    const { judgeToolCall } = await import("./guard.js");
+    for (const command of [
+      "env -0",
+      "env -u PATH",
+      "printenv -0",
+      "env --null",
+      "/usr/bin/env -0",
+      "env -0 | tr '\\0' '\\n'",
+      "cmd //c set",
+      "cmd //c env",
+      'cmd /c "set"',
+      'cmd /c "set | findstr ANTH"',
+      "cmd /c set ANTH",
+      "cmd /c set A",
+      "Get-ChildItem -Path Env:",
+      "gci -Path env:",
+      "Get-Item -Path Env:*",
+      "Get-ChildItem 'env:'",
+      'gci "Env:"',
+      "Set-Location env:; Get-ChildItem",
+      `node -p "process['env']"`,
+      `node -e "console.log(globalThis['process'].env)"`,
+    ]) {
+      expect(judgeToolCall("Bash", { command }, ctx)?.rule, command).toBe("protected-path");
+    }
+  });
+
+  it("读单个普通变量、按下标遍历数组、代码里的 set / env 字样、设变量跑命令：放行", async () => {
+    const { judgeToolCall } = await import("./guard.js");
+    for (const command of [
+      "Get-Item env:PATH",
+      "dir env:PATH",
+      "gi env:HYPIT_STATE_HOME",
+      "Get-ChildItem Env:PATH",
+      "ls env:Path",
+      'for i in "${!files[@]}"; do echo "$i"; done',
+      "node -e \"const { set } = require('lodash'); console.log(set)\"",
+      'node -e "[1].map((set) => set)"',
+      'python -c "x=(env)"',
+      "echo '{ env }'",
+      "env FOO=1 node build.js",
+      "set -e",
+      "set -euo pipefail; hypit check variant.svrun --json",
+    ]) {
+      expect(judgeToolCall("Bash", { command }, ctx), command).toBeUndefined();
+    }
+  });
+
+  it("不点凭据文件名、改用通配或整目录去碰 ~/.claude：拦", async () => {
+    const { judgeToolCall } = await import("./guard.js");
+    for (const command of [
+      "cat ~/.claude/.cred*",
+      // 先 cd 进去（目录经变量拿到）再按文件名读：只能靠文件名认出来
+      'D="$(dirname "$X")"; cd "$D" && cat .credentials.json',
+      "cat ~/.claude/.credentials.jso?",
+      "grep -r accessToken ~/.claude",
+      "cp -r ~/.claude ./x",
+      "gci -Force ~/.claude -Filter *.json | Get-Content",
+      'ls "$HOME/.claude"',
+      "type C:\\Users\\me\\.claude\\settings.json",
+    ]) {
+      expect(judgeToolCall("Bash", { command }, ctx)?.rule, command).toBe("protected-path");
+    }
+    for (const command of ["ls ./assets", "cat .claude-notes.md", "mkdir -p assets/.claudette"]) {
+      expect(judgeToolCall("Bash", { command }, ctx), command).toBeUndefined();
+    }
+  });
+});

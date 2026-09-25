@@ -18,6 +18,8 @@ import {
   type StepRecord,
 } from "./evidence-store.js";
 import { EvidenceError, type EvidenceSource, type StartArgs } from "./evidence-types.js";
+import { jobProfile } from "../agent/profile-env.js";
+import { defaultProfile } from "../agent/profiles.js";
 
 /**
  * 证据准备流水线（REQ-002）：取源 → 探测 → 转写 → 抽帧。
@@ -67,6 +69,10 @@ export function evidenceState(templateId: string): EvidenceState {
 export async function startEvidence(args: StartArgs): Promise<EvidenceState> {
   const template = requireTemplate(args.templateId);
   assertNotRunning(args.templateId);
+  // 复刻要看帧（REQ-010）：选的档案不支持看图、或没有 key，在动任何东西之前就拒，不建任务
+  // 没选就是当时的默认档案：同样要验、同样记下，之后改默认不影响这一次（10.2 审查 S1-M2）
+  const profileId = args.profileId ?? defaultProfile().id;
+  jobProfile({ ownerKind: "template", profileId });
 
   const workspace = requireWorkspace(template);
   ensureWorkspaceLayout(workspace);
@@ -80,7 +86,7 @@ export async function startEvidence(args: StartArgs): Promise<EvidenceState> {
     .prepare(
       `UPDATE templates
           SET source_kind = ?, source_url = ?, source_path = NULL, language = ?, note = ?,
-              status = 'importing', approved_replica_id = NULL, updated_at = ?
+              status = 'importing', approved_replica_id = NULL, agent_profile_id = ?, updated_at = ?
         WHERE id = ?`,
     )
     .run(
@@ -88,6 +94,7 @@ export async function startEvidence(args: StartArgs): Promise<EvidenceState> {
       args.source.kind === "url" ? args.source.url : null,
       args.language,
       args.note ?? null,
+      profileId,
       now,
       args.templateId,
     );

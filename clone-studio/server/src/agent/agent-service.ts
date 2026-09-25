@@ -9,6 +9,7 @@ import { latestJobOf, requireJob, updateJob, type AgentJobRow } from "./job-stor
 import { appendIntercept, appendMessage, appendPrompt, appendStop } from "./message-store.js";
 import { runAgent } from "./runner.js";
 import { Scheduler, type SchedulerDeps } from "./scheduler.js";
+import type { CostBasis } from "./profile-env.js";
 
 /**
  * 把调度器接进应用（Spec REQ-003）：消息落库 + 推 SSE，工作目录按 owner 现查，
@@ -184,8 +185,11 @@ export interface AgentJobView {
   costIsEstimate: boolean;
   stopReason: string | null;
   /** 所用模型档案名（Spec REQ-010：抽屉页头要显示档案名与模型 id）；没选档案时为 null */
+  profileId: string | null;
   profileName: string | null;
   modelId: string | null;
+  /** 花费口径（REQ-010）：none = 兼容端点没填单价，花费算不出，界面写「未知」 */
+  costBasis: CostBasis | null;
   resumeAt: string | null;
   createdAt: string;
   updatedAt: string | null;
@@ -206,8 +210,10 @@ export function present(job: AgentJobRow): AgentJobView {
     costUsd: job.cost_usd,
     costIsEstimate: job.cost_is_estimate === 1,
     stopReason: job.stop_reason,
+    profileId: job.profile_id,
     profileName: job.profile_name,
     modelId: job.model_id,
+    costBasis: job.cost_basis,
     resumeAt: job.resume_at,
     createdAt: job.created_at,
     updatedAt: job.updated_at,

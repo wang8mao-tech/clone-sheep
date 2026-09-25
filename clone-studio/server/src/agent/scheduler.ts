@@ -2,7 +2,10 @@ import { Breaker, systemClock, type Clock, type Verdict } from "./breaker.js";
 import { createJob, requireJob, updateJob, type AgentJobRow, type NewJob, type OwnerKind } from "./job-store.js";
 import { assertContinuable, assertLatest, assertOwnerFree, assertRerunnable, assertReworkable } from "./job-guards.js";
 import { runKind, settle, spendOf } from "./outcome.js";
-import { planQuotaResume, type Spend } from "./quota.js";
+import { PriceMeter } from "./price-meter.js";
+import { jobProfile, redactSecrets, rerunChoice, runProfile, SDK_BUDGET_OFF, type RunProfile } from "./profile-env.js";
+import { awaitQuota } from "./quota-wait.js";
+import type { Spend } from "./quota.js";
 import { continuePrompt } from "./prompts.js";
 import type { RunOutcome } from "./runner.js";
 import { SchedulerError, type Pending, type RunKind, type Running, type SchedulerDeps } from "./scheduler-types.js";
@@ -45,6 +48,8 @@ export class Scheduler {
     assertContinuable(job);
     assertLatest(job);
     assertOwnerFree(job.owner_kind, job.owner_id);
+    // resume 沿用原档案（REQ-010）：原档案删了或 key 没了，接不上，只能重跑
+    runProfile(job);
     let next: Pending;
     if (job.session_id) next = { jobId, prompt, resume: job.session_id, kind, ...this.fullAllowance() };
     else if (customPrompt !== undefined) {
@@ -64,25 +69,26 @@ export class Scheduler {
     assertReworkable(job);
     assertLatest(job);
     assertOwnerFree(job.owner_kind, job.owner_id);
+    runProfile(job);
     this.patch(jobId, { status: "queued", stop_reason: null, ended_at: null, resume_at: null });
     this.queue.push({ jobId, prompt, resume: job.session_id, kind: "rework", ...this.fullAllowance() });
     this.pump();
     return requireJob(jobId);
   }
 
-  /** 重跑：清掉 Agent 产物，按原任务提示开一个新任务（新会话）。先全部检查完再动文件 */
-  rerun(jobId: string): AgentJobRow {
+  /**
+   * 重跑：清掉 Agent 产物，按原任务提示开一个新任务（新会话）。先全部检查完再动文件——
+   * 包括档案：可以重选（REQ-010），选的档案不能用（没 key、复刻却不支持看图）就在清文件之前拒
+   */
+  rerun(jobId: string, profileId?: string): AgentJobRow {
     const job = requireJob(jobId);
     assertRerunnable(job);
     assertLatest(job);
     assertOwnerFree(job.owner_kind, job.owner_id);
+    const choice = rerunChoice(job, profileId);
+    jobProfile({ ownerKind: job.owner_kind, profileId: choice.profileId, legacyModelId: choice.modelId ?? null });
     this.deps.resetWorkspace(job);
-    return this.enqueue({
-      ownerKind: job.owner_kind,
-      ownerId: job.owner_id,
-      prompt: job.prompt,
-      ...(job.model_id ? { modelId: job.model_id } : {}),
-    });
+    return this.enqueue({ ownerKind: job.owner_kind, ownerId: job.owner_id, prompt: job.prompt, ...choice });
   }
 
   /** 取消：排队中、等待额度、运行中都行，结果是「已取消」。运行中的等进程真正结束才返回 */
@@ -162,6 +168,19 @@ export class Scheduler {
 
   private async execute(pending: Pending, entry: Running): Promise<void> {
     const before = requireJob(pending.jobId);
+    // 每次开跑都按任务快照与原档案重新算（等额度续跑之前档案可能被删了、key 被清了）：用不了就改判失败写明原因
+    let profile: RunProfile;
+    try {
+      profile = runProfile(before);
+    } catch (error) {
+      this.patch(pending.jobId, {
+        status: "failed",
+        stop_reason: error instanceof Error ? error.message : String(error),
+        ended_at: new Date().toISOString(),
+        resume_at: null,
+      });
+      return;
+    }
     // 两列取同一个时刻、同一只时钟：分两次取会差出 1 毫秒，第一次开跑时 started_at 与 run_started_at 对不上
     const now = new Date(this.clock.now()).toISOString();
     // started_at 记任务第一次开始；run_started_at 记**这一段**的起点，run_elapsed_ms 记这次运行
@@ -176,13 +195,16 @@ export class Scheduler {
       run_elapsed_ms: pending.elapsedMs ?? 0,
       ended_at: null,
       resume_at: null,
+      cost_basis: profile.basis,
     });
     this.deps.onRunStart?.(job.id, { kind: runKind(pending, before.started_at), prompt: pending.prompt });
     let verdict: Verdict | undefined;
     let latestCost: number | undefined;
     // 本次运行之前已经记下的累计花费。resume 接上转录里的累计值时清零（那份累计里已经含它），
     // 新开会话（含 resume 却换了会话 id）时保留：那条会话的 total 从 0 起算，要叠上去
-    let carry = pending.resume ? 0 : before.cost_usd;
+    // 按单价折算（或算不出）的：这一段只算这一段，之前记下的原样带着，不看 SDK 的累计值
+    let carry = pending.resume && profile.basis === "sdk" ? 0 : before.cost_usd;
+    const meter = profile.pricing ? new PriceMeter(profile.pricing) : undefined;
     const breaker = new Breaker(
       { wallMs: pending.wallMs, totalWallMs: pending.totalWallMs },
       (v) => {
@@ -196,16 +218,21 @@ export class Scheduler {
       outcome = await this.deps.run({
         workspace: this.deps.workspaceOf(job),
         prompt: pending.prompt,
-        maxBudgetUsd: pending.budgetUsd,
+        maxBudgetUsd: profile.basis === "sdk" ? pending.budgetUsd : SDK_BUDGET_OFF,
         stopSignal: entry.controller.signal,
         subject: { kind: job.owner_kind, id: job.owner_id },
-        ...(job.model_id ? { model: job.model_id } : {}),
+        ...(profile.model ? { model: profile.model } : {}),
+        profile: { env: profile.env, subscription: profile.subscription, webSearch: profile.webSearch },
         ...(pending.resume ? { resume: pending.resume } : {}),
         onIntercept: (denial) => {
-          if (this.isCurrent(job.id, entry)) this.deps.onIntercept?.(job.id, denial);
+          if (this.isCurrent(job.id, entry)) this.deps.onIntercept?.(job.id, redactSecrets(denial, profile.secrets));
         },
         onMessage: (message) => {
           breaker.observe(message);
+          if (meter) {
+            meter.observe(message);
+            if (meter.cost >= pending.budgetUsd) breaker.trip("budget", "花费达到上限（按档案单价折算）");
+          }
           // 被丢弃的那次运行还会继续吐消息（它的进程没停干净）：不能拿它的会话 id、
           // 消息去盖新一轮的记录，否则「继续」会 resume 到一条过时的会话上
           if (!this.isCurrent(job.id, entry)) return;
@@ -220,9 +247,10 @@ export class Scheduler {
             // 认了的边界：转录没接上、而这一段本身又比之前记下的还贵时，看起来就是正常的累计值，
             // 这一段之前的花费会被少记——花费本来就按「估」记账（Spec REQ-009）
             if (pending.resume && carry === 0 && message.total_cost_usd < before.cost_usd) carry = before.cost_usd;
-            latestCost = message.total_cost_usd;
+            // 第三方端点的 SDK 估算不可信：只认 sdk 口径
+            if (profile.basis === "sdk") latestCost = message.total_cost_usd;
           }
-          this.deps.onMessage?.(job.id, message);
+          this.deps.onMessage?.(job.id, redactSecrets(message, profile.secrets));
         },
       });
     } catch (error) {
@@ -230,6 +258,7 @@ export class Scheduler {
     } finally {
       breaker.stop();
     }
+    if (meter) latestCost = meter.cost;
     const spend = spendOf(carry, latestCost, before.cost_usd, breaker.elapsedMs());
     // 已经被丢弃（stop 超时）：任务早标了失败，可能已经又跑起了新一轮，这里不能再写库
     if (!this.isCurrent(pending.jobId, entry)) return;
@@ -244,7 +273,7 @@ export class Scheduler {
     if (entry.action || verdict) this.deps.onRunStop?.(job.id, { reason: settlement.stopReason ?? "" });
     this.patch(pending.jobId, {
       status: settlement.status,
-      stop_reason: settlement.stopReason,
+      stop_reason: redactSecrets(settlement.stopReason, profile.secrets),
       cost_usd: spend.cost,
       run_elapsed_ms: ranMs,
       ended_at: new Date().toISOString(),
@@ -252,39 +281,9 @@ export class Scheduler {
     });
   }
 
-  /** 订阅限流：进「等待额度」，到点用剩下的墙钟与花费自动续跑（算法在 quota.ts） */
+  /** 订阅限流：进「等待额度」，到点用剩下的墙钟与花费自动续跑（quota-wait.ts） */
   private awaitQuota(pending: Pending, resumeAt: Date, spend: Spend): void {
-    const job = requireJob(pending.jobId);
-    const plan = planQuotaResume(job, pending, spend);
-    // 额度用光就不会续跑了：停下记录写真正的原因，别让抽屉说「等恢复后续跑」（复审 S1-R3-2）
-    this.deps.onRunStop?.(job.id, { reason: plan.kind === "trip" ? plan.reason : "awaiting_quota" });
-    if (plan.kind === "trip") {
-      // 这里也是终态：额度用光不再续跑，这一段跑掉的时间同样要落库。少写这一笔，
-      // 界面就会出现「原因：运行时间用完 / 用时 0 秒」这种自相矛盾的行（复审 S1-M1(r7)）
-      const ended = { cost_usd: spend.cost, ended_at: new Date().toISOString() };
-      const elapsed = pending.elapsedMs ?? job.run_elapsed_ms;
-      this.patch(job.id, { status: "tripped", stop_reason: plan.reason, run_elapsed_ms: elapsed, ...ended });
-      return;
-    }
-    const next = plan.next;
-    // 等额度期间「用时」冻在已经跑掉的那些：累计值上一步已经并好，这里落库即可。
-    // 不动 run_started_at——它只在运行中有意义，往前挪会虚高、往后挪会变成未来时间（复审 S1-M1(r6)）
-    this.patch(job.id, {
-      status: "awaiting_quota",
-      cost_usd: spend.cost,
-      run_elapsed_ms: next.elapsedMs ?? 0,
-      resume_at: resumeAt.toISOString(),
-    });
-    const timer = this.clock.setTimeout(
-      () => {
-        this.waiting.delete(job.id);
-        this.patch(job.id, { status: "queued", resume_at: null });
-        this.queue.push(next);
-        this.pump();
-      },
-      Math.max(0, resumeAt.getTime() - this.clock.now()),
-    );
-    this.waiting.set(job.id, timer);
+    awaitQuota(this.stopContext(), (jobId, run) => this.deps.onRunStop?.(jobId, run), pending, resumeAt, spend);
   }
 
   /** 这次运行还是这个任务当前的那一次吗（stop 超时会丢弃一次运行，但它的进程还在吐消息） */

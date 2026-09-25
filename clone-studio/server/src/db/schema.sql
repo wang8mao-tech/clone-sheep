@@ -48,6 +48,8 @@ CREATE TABLE IF NOT EXISTS templates (
                           CHECK (status IN ('importing','cloning','awaiting_review','approved','failed')),
   -- 通过验货的那一版复刻片（REQ-004：它是这个模板的第一条成片）；历次版本都留着供对比，只有这一版算成片
   approved_replica_id   TEXT,
+  -- ①参考 导入时选的 Agent 模型档案（REQ-010）：证据做完自动起复刻时用它
+  agent_profile_id      TEXT,
   created_at            TEXT NOT NULL,
   updated_at            TEXT NOT NULL
 );
@@ -143,6 +145,8 @@ CREATE TABLE IF NOT EXISTS agent_jobs (
   profile_id       TEXT,
   profile_name     TEXT,
   model_id         TEXT,
+  -- 花费口径（REQ-010）：sdk = SDK 估算；price = 按档案单价折算；none = 兼容端点没填单价，算不出
+  cost_basis       TEXT,
   -- 任务提示原文：重跑按它从头来（Task 5.2）
   prompt           TEXT,
   -- 等待额度时的自动续跑时间（订阅限流给的重置时间），供界面显示

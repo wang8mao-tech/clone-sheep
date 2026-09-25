@@ -2,6 +2,7 @@ import type { FastifyError, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { JobNotFoundError } from "../agent/job-store.js";
 import { SchedulerError } from "../agent/scheduler-types.js";
+import { ProfileError } from "../agent/profiles.js";
 import { ArchiveError } from "../services/archive.js";
 import { EvidenceError } from "../services/evidence.js";
 
@@ -16,7 +17,7 @@ export function archiveErrorHandler(error: FastifyError, _request: FastifyReques
     void reply.status(error.status).send({ error: { code: error.code, message: error.message } });
     return;
   }
-  if (error instanceof ArchiveError || error instanceof EvidenceError) {
+  if (error instanceof ArchiveError || error instanceof EvidenceError || error instanceof ProfileError) {
     void reply.status(error.status).send({ error: { code: error.code, message: error.message } });
     return;
   }

@@ -77,6 +77,16 @@ describe("兼容端点：直接打 Messages API", () => {
     expect(thrown.ok).toBe(false);
   });
 
+  it("token 里有引号、反斜杠：上游在 JSON 里回显的转义形式也打码（10.1 第二轮审查 N2）", async () => {
+    const b = await bootProfiles();
+    const token = 'sk-abc"def\\1234567';
+    const up = await fakeEndpoint(401, JSON.stringify({ error: `bad key ${token}` }));
+    const row = b.profiles.createProfile({ ...COMPATIBLE, baseUrl: up.base, token });
+    const { probeMessagesApi } = await import("./profile-test.js");
+    const failed = await probeMessagesApi(row);
+    expect(failed.detail).not.toContain("sk-abc");
+  });
+
   it("不支持看图的：只发文字", async () => {
     const b = await bootProfiles();
     const up = await fakeEndpoint(200, "{}");

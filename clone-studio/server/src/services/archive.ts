@@ -124,6 +124,8 @@ export interface TemplateRow {
   status: TemplateStatus;
   /** 通过验货的那一版复刻片；没通过是 null */
   approved_replica_id: string | null;
+  /** ①参考 选的 Agent 模型档案（REQ-010） */
+  agent_profile_id: string | null;
   created_at: string;
   updated_at: string;
 }

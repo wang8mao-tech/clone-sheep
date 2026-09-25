@@ -24,6 +24,7 @@ const SubmitBody = z.object({
     .nullish(),
   note: z.string().nullish(),
   modelId: z.string().nullish(),
+  profileId: z.string().nullish(),
   budgetUsd: z.number().nullish(),
 });
 

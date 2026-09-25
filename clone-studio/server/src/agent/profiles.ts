@@ -2,6 +2,17 @@ import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import { getSecret, maskSecret, setSecret, type SecretKey } from "../lib/secrets.js";
 import { SUBSCRIPTION_PROFILE_ID, type ProfileKind } from "./profile-presets.js";
+import {
+  cleanBaseUrl,
+  cleanModel,
+  cleanName,
+  cleanOptional,
+  cleanPrice,
+  cleanToken,
+  ProfileError,
+} from "./profile-validate.js";
+
+export { ProfileError };
 
 /**
  * 模型档案（Spec REQ-010）：档案本身存库，token 只存 secrets.json（REQ-008 同款），接口只回打码值。
@@ -44,16 +55,6 @@ export interface ProfileView {
   token: string | null;
   /** 兼容端点没填全单价：$ 熔断不生效（REQ-010），界面在档案上标出来 */
   budgetNote: string | null;
-}
-
-export class ProfileError extends Error {
-  constructor(
-    readonly code: string,
-    message: string,
-    readonly status = 400,
-  ) {
-    super(message);
-  }
 }
 
 /** 还没结束的任务：它们开跑 / 续跑时要用档案，档案不能删 */
@@ -128,62 +129,6 @@ export interface ProfileInput {
 }
 
 export type ProfilePatch = Partial<Omit<ProfileInput, "kind">>;
-
-function cleanName(name: string, selfId?: string): string {
-  const value = name.trim();
-  // 按字符数：emoji 之类在 UTF-16 里占两个码元
-  const length = [...value].length;
-  if (length < 1 || length > 30) throw new ProfileError("NAME_INVALID", "档案名要 1-30 字。");
-  const taken = db().prepare("SELECT id FROM model_profiles WHERE name = ?").get(value) as { id: string } | undefined;
-  if (taken && taken.id !== selfId) throw new ProfileError("NAME_TAKEN", `已经有叫「${value}」的档案了。`, 409);
-  return value;
-}
-
-function cleanBaseUrl(kind: ProfileInput["kind"], value: string | null | undefined): string | null {
-  // Anthropic 官方 key 走官方地址、订阅走本机登录态，都不收 base_url
-  if (kind !== "compatible") return null;
-  const url = (value ?? "").trim();
-  let parsed: URL | undefined;
-  try {
-    parsed = new URL(url);
-  } catch {
-    parsed = undefined;
-  }
-  if (!parsed || (parsed.protocol !== "http:" && parsed.protocol !== "https:")) {
-    throw new ProfileError("BASE_URL_INVALID", "base_url 要是 http 或 https 地址。");
-  }
-  return url.replace(/\/+$/, "");
-}
-
-function cleanModel(value: string): string {
-  const model = value.trim();
-  if (!model) throw new ProfileError("MODEL_REQUIRED", "要填主模型 id。");
-  return model;
-}
-
-/**
- * token 只收可见 ASCII（不含空白与控制字符）：真 key 本来就是这样；带换行的会在拼请求头时报错，
- * 而那条报错会把整串明文带回界面（10.1 审查 M2）
- */
-function cleanToken(value: string): string {
-  const token = value.trim();
-  if (!token) throw new ProfileError("TOKEN_REQUIRED", "要填 API key。");
-  if (!/^[!-~]+$/.test(token)) {
-    throw new ProfileError("TOKEN_INVALID", "API key 里有空格、换行或其它不可见字符，重新粘贴一次。");
-  }
-  return token;
-}
-
-function cleanOptional(value: string | null | undefined): string | null {
-  const text = (value ?? "").trim();
-  return text ? text : null;
-}
-
-function cleanPrice(value: number | null | undefined): number | null {
-  if (value === null || value === undefined) return null;
-  if (!Number.isFinite(value) || value < 0) throw new ProfileError("PRICE_INVALID", "单价要是不小于 0 的数。");
-  return value;
-}
 
 export function createProfile(input: ProfileInput): ProfileRow {
   const name = cleanName(input.name);

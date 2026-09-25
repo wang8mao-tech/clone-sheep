@@ -20,6 +20,7 @@ import {
 } from "./variant-files.js";
 import { listAssets, userReplacedFiles, type AssetRow, type VariantRow } from "./variant-store.js";
 import { presentVariant, requireVariant, VariantError, type VariantView } from "./variants.js";
+import { jobProfile, rerunChoice } from "../agent/profile-env.js";
 
 /**
  * 素材审核（REQ-005、FLOW-003 步骤 4-5 与分支）：看素材与台词、替换单张、素材通过交给估价闸门、
@@ -257,7 +258,7 @@ export const RERUNNABLE = ["failed", "tripped", "interrupted", "asset_review"];
  * 重跑（FLOW-003 分支）：清掉 Agent 的稿子、清单与抓来的图，留下模板原稿与用户替换过的图（Task 5.2 复审 S1-M4），
  * 按原任务提示与模型开一个新会话。出片失败后重跑同样走这里：运行文件路径清掉，素材要重新审
  */
-export function rerunVariant(id: string): VariantView {
+export function rerunVariant(id: string, profileId?: string): VariantView {
   const variant = requireVariant(id);
   if (!RERUNNABLE.includes(variant.status)) {
     throw new VariantError("NOT_RERUNNABLE", "只有失败、熔断、中断或素材待审的变体可以重跑");
@@ -267,6 +268,9 @@ export function rerunVariant(id: string): VariantView {
   if (isEstimating(id)) throw new VariantError("ESTIMATING", "这条正在估价，等估完再重跑");
   const job = latestJobOf("production", id);
   if (!job?.prompt) throw new VariantError("NO_PROMPT", "这条变体没有保存任务提示，无法重跑");
+  // 重跑可重选档案（REQ-010）；选的不能用就在清文件之前拒
+  const choice = rerunChoice(job, profileId);
+  jobProfile({ ownerKind: "production", profileId: choice.profileId, legacyModelId: choice.modelId ?? null });
   const template = requireTemplate(variant.template_id);
   resetVariantProducts(dirOf(variant), userReplacedFiles(id), template.workspace_path ?? undefined);
   db().transaction(() => {
@@ -279,7 +283,7 @@ export function rerunVariant(id: string): VariantView {
     ownerKind: "production",
     ownerId: id,
     prompt: job.prompt,
-    ...(job.model_id ? { modelId: job.model_id } : {}),
+    ...choice,
   });
   notify(`template:${variant.template_id}`, "variants", { productionId: id });
   return presentVariant(requireVariant(id));

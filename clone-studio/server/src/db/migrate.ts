@@ -131,6 +131,19 @@ const STEPS: ReadonlyArray<{ version: number; run: (d: ReturnType<typeof db>) =>
         d.exec("ALTER TABLE model_profiles ADD COLUMN updated_at TEXT");
     },
   },
+  {
+    // Task 10.2：模板记下 ①参考 选的档案；任务记下花费口径
+    version: 11,
+    run: (d) => {
+      addAgentJobColumns(d, ["cost_basis"]);
+      const templates = new Set(
+        (d.prepare("PRAGMA table_info(templates)").all() as Array<{ name: string }>).map((c) => c.name),
+      );
+      if (templates.size > 0 && !templates.has("agent_profile_id")) {
+        d.exec("ALTER TABLE templates ADD COLUMN agent_profile_id TEXT");
+      }
+    },
+  },
 ];
 
 /** agent_jobs 补列：老库里那张表已经存在，schema.sql 的 CREATE TABLE IF NOT EXISTS 不会给它加列 */

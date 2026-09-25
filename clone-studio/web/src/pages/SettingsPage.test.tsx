@@ -20,7 +20,13 @@ const settings = {
 };
 
 function base(extra: Record<string, unknown> = {}) {
-  return { ...healthStubs, "/api/clients": { body: { clients: [] } }, "/api/settings": { body: settings }, ...extra };
+  return {
+    ...healthStubs,
+    "/api/clients": { body: { clients: [] } },
+    "/api/settings": { body: settings },
+    "/api/model-profiles": { body: { profiles: [] } },
+    ...extra,
+  };
 }
 
 beforeEach(() => {

@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { RotateCw } from "lucide-react";
+import { Plus, RotateCw } from "lucide-react";
 import { Badge } from "../components/ui/Badge.js";
 import { Button } from "../components/ui/Button.js";
 import { Input } from "../components/ui/Input.js";
 import { useToast } from "../components/ui/Toast.js";
 import { HealthRow } from "../components/HealthRow.js";
+import { ModelProfilePanel, type PanelTarget } from "../components/settings/ModelProfilePanel.js";
+import { ModelProfiles } from "../components/settings/ModelProfiles.js";
 import { RatesTable } from "../components/settings/RatesTable.js";
 import { NumberSetting, Section } from "../components/settings/SettingsFields.js";
 import { api, TIMEOUT_MS, ApiError } from "../lib/api.js";
@@ -15,6 +17,8 @@ export function SettingsPage() {
   const qc = useQueryClient();
   const toast = useToast();
   const [tokenDraft, setTokenDraft] = useState("");
+  /** 添加 / 编辑模型档案的右侧表单面板（SCREEN-009） */
+  const [panel, setPanel] = useState<PanelTarget | null>(null);
 
   const health = useQuery({
     queryKey: ["health", "checks"],
@@ -88,6 +92,7 @@ export function SettingsPage() {
             {[
               ["checks", "环境体检"],
               ["services", "生成服务"],
+              ["models", "Agent 模型"],
               ["limits", "限额与并发"],
               ["rates", "费率表"],
               ["paths", "路径"],
@@ -177,6 +182,24 @@ export function SettingsPage() {
             </div>
           </Section>
 
+          <Section
+            id="models"
+            title="Agent 模型"
+            action={
+              <Button
+                icon={<Plus aria-hidden className="size-4" />}
+                onClick={(e) => setPanel({ mode: "create", opener: e.currentTarget })}
+              >
+                添加模型
+              </Button>
+            }
+          >
+            <ModelProfiles
+              onEdit={(profile, opener) => setPanel({ mode: "edit", profile, opener })}
+              onDeleted={(id) => setPanel((p) => (p?.mode === "edit" && p.profile.id === id ? null : p))}
+            />
+          </Section>
+
           <Section id="limits" title="限额与熔断 · 并发">
             {s ? (
               <div className="flex flex-wrap gap-4">
@@ -261,6 +284,13 @@ export function SettingsPage() {
           </Section>
         </div>
       </div>
+      {panel ? (
+        <ModelProfilePanel
+          key={panel.mode === "edit" ? panel.profile.id : "create"}
+          target={panel}
+          onClose={() => setPanel(null)}
+        />
+      ) : null}
     </div>
   );
 }

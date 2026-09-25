@@ -23,8 +23,11 @@ export interface AgentJobView {
   costUsd: number;
   costIsEstimate: boolean;
   stopReason: string | null;
+  profileId?: string | null;
   profileName: string | null;
   modelId: string | null;
+  /** 花费口径（REQ-010）：none = 兼容端点没填单价，花费算不出 */
+  costBasis?: "sdk" | "price" | "none" | null;
   resumeAt: string | null;
   createdAt: string;
   updatedAt: string | null;
@@ -97,8 +100,13 @@ export const agentApi = {
   /** 继续：resume 同一会话（熔断 / 中断 / 失败之后） */
   continue: (jobId: string) => api.post<{ job: AgentJobView }>(`/api/agent-jobs/${jobId}/continue`),
   /** 重跑：清掉 Agent 产物、按原任务提示开一个新任务；清目录可能要一会儿 */
-  rerun: (jobId: string) =>
-    api.post<{ job: AgentJobView }>(`/api/agent-jobs/${jobId}/rerun`, undefined, RERUN_TIMEOUT_MS),
+  /** 重跑可重选档案（REQ-010）；不给用原档案 */
+  rerun: (jobId: string, profileId?: string | null) =>
+    api.post<{ job: AgentJobView }>(
+      `/api/agent-jobs/${jobId}/rerun`,
+      profileId ? { profileId } : undefined,
+      RERUN_TIMEOUT_MS,
+    ),
   abort: (jobId: string) =>
     api.post<{ job: AgentJobView }>(`/api/agent-jobs/${jobId}/abort`, undefined, ABORT_TIMEOUT_MS),
 };

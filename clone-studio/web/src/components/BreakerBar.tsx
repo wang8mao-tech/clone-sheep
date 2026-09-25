@@ -12,10 +12,13 @@ import {
   type EndedJob,
 } from "../lib/agent-status.js";
 import { useTemplateAgent } from "../lib/agent-feed-context.js";
-import { formatUsd } from "../lib/format.js";
+import { COST_UNKNOWN, costUnknown, formatUsd } from "../lib/format.js";
 import { formatRunElapsed } from "../lib/run-elapsed.js";
 import { Button } from "./ui/Button.js";
 import { ConfirmDialog } from "./ui/ConfirmDialog.js";
+import { useProfileChoice } from "../lib/useProfileChoice.js";
+import { ModelSelect } from "./ModelSelect.js";
+import { SUBSCRIPTION_PROFILE_ID } from "../lib/model-profiles.js";
 
 /** 横条只对已经结束的任务出现，终态的用时只认累计值、不看 now：给个固定值，不在渲染里取时钟 */
 const ENDED = 0;
@@ -42,12 +45,17 @@ export function BreakerBar() {
 
 function BarBody({ job, feed, gate }: { job: EndedJob; feed: AgentFeed | null; gate: ActionGate }) {
   const [confirming, setConfirming] = useState(false);
+  // 重跑可重选档案，默认原档案（REQ-010、CMP-009「重跑可重选模型」）；复刻的任务要支持看图
+  // 没记档案的老任务原来就在内置订阅上跑（server rerunChoice 同一口径，10.4 审查 S1-M1）
+  const original = job.profileId ?? SUBSCRIPTION_PROFILE_ID;
+  const model = useProfileChoice(job.ownerKind === "template" ? "vision" : null, original);
   const cont = useMutation({
     mutationFn: (jobId: string) => agentApi.continue(jobId),
     onSuccess: (res) => feed?.replaceJob(res.job),
   });
   const rerun = useMutation({
-    mutationFn: (jobId: string) => agentApi.rerun(jobId),
+    // 没换档案就不带：交给服务端按原档案重跑（老任务的「订阅 + 指定模型」也照原样）
+    mutationFn: (jobId: string) => agentApi.rerun(jobId, model.profileId !== original ? model.profileId : null),
     onSuccess: (res) => {
       setConfirming(false);
       // 重跑出来的是新任务：抽屉与横条一起换过去（同一个模板主题的 agent-job 事件也会来，重复无害）
@@ -85,8 +93,8 @@ function BarBody({ job, feed, gate }: { job: EndedJob; feed: AgentFeed | null; g
           {reason ? `：${reason}` : ""}
         </span>
         <span className="shrink-0 font-mono text-caption text-text-secondary">
-          用时 {formatRunElapsed(job, ENDED)} · 花费 {formatUsd(job.costUsd)}
-          {job.costIsEstimate ? "（估）" : ""}
+          用时 {formatRunElapsed(job, ENDED)} · 花费 {costUnknown(job) ? COST_UNKNOWN : formatUsd(job.costUsd)}
+          {job.costIsEstimate && !costUnknown(job) ? "（估）" : ""}
         </span>
         {actions.includes("continue") ? (
           <Button
@@ -129,20 +137,32 @@ function BarBody({ job, feed, gate }: { job: EndedJob; feed: AgentFeed | null; g
             ? [
                 // 变体的重跑（服务端转到 rerunVariant，同 ④ 队列的重跑）：只清 Agent 的产物，你换过的图留着
                 "清掉这条变体 Agent 写的稿子、清单与抓来的图（你替换过的图留着），素材要重新审",
-                "按原来的 brief 与模型开一个新会话从头写，之前的会话不再接着用",
+                "按原来的 brief 与下面选的档案开一个新会话从头写，之前的会话不再接着用",
               ]
             : [
                 // 与 server/src/hypit/workspace.ts resetAgentProducts 一致：只清顶层，三个目录整个留着
                 "会删掉 Agent 在工作目录顶层写出的文件（ANALYSIS.md、TIMELINE.md、reference.svml 等）",
                 "references、assets、productions 三个目录（证据、素材、变体数据）整个保留",
-                "按原来的任务提示开一个新会话从头做，之前的会话不再接着用",
+                "按原来的任务提示与下面选的档案开一个新会话从头做，之前的会话不再接着用",
               ]
         }
         confirmLabel="清掉产物并重跑"
         busy={rerun.isPending}
         onConfirm={() => rerun.mutate(job.id)}
         onCancel={() => setConfirming(false)}
-      />
+      >
+        <ModelSelect
+          label="用哪个模型档案重跑"
+          need={job.ownerKind === "template" ? "vision" : null}
+          profiles={model.profiles}
+          value={model.profileId}
+          onChange={model.setProfileId}
+          error={model.error}
+          onRetry={model.retry}
+          fallbackText="重跑会沿用原档案。"
+          disabled={rerun.isPending}
+        />
+      </ConfirmDialog>
     </div>
   );
 }

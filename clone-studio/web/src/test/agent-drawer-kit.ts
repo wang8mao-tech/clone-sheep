@@ -16,6 +16,8 @@ export interface DrawerDb {
   abortCalls: number;
   continueCalls: number;
   rerunCalls: number;
+  /** 每次重跑带的请求体（选了哪个档案） */
+  rerunBodies: unknown[];
 }
 
 export function drawerBackend(
@@ -30,6 +32,7 @@ export function drawerBackend(
     abortCalls: 0,
     continueCalls: 0,
     rerunCalls: 0,
+    rerunBodies: [],
     ...init,
   };
   const lastSeq = () => db.messages.at(-1)?.seq ?? 0;
@@ -79,8 +82,9 @@ export function drawerBackend(
       db.job = { ...db.job, status: "queued", stopReason: null, endedAt: null };
       return { body: { job: db.job } };
     },
-    "POST /api/agent-jobs/:id/rerun": () => {
+    "POST /api/agent-jobs/:id/rerun": (req) => {
       db.rerunCalls += 1;
+      db.rerunBodies.push(typeof req?.body === "string" ? JSON.parse(req.body) : null);
       if (!db.job) return { status: 404, body: { error: { message: "Agent 任务不存在" } } };
       db.job = {
         ...db.job,

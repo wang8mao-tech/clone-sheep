@@ -24,6 +24,8 @@ export interface SessionInput {
   model?: string;
   /** 这次会话用的模型档案（REQ-010）：要注入的变量、是不是订阅、有没有原生联网搜索 */
   profile?: SessionProfile;
+  /** 吐流式事件（按单价折算花费时要看运行中的输出 token，price-meter.ts） */
+  includePartialMessages?: boolean;
   /** 花费熔断（美元），走 SDK 原生 maxBudgetUsd + error_max_budget_usd，不自己累加 */
   maxBudgetUsd: number;
   /** 续上已有会话（继续 / 打回） */
@@ -221,6 +223,7 @@ export function buildSessionOptions(input: SessionInput): Options {
       append: hostSystemAppend({ workspace: input.workspace, webSearch }),
     },
     maxBudgetUsd: input.maxBudgetUsd,
+    ...(input.includePartialMessages ? { includePartialMessages: true } : {}),
     env: sessionEnv(agentEnv(process.env, input.binDir), input.profile),
     ...(input.model ? { model: input.model } : {}),
     ...(input.resume ? { resume: input.resume } : {}),

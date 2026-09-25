@@ -256,3 +256,12 @@ describe("会话里的 guard 保护 Claude Code 登录凭据（10.2 审查 S2-M2
     expect(out.hookSpecificOutput?.permissionDecision).toBe("deny");
   });
 });
+
+describe("会话配置：流式事件开关", () => {
+  it("要按单价折算的会话把 includePartialMessages 交给 SDK；不要的不带", async () => {
+    const { buildSessionOptions } = await import("./session.js");
+    const base = { workspace: "C:/ws", pluginDir: "C:/plugin", maxBudgetUsd: 5, onIntercept: () => undefined };
+    expect(buildSessionOptions({ ...base, includePartialMessages: true }).includePartialMessages).toBe(true);
+    expect(buildSessionOptions(base).includePartialMessages).toBeUndefined();
+  });
+});

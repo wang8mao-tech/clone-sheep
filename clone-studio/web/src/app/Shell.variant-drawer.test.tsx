@@ -6,6 +6,7 @@ import { installEventSource } from "../test/fake-event-source.js";
 import { agentJob } from "../test/agent-fixtures.js";
 import { BASE, IDLE, stub, TPL_ID } from "../test/reference-fixtures.js";
 import { batch, variant } from "../test/variants-kit.js";
+import { DS, SUB } from "../test/profiles-kit.js";
 
 /**
  * 抽屉跟随所选对象（Design-Brief §2.3「在 007 显示该变体的任务」，Task 9.3）：
@@ -22,6 +23,7 @@ function setup(
     continue: true,
     rerun: true,
   },
+  more: { job?: Partial<ReturnType<typeof agentJob>>; extra?: Parameters<typeof stub>[2] } = {},
 ) {
   const find = installEventSource();
   const templateJob = agentJob({ id: "tpl-job", ownerId: TPL_ID, status: "done", stopReason: null });
@@ -31,6 +33,7 @@ function setup(
     ownerId: "v2",
     status: "tripped",
     stopReason: "budget：花费达到上限",
+    ...more.job,
   });
   const v2 = variant(2, { status: "tripped", name: "手机排行", agent: variantJob });
   stub(
@@ -45,7 +48,6 @@ function setup(
           : { job: templateJob, jobLastSeq: 0 },
       }),
       [`/api/templates/${TPL_ID}/variants`]: { body: { batches: [batch({ variants: [v2] })] } },
-      "/api/agent-models": { body: { models: [{ id: null, label: "订阅默认模型", disabledReason: null }] } },
       "/api/settings": {
         body: {
           referenceMaxSeconds: 180,
@@ -71,6 +73,7 @@ function setup(
       "/api/productions/:id/costs": {
         body: { productionId: "v2", agent: [], builds: [], totalUsd: 0, totalIsEstimate: false },
       },
+      ...more.extra,
     },
     { approvedReplicaId: "r1" },
   );
@@ -122,7 +125,6 @@ describe("外壳 · 抽屉跟随所选变体（Task 9.3）", () => {
         [`/api/templates/${TPL_ID}/variants`]: {
           body: { batches: [batch({ variants: [variant(2, { name: "手机排行" })] })] },
         },
-        "/api/agent-models": { body: { models: [{ id: null, label: "订阅默认模型", disabledReason: null }] } },
         "/api/settings": {
           body: {
             referenceMaxSeconds: 180,
@@ -233,5 +235,24 @@ describe("外壳 · 抽屉跟随所选变体（Task 9.3）", () => {
     await screen.findByRole("region", { name: "④ 变体 工作区" });
     expect(find(`production:v2`)).toBeUndefined();
     expect(screen.queryByRole("status", { name: "任务已熔断" })).toBeNull();
+  });
+});
+
+describe("007 · 没有原生联网搜索的档案（REQ-010 MUST，Task 10.4）", () => {
+  it("这条变体的任务用的档案没有原生搜索：素材审核上提示缺口可能偏多；有搜索的不提示", async () => {
+    const blind = { ...DS, id: "p-ark", name: "方舟", supportsWebSearch: false };
+    const find = setup(undefined, {
+      job: { profileId: "p-ark", profileName: "方舟" },
+      extra: { "/api/model-profiles": { body: { profiles: [SUB, blind] } } },
+    });
+    renderApp(`${BASE}/variants?variant=v2`);
+    const es = await waitFor(() => {
+      const s = find(`production:v2`);
+      if (!s) throw new Error("没订阅变体主题");
+      return s;
+    });
+    act(() => es.open());
+    const panel = await screen.findByRole("region", { name: "素材审核：手机排行" });
+    expect(await within(panel).findByText(/该模型无原生搜索，素材缺口可能偏多/)).toHaveTextContent("「方舟」");
   });
 });

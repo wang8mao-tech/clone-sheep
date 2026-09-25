@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { until, useCloneSandbox } from "./clone-test-kit.js";
-import { bootVariants } from "./variant-test-kit.js";
+import { bootVariants, sonnetProfile } from "./variant-test-kit.js";
 import { inReview, makeImage, upload } from "./variant-review-kit.js";
 
 /** 素材审核的打回与重跑（FLOW-003 分支）：意见 resume 该变体会话；重跑只清 Agent 的产物（Task 5.2 复审 S1-M4） */
@@ -36,7 +36,7 @@ describe("打回与重跑", () => {
 
   it("出片失败后重跑：清稿子与 Agent 的图，保留用户换过的；运行文件路径清掉；按原提示与模型开新会话", async () => {
     const b = await bootVariants();
-    const id = b.submit(["换成手机品牌排行榜"], { modelId: "claude-sonnet-5" }).variants[0]?.id as string;
+    const id = b.submit(["换成手机品牌排行榜"], { profileId: await sonnetProfile() }).variants[0]?.id as string;
     const dir = b.dirOf(id);
     makeImage(path.join(dir, "assets/01-a.jpg"), 20, 20);
     makeImage(path.join(dir, "assets/02-b.jpg"), 20, 20);

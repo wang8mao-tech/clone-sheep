@@ -18,12 +18,8 @@ import {
   type EvidenceState,
   type SourceMode,
 } from "../../lib/evidence.js";
-
-/**
- * Agent 模型下拉 CMP-010。Phase 4 只有内置订阅档案（DEV-PLAN Phase 4 交付清单），
- * 档案管理与切换在 Phase 10 落地，届时换成真实的档案列表。
- */
-const MODEL_OPTIONS = [{ value: "builtin-claude-code", label: "本机 Claude Code 订阅", detail: "看图 · 搜索" }];
+import { ModelSelect } from "../../components/ModelSelect.js";
+import { useProfileChoice } from "../../lib/useProfileChoice.js";
 
 /** 上传与点火接口里跟来源有关的错误，贴在链接/文件下；其余走 toast */
 const SOURCE_CODES = new Set(["BAD_FILE_TYPE", "FILE_TOO_LARGE", "EMPTY_FILE", "NO_FILE", "INVALID_BODY"]);
@@ -69,6 +65,8 @@ export function ReferenceForm({ template, locked, maxSeconds, mode, onModeChange
   const name = nameDraft ?? template.name;
   const language = languageDraft ?? template.language ?? "zh";
   const note = noteDraft ?? template.note ?? "";
+  // 复刻要看参考视频的帧：只给支持看图的档案（REQ-010 MUST，AC-027）
+  const model = useProfileChoice("vision");
 
   const submit = useMutation({
     mutationFn: async () => {
@@ -87,6 +85,7 @@ export function ReferenceForm({ template, locked, maxSeconds, mode, onModeChange
       return evidenceApi.start(template.id, {
         language,
         ...(note.trim() ? { note: note.trim() } : {}),
+        ...(model.profileId ? { profileId: model.profileId } : {}),
         ...source,
       });
     },
@@ -143,6 +142,8 @@ export function ReferenceForm({ template, locked, maxSeconds, mode, onModeChange
   };
 
   const disabled = locked || submit.isPending;
+  // 档案读到了、却一个支持看图的都没有：不能提交（Design-Brief SCREEN-003 禁用态：提交按钮禁用，下方一行说明）
+  const noProfile = model.profiles !== undefined && model.profileId === null;
 
   return (
     <form
@@ -248,7 +249,15 @@ export function ReferenceForm({ template, locked, maxSeconds, mode, onModeChange
         />
       </div>
 
-      <Select label="Agent 模型" disabled={disabled} options={MODEL_OPTIONS} defaultValue={MODEL_OPTIONS[0]?.value} />
+      <ModelSelect
+        need="vision"
+        profiles={model.profiles}
+        value={model.profileId}
+        onChange={model.setProfileId}
+        error={model.error}
+        onRetry={model.retry}
+        disabled={disabled}
+      />
 
       <Textarea
         label="复刻备注"
@@ -267,8 +276,8 @@ export function ReferenceForm({ template, locked, maxSeconds, mode, onModeChange
           type="submit"
           variant="primary"
           loading={submit.isPending}
-          disabled={locked}
-          disabledReason="证据准备正在跑，等它结束"
+          disabled={locked || noProfile}
+          disabledReason={locked ? "证据准备正在跑，等它结束" : "没有支持看图的模型档案"}
         >
           {submit.isPending && mode === "file" ? "上传中" : "开始复刻"}
         </Button>

@@ -10,6 +10,8 @@ interface Props {
   busy?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
+  /** 后果清单下面的补充控件（重跑时的 CMP-010 档案选择） */
+  children?: React.ReactNode;
 }
 
 /**
@@ -18,7 +20,16 @@ interface Props {
  * 删除那种要逐字输入名称的是 CMP-012（ConfirmDangerDialog），这里不要求输入。
  * 同样用原生 <dialog>，焦点陷阱与 Esc 关闭由浏览器负责。
  */
-export function ConfirmDialog({ open, title, consequences, confirmLabel, busy = false, onConfirm, onCancel }: Props) {
+export function ConfirmDialog({
+  open,
+  title,
+  consequences,
+  confirmLabel,
+  busy = false,
+  onConfirm,
+  onCancel,
+  children,
+}: Props) {
   const ref = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -54,6 +65,7 @@ export function ConfirmDialog({ open, title, consequences, confirmLabel, busy = 
             </li>
           ))}
         </ul>
+        {children}
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onCancel} disabled={busy}>
             取消

@@ -45,3 +45,10 @@ export function formatResumeTime(resumeAt: string | null): string | null {
     ? at.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
     : null;
 }
+
+/** 兼容端点没填单价（花费口径 none）：花费算不出，写「未知」而不是 $0（REQ-010） */
+export const COST_UNKNOWN = "未知（没填单价）";
+
+export function costUnknown(job: { costBasis?: string | null } | null | undefined): boolean {
+  return job?.costBasis === "none";
+}

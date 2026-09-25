@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { LANGUAGE_OPTIONS } from "../../lib/evidence.js";
-import { BATCH_NOTE_MAX, charCount, checkBriefs, type AgentModelOption, type SubmitInput } from "../../lib/variants.js";
+import { BATCH_NOTE_MAX, charCount, checkBriefs, type SubmitInput } from "../../lib/variants.js";
+import { useProfileChoice } from "../../lib/useProfileChoice.js";
+import { ModelSelect } from "../ModelSelect.js";
 import { Button } from "../ui/Button.js";
 import { Input, Textarea } from "../ui/Input.js";
 import { Select } from "../ui/Select.js";
@@ -11,7 +13,6 @@ import { BriefEditor } from "./BriefEditor.js";
 interface Props {
   /** 模板的语言：目标语言下拉的「同模板」项写明是什么 */
   templateLanguage: string | null;
-  models: readonly AgentModelOption[] | undefined;
   /** 设置里的默认批次限额与单条限额（批次限额的下限） */
   defaultBudgetUsd: number;
   perItemLimitUsd: number;
@@ -25,12 +26,13 @@ interface Props {
 
 /** SCREEN-006 上部提交区（可折叠）：brief、目标语言、批次备注、Agent 模型、批次限额、提交 N 条变体 */
 export function SubmitPanel(props: Props) {
-  const { models, defaultBudgetUsd, perItemLimitUsd, maxItems, busy, error, onSubmit } = props;
+  const { defaultBudgetUsd, perItemLimitUsd, maxItems, busy, error, onSubmit } = props;
+  // 变体不强求看图（REQ-010：只提示），ModelSelect 会就地提醒
+  const model = useProfileChoice(null);
   const [open, setOpen] = useState(props.defaultOpen);
   const [briefs, setBriefs] = useState("");
   const [language, setLanguage] = useState("");
   const [note, setNote] = useState("");
-  const [model, setModel] = useState("");
   const [budget, setBudget] = useState<string | null>(null);
 
   const check = checkBriefs(briefs, maxItems);
@@ -54,14 +56,6 @@ export function SubmitPanel(props: Props) {
     },
     ...LANGUAGE_OPTIONS,
   ];
-  const modelOptions = (models ?? [{ id: null, label: "订阅默认模型", disabledReason: null }]).map((m) => ({
-    value: m.id ?? "",
-    // 不可选的原因写进选项文字：原生下拉不显示 title，读屏也读不到（CMP-010、8.3 审查 MEDIUM-3）
-    label: m.disabledReason ? `${m.label}（不可选：${m.disabledReason}）` : m.label,
-    ...(m.id ? { detail: m.id } : {}),
-    disabled: m.disabledReason !== null,
-    ...(m.disabledReason ? { disabledReason: m.disabledReason } : {}),
-  }));
   // 服务端逐行校验的结果（提交后）：界面实时校验漏掉的以它为准
   const serverError = error?.message;
 
@@ -87,13 +81,13 @@ export function SubmitPanel(props: Props) {
               options={languageOptions}
               disabled={busy}
             />
-            <Select
-              label="Agent 模型"
-              value={model}
-              onChange={(e) => setModel(e.currentTarget.value)}
-              options={modelOptions}
+            <ModelSelect
+              profiles={model.profiles}
+              value={model.profileId}
+              onChange={model.setProfileId}
+              error={model.error}
+              onRetry={model.retry}
               disabled={busy}
-              hint="模型档案在设置页落地前，只能在本机订阅下选模型"
             />
             <Input
               label="批次限额 USD"
@@ -136,7 +130,7 @@ export function SubmitPanel(props: Props) {
                   briefs,
                   targetLanguage: language || null,
                   note: note.trim() || null,
-                  modelId: model || null,
+                  profileId: model.profileId,
                   budgetUsd: budgetValue,
                 })
               }

@@ -14,7 +14,7 @@ import { cloneApi, cloneKeys, type CloneState } from "../../lib/clone.js";
 import { evidenceApi, evidenceKeys } from "../../lib/evidence.js";
 import { buildKeys } from "../../lib/build.js";
 import { estimateKeys } from "../../lib/estimate.js";
-import { formatUsd } from "../../lib/format.js";
+import { COST_UNKNOWN, costUnknown, formatUsd } from "../../lib/format.js";
 import { api } from "../../lib/api.js";
 import type { Settings } from "../../lib/types.js";
 import { formatRunElapsed } from "../../lib/run-elapsed.js";
@@ -238,9 +238,11 @@ function RunningLine({ job }: { job: AgentJobView }) {
       {/* 「· 值」成对不拆行：折行时分隔点不能悬在上一行末尾 */}
       <span className="whitespace-nowrap">
         <span aria-hidden>· </span>
-        <span className="font-mono text-[12px] text-text tabular-nums">{formatUsd(job.costUsd)}</span>
+        <span className="font-mono text-[12px] text-text tabular-nums">
+          {costUnknown(job) ? COST_UNKNOWN : formatUsd(job.costUsd)}
+        </span>
         {/* REQ-009：估算值标「估」，与抽屉顶栏、横条同一个判断 */}
-        {job.costIsEstimate ? <span> 估</span> : null}
+        {job.costIsEstimate && !costUnknown(job) ? <span> 估</span> : null}
       </span>
       {/* 与抽屉顶栏同一个写法：档案名 · 模型 id，没指定就是订阅的默认模型 */}
       <span className="whitespace-nowrap">

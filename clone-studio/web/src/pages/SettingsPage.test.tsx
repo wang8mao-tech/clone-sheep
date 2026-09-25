@@ -137,3 +137,13 @@ describe("设置页：TokenDance 凭据", () => {
     expect(await screen.findByText("TokenDance key 验证通过")).toBeInTheDocument();
   });
 });
+
+describe("设置页：从「管理模型…」带锚点过来", () => {
+  it("#models：滚到「Agent 模型」这一组", async () => {
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    renderApp("/settings#models");
+    await waitFor(() => expect(scroll).toHaveBeenCalled());
+    expect((scroll.mock.contexts[0] as HTMLElement).id).toBe("models");
+  });
+});

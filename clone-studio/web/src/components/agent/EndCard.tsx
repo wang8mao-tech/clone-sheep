@@ -5,7 +5,7 @@ import {
   type ActionGate,
   type EndedJob,
 } from "../../lib/agent-status.js";
-import { formatUsd } from "../../lib/format.js";
+import { COST_UNKNOWN, costUnknown, formatUsd } from "../../lib/format.js";
 import { formatRunElapsed } from "../../lib/run-elapsed.js";
 import type { Tone } from "../../lib/agent-timeline.js";
 import { ToneBlock } from "./ToneBlock.js";
@@ -33,8 +33,9 @@ export function EndCard({ job, now, gate = null }: { job: EndedJob; now: number;
         <div className="mt-1 flex gap-4 text-caption text-text-tertiary">
           <span>用时 {formatRunElapsed(job, now)}</span>
           <span>
-            花费 {formatUsd(job.costUsd)}
-            {job.costIsEstimate ? "（估）" : ""}
+            {/* 没填单价的：写「未知」，不写 $0（10.4 第二轮审查 S1-M-A） */}
+            花费 {costUnknown(job) ? COST_UNKNOWN : formatUsd(job.costUsd)}
+            {job.costIsEstimate && !costUnknown(job) ? "（估）" : ""}
           </span>
         </div>
         {next ? <div className="mt-1 text-caption text-text-tertiary">{next}</div> : null}

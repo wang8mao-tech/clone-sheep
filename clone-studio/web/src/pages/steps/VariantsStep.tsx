@@ -46,7 +46,6 @@ function VariantsBody({ templateId }: { templateId: string }) {
     queryFn: () => archiveApi.template(templateId),
   });
   const settings = useQuery({ queryKey: ["settings"], queryFn: () => api.get<Settings>("/api/settings") });
-  const models = useQuery({ queryKey: variantKeys.models, queryFn: variantApi.models, staleTime: Infinity });
   const list = useQuery({
     queryKey: variantKeys.list(templateId),
     queryFn: () => variantApi.list(templateId),
@@ -167,7 +166,6 @@ function VariantsBody({ templateId }: { templateId: string }) {
         <SubmitPanel
           key={formKey}
           templateLanguage={template.data?.language ?? null}
-          models={models.data?.models}
           defaultBudgetUsd={settings.data?.batchLimitUsd ?? 15}
           perItemLimitUsd={perItem}
           // 与服务端一致：设置只能往小调，封顶 20（REQ-005 / FLOW-003；8.3 审查 MEDIUM-2）

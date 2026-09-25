@@ -10,6 +10,7 @@ import { agentJob } from "./agent-fixtures.js";
 import { drawerBackend, TPL } from "./agent-drawer-kit.js";
 import { installEventSource } from "./fake-event-source.js";
 import { renderWithProviders } from "./harness.js";
+import { DS, SUB } from "./profiles-kit.js";
 
 /** ④ 变体页测试共用：变体 / 批次桩、假后端（队列、提交、取消、重跑、重试出片、继续）、挂在带抽屉数据源的路由里 */
 
@@ -108,12 +109,20 @@ export function variantsBackend(init: BatchView[], extra: Stubs = {}): VariantsD
         body: { id: TPL, clientId: "c1", name: "足球榜单", status: "approved", language: "zh" },
       },
       "/api/settings": { body: { perItemLimitUsd: 1.5, batchLimitUsd: 15, batchMaxItems: 20, agentBudgetUsd: 5 } },
-      "/api/agent-models": {
+      // CMP-010：内置订阅（默认）、订阅 · Sonnet、一个还没填 key 的兼容端点（置灰）
+      "/api/model-profiles": {
         body: {
-          models: [
-            { id: null, label: "订阅默认模型", disabledReason: null },
-            { id: "claude-sonnet-5", label: "Sonnet 5", disabledReason: null },
-            { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5", disabledReason: "写不出能过 hypit check 的稿子" },
+          profiles: [
+            SUB,
+            {
+              ...SUB,
+              id: "p-sonnet",
+              name: "订阅 · Sonnet",
+              modelId: "claude-sonnet-5",
+              isDefault: false,
+              builtin: false,
+            },
+            { ...DS, id: "p-nokey", name: "没 key 的端点", token: null },
           ],
         },
       },

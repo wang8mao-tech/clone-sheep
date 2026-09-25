@@ -113,6 +113,27 @@ describe("花费口径", () => {
     expect(store.requireJob(j.id).cost_usd).toBeCloseTo(1.5);
   });
 
+  it("按单价折算：已经跑完的一段靠 result 的合计用量补齐输出 token；超了也不回头判熔断", async () => {
+    const { scheduler, calls, profiles, store } = await withProfiles();
+    const p = profiles.createProfile(DEEPSEEK);
+    const j = scheduler.enqueue({ ...job("t1"), profileId: p.id });
+    calls[0]!.emit(init("s-1"));
+    // 流式下 assistant 只记了 1 个输出 token（假端点实测）
+    calls[0]!.emit(assistant("m1", 1_000_000, 1));
+    const done = {
+      type: "result",
+      subtype: "success",
+      total_cost_usd: 40,
+      usage: { input_tokens: 1_000_000, output_tokens: 5_000_000 },
+      errors: [],
+    };
+    calls[0]!.emit(done);
+    calls[0]!.finish({ result: done as never });
+    await flush();
+    expect(store.requireJob(j.id)).toMatchObject({ status: "done" });
+    expect(store.requireJob(j.id).cost_usd).toBeCloseTo(6);
+  });
+
   it("没填单价：不做 $ 熔断，花费记 0、口径 none", async () => {
     const { scheduler, calls, profiles, store } = await withProfiles();
     const p = profiles.createProfile({ ...DEEPSEEK, priceIn: null, priceOut: null });
@@ -213,5 +234,36 @@ describe("拦截记录里的凭据", () => {
       tool: "Bash",
     });
     expect(JSON.stringify(intercepts)).not.toContain(DEEPSEEK.token);
+  });
+});
+
+describe("流式事件（10.4 审查 S2-M2）", () => {
+  const ev = (event: Record<string, unknown>) => ({ type: "stream_event", event, parent_tool_use_id: null });
+
+  it("按单价算的会话开流式事件；运行中输出 token 超了预算就熔断；流式事件不转出去（不落库、不推界面）", async () => {
+    const { scheduler, calls, profiles, store, forwardedMessages } = await withProfiles();
+    const p = profiles.createProfile(DEEPSEEK);
+    const j = scheduler.enqueue({ ...job("t1"), profileId: p.id });
+    expect(calls[0]!.input.includePartialMessages).toBe(true);
+    calls[0]!.emit(init("s-1"));
+    calls[0]!.emit(
+      ev({ type: "message_start", message: { id: "m1", usage: { input_tokens: 1_000_000, output_tokens: 1 } } }),
+    );
+    await flush();
+    expect(store.requireJob(j.id).status).toBe("running");
+    calls[0]!.emit(ev({ type: "message_delta", usage: { output_tokens: 5_000_000 } }));
+    await flush();
+    expect(store.requireJob(j.id)).toMatchObject({ status: "tripped" });
+    expect(store.requireJob(j.id).cost_usd).toBeCloseTo(6);
+    expect(forwardedMessages.some((f) => (f.message as { type: string }).type === "stream_event")).toBe(false);
+  });
+
+  it("订阅与没填单价的：不开流式事件", async () => {
+    const { scheduler, calls, profiles } = await withProfiles();
+    scheduler.enqueue(job("t1"));
+    const free = profiles.createProfile({ ...DEEPSEEK, name: "无价", priceIn: null, priceOut: null });
+    scheduler.enqueue({ ...job("t2"), profileId: free.id });
+    expect(calls[0]!.input.includePartialMessages).toBeUndefined();
+    expect(calls[1]!.input.includePartialMessages).toBeUndefined();
   });
 });

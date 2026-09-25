@@ -47,28 +47,21 @@ export interface BatchView {
   variants: VariantView[];
 }
 
-export interface AgentModelOption {
-  id: string | null;
-  label: string;
-  disabledReason: string | null;
-}
-
 export interface SubmitInput {
   briefs: string;
   targetLanguage?: string | null;
   note?: string | null;
-  modelId?: string | null;
+  /** Agent 模型档案（REQ-010、CMP-010）；不给用默认档案 */
+  profileId?: string | null;
   budgetUsd?: number | null;
 }
 
 export const variantKeys = {
   list: (templateId: string) => ["variants", templateId] as const,
-  models: ["agent-models"] as const,
 };
 
 export const variantApi = {
   list: (templateId: string) => api.get<{ batches: BatchView[] }>(`/api/templates/${templateId}/variants`),
-  models: () => api.get<{ models: AgentModelOption[] }>("/api/agent-models"),
   submit: (templateId: string, input: SubmitInput) =>
     api.post<{ batch: BatchView }>(`/api/templates/${templateId}/batches`, input, 30_000),
   cancel: (id: string) =>

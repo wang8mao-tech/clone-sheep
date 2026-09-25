@@ -34,7 +34,11 @@ export interface OutputView {
 
 export interface AgentCostLine {
   jobId: string;
+  /** 模型档案名（快照，REQ-010） */
+  profileName?: string | null;
   model: string | null;
+  /** 花费口径：none = 兼容端点没填单价，花费算不出 */
+  costBasis?: string | null;
   status: string;
   elapsedMs: number;
   costUsd: number;

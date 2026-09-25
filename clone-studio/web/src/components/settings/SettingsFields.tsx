@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useLocation } from "react-router";
 import { Input } from "../ui/Input.js";
 
 /** 设置页的两个基础件：分组卡片与「失焦即存」的数字项。从 SettingsPage 拆出来，页面文件保持在 300 行内 */
@@ -14,10 +15,16 @@ export function Section({
   action?: React.ReactNode;
   children: React.ReactNode;
 }) {
+  // 从别处点「管理模型…」这类带 #锚点 的链接过来：滚到这一组
+  const ref = useRef<HTMLElement>(null);
+  const { hash } = useLocation();
+  useEffect(() => {
+    if (hash === `#${id}`) ref.current?.scrollIntoView?.({ block: "start" });
+  }, [hash, id]);
   return (
     // 设计稿「设置」：每组是一张 surface 卡片，44px 标题行带下边线。字段用 bg 色底，
     // 放在卡片里才分得出来（Task 4.4 把共用字段底色改成 bg 后，裸放会与页面同色）
-    <section id={id} className="flex scroll-mt-6 flex-col rounded-lg border border-border bg-surface">
+    <section ref={ref} id={id} className="flex scroll-mt-6 flex-col rounded-lg border border-border bg-surface">
       <div className="flex h-11 items-center justify-between gap-2 border-b border-border px-4">
         <h2 className="text-[14px] font-semibold">{title}</h2>
         {action}

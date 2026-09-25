@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { until, useCloneSandbox } from "./clone-test-kit.js";
-import { bootVariants } from "./variant-test-kit.js";
+import { bootVariants, sonnetProfile } from "./variant-test-kit.js";
 
 /** 批量提交与变体队列（REQ-005、FLOW-003 步骤 1-2、AC-014、AC-016） */
 
@@ -61,9 +61,9 @@ describe("提交", () => {
     expect(b.calls[0]?.input.prompt).toContain("台词与屏幕文字用这个语言：和模板原片相同的语言");
   });
 
-  it("没指定语言用模板的语言；指定模型就带给会话", async () => {
+  it("没指定语言用模板的语言；选的档案指定了模型就带给会话", async () => {
     const b = await bootVariants();
-    b.submit(["换成汽车品牌排行榜"], { modelId: "claude-sonnet-5" });
+    b.submit(["换成汽车品牌排行榜"], { profileId: await sonnetProfile() });
     await until(() => b.calls.length === 1, "会话开跑");
     expect(b.calls[0]?.input.prompt).toContain("台词与屏幕文字用这个语言：zh");
     expect(b.calls[0]?.input.model).toBe("claude-sonnet-5");
@@ -113,12 +113,11 @@ describe("提交", () => {
     expect(counts(b).variants).toBe(0);
   });
 
-  it("不可选的模型、超范围的批次限额、超长备注：拒绝", async () => {
+  it("不存在的档案、超范围的批次限额、超长备注：拒绝", async () => {
     const b = await bootVariants();
-    expect(() => b.submit(briefs(1), { modelId: "claude-haiku-4-5-20251001" })).toThrow(
-      expect.objectContaining({ code: "INVALID_MODEL" }),
+    expect(() => b.submit(briefs(1), { profileId: "gpt-5" })).toThrow(
+      expect.objectContaining({ code: "PROFILE_NOT_FOUND" }),
     );
-    expect(() => b.submit(briefs(1), { modelId: "gpt-5" })).toThrow(expect.objectContaining({ code: "INVALID_MODEL" }));
     expect(() => b.submit(briefs(1), { budgetUsd: 1 })).toThrow(expect.objectContaining({ code: "INVALID_BUDGET" }));
     expect(() => b.submit(briefs(1), { budgetUsd: 1001 })).toThrow(expect.objectContaining({ code: "INVALID_BUDGET" }));
     expect(() => b.submit(briefs(1), { note: "注".repeat(1001) })).toThrow(

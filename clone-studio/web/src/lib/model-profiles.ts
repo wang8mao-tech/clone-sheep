@@ -2,6 +2,9 @@ import { api } from "./api.js";
 
 /** Agent 模型档案（REQ-010、SCREEN-009「Agent 模型」、CMP-010）。对应 server agent/profiles.ts 的视图 */
 
+/** 内置「本机 Claude Code 订阅」档案的 id（server profile-presets.ts） */
+export const SUBSCRIPTION_PROFILE_ID = "subscription";
+
 export type ProfileKind = "subscription" | "anthropic" | "compatible";
 
 export interface ModelProfile {

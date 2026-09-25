@@ -189,8 +189,7 @@ export class Scheduler {
     const job = this.patch(pending.jobId, {
       status: "running",
       started_at: before.started_at ?? now,
-      // 这一段的起点走注入的时钟：用时的另一半（run_elapsed_ms）也是它算出来的，
-      // 两半必须同一个时间源，否则加起来就是两把尺子量出的数
+      // 这一段的起点走注入的时钟：用时的另一半（run_elapsed_ms）也是它算出来的，两半必须同一个时间源
       run_started_at: now,
       run_elapsed_ms: pending.elapsedMs ?? 0,
       ended_at: null,
@@ -200,9 +199,8 @@ export class Scheduler {
     this.deps.onRunStart?.(job.id, { kind: runKind(pending, before.started_at), prompt: pending.prompt });
     let verdict: Verdict | undefined;
     let latestCost: number | undefined;
-    // 本次运行之前已经记下的累计花费。resume 接上转录里的累计值时清零（那份累计里已经含它），
-    // 新开会话（含 resume 却换了会话 id）时保留：那条会话的 total 从 0 起算，要叠上去
-    // 按单价折算（或算不出）的：这一段只算这一段，之前记下的原样带着，不看 SDK 的累计值
+    // 之前记下的累计花费：sdk 口径 resume 接上转录累计时清零（那份里已含它），新开会话时保留（total 从 0 起算）；
+    // 按单价折算（或算不出）的只算这一段，之前记下的原样带着，不看 SDK 的累计值
     let carry = pending.resume && profile.basis === "sdk" ? 0 : before.cost_usd;
     const meter = profile.pricing ? new PriceMeter(profile.pricing) : undefined;
     const breaker = new Breaker(
@@ -223,16 +221,19 @@ export class Scheduler {
         subject: { kind: job.owner_kind, id: job.owner_id },
         ...(profile.model ? { model: profile.model } : {}),
         profile: { env: profile.env, subscription: profile.subscription, webSearch: profile.webSearch },
+        ...(profile.pricing ? { includePartialMessages: true } : {}), // 运行中看得到输出 token（price-meter.ts）
         ...(pending.resume ? { resume: pending.resume } : {}),
         onIntercept: (denial) => {
           if (this.isCurrent(job.id, entry)) this.deps.onIntercept?.(job.id, redactSecrets(denial, profile.secrets));
         },
         onMessage: (message) => {
           breaker.observe(message);
-          if (meter) {
-            meter.observe(message);
-            if (meter.cost >= pending.budgetUsd) breaker.trip("budget", "花费达到上限（按档案单价折算）");
+          meter?.observe(message);
+          // 跑完的这一段（result）不回头判熔断，花费照实记；流式事件只喂计价，不落库、不推界面
+          if (meter && message.type !== "result" && meter.cost >= pending.budgetUsd) {
+            breaker.trip("budget", "花费达到上限（按档案单价折算）");
           }
+          if (message.type === "stream_event") return;
           // 被丢弃的那次运行还会继续吐消息（它的进程没停干净）：不能拿它的会话 id、
           // 消息去盖新一轮的记录，否则「继续」会 resume 到一条过时的会话上
           if (!this.isCurrent(job.id, entry)) return;

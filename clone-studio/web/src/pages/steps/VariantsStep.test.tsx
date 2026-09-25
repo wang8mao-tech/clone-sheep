@@ -74,15 +74,14 @@ describe("提交区", () => {
     expect(briefBox()).toHaveAttribute("aria-describedby", expect.stringContaining("-errors"));
   });
 
-  it("写不出稿子的模型置灰；批次限额低于单条限额不让提交", async () => {
+  it("还没填 key 的档案置灰并写原因；默认选默认档案；批次限额低于单条限额不让提交", async () => {
     variantsBackend([]);
     await mountVariants();
     const model = await screen.findByLabelText("Agent 模型");
-    await waitFor(() => expect(within(model).getByRole("option", { name: /Haiku/ })).toBeDisabled());
-    // 原因写在选项文字里，看得见也读得到
-    expect(
-      within(model).getByRole("option", { name: /Haiku 4\.5（不可选：写不出能过 hypit check 的稿子）/ }),
-    ).toBeInTheDocument();
+    await waitFor(() => expect(within(model).getByRole("option", { name: /没 key 的端点/ })).toBeDisabled());
+    // 原因写在选项文字里，看得见也读得到（CMP-010）
+    expect(within(model).getByRole("option", { name: /没 key 的端点（不可选：还没有 API key）/ })).toBeInTheDocument();
+    expect(model).toHaveValue("subscription");
     fireEvent.change(briefBox(), { target: { value: "换成手机品牌排行榜" } });
     fireEvent.change(screen.getByLabelText("批次限额 USD"), { target: { value: "1" } });
     expect(submitButton()).toBeDisabled();
@@ -94,7 +93,7 @@ describe("提交区", () => {
     const { user } = await mountVariants();
     fireEvent.change(briefBox(), { target: { value: "换成手机品牌排行榜\n换成汽车品牌排行榜" } });
     await user.selectOptions(screen.getByLabelText("目标语言"), "en");
-    await user.selectOptions(await screen.findByLabelText("Agent 模型"), "claude-sonnet-5");
+    await user.selectOptions(await screen.findByLabelText("Agent 模型"), "p-sonnet");
     fireEvent.change(screen.getByLabelText("批次备注（附加给每一条）"), { target: { value: " 片尾加关注 " } });
     await user.click(submitButton());
     await waitFor(() => expect(db.submits).toHaveLength(1));
@@ -102,7 +101,7 @@ describe("提交区", () => {
       briefs: "换成手机品牌排行榜\n换成汽车品牌排行榜",
       targetLanguage: "en",
       note: "片尾加关注",
-      modelId: "claude-sonnet-5",
+      profileId: "p-sonnet",
       budgetUsd: 15,
     });
     expect(await screen.findByRole("list", { name: "批次 毒舌风格 的变体" })).toBeInTheDocument();

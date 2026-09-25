@@ -14,6 +14,7 @@ import {
   stub,
   TPL_ID,
 } from "../../test/reference-fixtures.js";
+import { DS, SUB } from "../../test/profiles-kit.js";
 
 beforeEach(() => {
   stub("importing", IDLE);
@@ -63,7 +64,13 @@ describe("① 参考 · 链接提交", () => {
     await user.click(screen.getByRole("button", { name: "开始复刻" }));
 
     expect(await screen.findByRole("list", { name: "证据准备清单" })).toBeInTheDocument();
-    expect(sent).toEqual({ language: "en", note: "保留节奏", url: "https://www.youtube.com/shorts/abc" });
+    // 模型档案默认是内置订阅（CMP-010）
+    expect(sent).toEqual({
+      language: "en",
+      note: "保留节奏",
+      profileId: "subscription",
+      url: "https://www.youtube.com/shorts/abc",
+    });
     expect(row(/^下载：进行中/)).toBeInTheDocument();
     expect(row(/^抽帧拼图：等待/)).toBeInTheDocument();
     // 跑着的时候表单锁住，后端此时也会拒
@@ -147,7 +154,9 @@ describe("① 参考 · 上传", () => {
     await user.click(await screen.findByRole("radio", { name: "上传文件" }));
     await user.upload(screen.getByLabelText("选择视频文件"), new File(["abc"], "v.mp4", { type: "video/mp4" }));
     await user.click(screen.getByRole("button", { name: "开始复刻" }));
-    await waitFor(() => expect(sent).toEqual({ language: "zh", uploadPath: "C:/data/uploads/u1.mp4" }));
+    await waitFor(() =>
+      expect(sent).toEqual({ language: "zh", profileId: "subscription", uploadPath: "C:/data/uploads/u1.mp4" }),
+    );
   });
 
   it("后端拒收（超 500 MB）时红字贴在文件下", async () => {
@@ -257,5 +266,41 @@ describe("① 参考 · 审查补的边界", () => {
     await user.keyboard("{ArrowRight}");
     expect(upload).toHaveAttribute("aria-checked", "true");
     expect(upload).toHaveFocus();
+  });
+});
+
+describe("① 参考 · 模型档案（CMP-010，REQ-010 MUST，AC-027 前端）", () => {
+  it("不支持看图的档案置灰；一个支持看图的都没有：开始复刻不可点，写明原因", async () => {
+    const blind = { ...DS, id: "p-blind", name: "方舟", supportsVision: false, isDefault: true };
+    stub("importing", IDLE, { "/api/model-profiles": { body: { profiles: [blind] } } });
+    renderApp(`${BASE}/reference`);
+    const select = await screen.findByLabelText("Agent 模型");
+    await waitFor(() =>
+      expect(within(select).getByRole("option", { name: /方舟（不可选：不支持看图/ })).toBeDisabled(),
+    );
+    expect(await screen.findByText(/没有支持看图的模型档案/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "开始复刻" })).toBeDisabled();
+  });
+
+  it("选了别的支持看图的档案：提交时带上它", async () => {
+    const user = userEvent.setup();
+    let sent: Record<string, unknown> | undefined;
+    stub("importing", IDLE, {
+      "/api/model-profiles": { body: { profiles: [SUB, DS] } },
+      [`POST ${EVIDENCE}`]: (init) => {
+        sent = bodyOf(init);
+        return {
+          body: evidence("running", [
+            ["fetch", "running", { startedAt: new Date().toISOString() }],
+            ...PENDING.slice(1),
+          ]),
+        };
+      },
+    });
+    renderApp(`${BASE}/reference`);
+    await user.type(await screen.findByLabelText("视频链接"), "https://www.youtube.com/shorts/abc");
+    await user.selectOptions(await screen.findByLabelText("Agent 模型"), "p-ds");
+    await user.click(screen.getByRole("button", { name: "开始复刻" }));
+    await waitFor(() => expect(sent).toMatchObject({ profileId: "p-ds" }));
   });
 });

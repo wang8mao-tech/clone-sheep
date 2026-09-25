@@ -18,6 +18,7 @@ import { AssetCard } from "./AssetCard.js";
 import { AssetLightbox } from "./AssetLightbox.js";
 import { AssetReviewSkeleton } from "./AssetReviewSkeleton.js";
 import { CostBreakdown } from "../outputs/CostBreakdown.js";
+import { NoSearchHint } from "./NoSearchHint.js";
 
 interface Props {
   templateId: string;
@@ -83,8 +84,7 @@ export function AssetReviewPanel({ templateId, variantId, onClose }: Props) {
     );
     return () => offs.forEach((off) => off());
   }, [feed, qc, variantId]);
-  // 打开面板时焦点落到标题上：点开它的那一行被藏起来了，不移过来焦点会掉到 body
-  const loaded = state.data !== undefined;
+  const loaded = state.data !== undefined; // 打开面板时焦点落到标题上：点开它的那一行被藏起来了，不移过来会掉到 body
   useEffect(() => {
     if (loaded) heading.current?.focus();
   }, [loaded]);
@@ -160,9 +160,8 @@ export function AssetReviewPanel({ templateId, variantId, onClose }: Props) {
   const name = v.name ?? v.id;
   const reviewing = v.status === "asset_review";
   const busyReason = replacing.size > 0 ? "正在替换图片，换完再提交" : undefined;
-  // 出片卡自己会写出片的错；估价卡挂着时它自己写估价没过的原因。估价比出片新而没过的在这里说（8.4 第四轮审查 S1-M-1）
+  // 出片卡写出片的错、估价卡写估价没过；估价比出片新而没过的在这里说（8.4 第四轮 S1-M-1）。Agent 停下的原因归 CMP-009 横条（9.3）
   const stop = stopReason(v);
-  // Agent 那一段停下的原因与「继续 / 重跑」由工作区上方的 CMP-009 横条给（它跟着所选变体，Task 9.3），这里不重复
   const stopText = stop && stop.step === "estimate" && !showsEstimate(v) ? stop.text : null;
   const actionError = approve.error
     ? `素材没通过：${approve.error.message}`
@@ -189,6 +188,7 @@ export function AssetReviewPanel({ templateId, variantId, onClose }: Props) {
         ) : null}
       </header>
       {v.brief ? <p className="text-caption text-text-secondary">Brief：{v.brief}</p> : null}
+      <NoSearchHint />
 
       <div className="flex gap-4">
         <div className="min-w-0 basis-[65%]">

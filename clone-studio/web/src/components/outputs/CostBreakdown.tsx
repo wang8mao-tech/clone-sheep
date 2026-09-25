@@ -72,7 +72,7 @@ function Tables({ data }: { data: OutputCosts }) {
           <table aria-label="Agent 任务花费" className={`w-full table-fixed border-collapse ${N_TABLE}`}>
             <thead className={N_HEAD}>
               <tr className="border-b border-border">
-                <th className={th}>模型</th>
+                <th className={th}>档案 / 模型</th>
                 <th className={`${th} w-[72px]`}>时长</th>
                 <th className={`${th} w-[104px] text-right`}>等价花费</th>
               </tr>
@@ -81,7 +81,15 @@ function Tables({ data }: { data: OutputCosts }) {
               {data.agent.map((a) => (
                 <tr key={a.jobId} className={`border-b border-border/60 ${N_ROW}`}>
                   <td className={`${td} ${N_FULL}`}>
-                    <span className="block truncate font-mono whitespace-nowrap" title={a.model ?? "订阅默认模型"}>
+                    {a.profileName ? (
+                      <span className="block truncate whitespace-nowrap" title={a.profileName}>
+                        {a.profileName}
+                      </span>
+                    ) : null}
+                    <span
+                      className={`block truncate font-mono whitespace-nowrap ${a.profileName ? "text-text-tertiary" : ""}`}
+                      title={a.model ?? "订阅默认模型"}
+                    >
                       {a.model ?? "订阅默认模型"}
                     </span>
                     {a.shared ? (
@@ -97,7 +105,14 @@ function Tables({ data }: { data: OutputCosts }) {
                     {formatDuration(a.elapsedMs)}
                   </td>
                   <td className={`${td} text-right ${N_LABEL}`} data-label="等价花费">
-                    <Money usd={a.costUsd} estimate />
+                    {/* 兼容端点没填单价：算不出，写「未知」而不是 $0（REQ-010） */}
+                    {a.costBasis === "none" ? (
+                      <span className="text-text-tertiary" title="这个档案没填单价，花费算不出">
+                        未知
+                      </span>
+                    ) : (
+                      <Money usd={a.costUsd} estimate />
+                    )}
                   </td>
                 </tr>
               ))}
@@ -164,6 +179,9 @@ function Tables({ data }: { data: OutputCosts }) {
         {/* 合计含 Agent 等价花费与估价，一律标「估」（REQ-009） */}
         <Money usd={data.totalUsd} estimate />
       </div>
+      {data.agent.some((a) => a.costBasis === "none") ? (
+        <p className="text-right text-caption text-text-tertiary">不含没填单价、算不出的 Agent 花费</p>
+      ) : null}
     </section>
   );
 }

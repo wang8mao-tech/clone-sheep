@@ -113,13 +113,4 @@ describe("取消与模型清单", () => {
     expect((await server.inject({ method: "POST", url: "/api/variants/nope/cancel" })).statusCode).toBe(404);
     await server.close();
   });
-
-  it("GET /api/agent-models：订阅默认在前，Haiku 标不可选并写原因", async () => {
-    await bootVariants();
-    const server = await app();
-    const models = (await server.inject({ url: "/api/agent-models" })).json().models;
-    expect(models[0]).toEqual({ id: null, label: "订阅默认模型", disabledReason: null });
-    expect(models.find((m: { id: string }) => m.id?.startsWith("claude-haiku")).disabledReason).toMatch(/check/);
-    await server.close();
-  });
 });

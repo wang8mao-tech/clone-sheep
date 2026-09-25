@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
 import { db } from "../db/index.js";
 import { agentScheduler, notify, present, type AgentJobView } from "../agent/agent-service.js";
-import { usableModel } from "../agent/agent-models.js";
 import { activeJobsOf, latestJobOf } from "../agent/job-store.js";
 import { variantPrompt } from "../agent/prompts.js";
 import { requireTemplate } from "./archive.js";
@@ -37,8 +36,7 @@ export interface SubmitInput {
   briefs: string;
   targetLanguage?: string | null;
   note?: string | null;
-  modelId?: string | null;
-  /** Agent 模型档案（REQ-010、CMP-010）；给了就不看 modelId */
+  /** Agent 模型档案（REQ-010、CMP-010）；不给用默认档案 */
   profileId?: string | null;
   /** 这一批的限额；不给用设置里的批次限额 */
   budgetUsd?: number | null;
@@ -74,11 +72,8 @@ export function submitBatch(templateId: string, input: SubmitInput): BatchView {
     throw new VariantError("INVALID_NOTE", `批次备注最多 ${BATCH_NOTE_MAX} 字`, 400);
   }
   const profileId = input.profileId ?? undefined;
-  // 过渡做法（Phase 8 的模型下拉）：没给档案时仍收模型 id，走内置订阅
-  const modelId = profileId ? null : (input.modelId ?? null);
-  if (!usableModel(modelId)) throw new VariantError("INVALID_MODEL", "这个模型不能用来写变体", 400);
   // 档案不能用（不存在、没 key）在复制文件之前就拒；变体不要求看图（REQ-010：只提示）
-  jobProfile({ ownerKind: "production", profileId, legacyModelId: modelId });
+  jobProfile({ ownerKind: "production", profileId });
   const budget = input.budgetUsd ?? settings.batch_limit_usd;
   if (!Number.isFinite(budget) || budget < settings.per_item_limit_usd || budget > 1000) {
     throw new VariantError("INVALID_BUDGET", `批次限额要在单条限额 $${settings.per_item_limit_usd} 到 $1000 之间`, 400);
@@ -132,7 +127,6 @@ export function submitBatch(templateId: string, input: SubmitInput): BatchView {
         ownerId: id,
         prompt: variantPrompt({ brief, language, ...(note ? { batchNote: note } : {}) }),
         ...(profileId ? { profileId } : {}),
-        ...(modelId ? { modelId } : {}),
       });
     } catch {
       // 新建的出片单位上不会有别的任务，入队只会因库出错失败：这一条记失败留在队列里让人看到，其余照常

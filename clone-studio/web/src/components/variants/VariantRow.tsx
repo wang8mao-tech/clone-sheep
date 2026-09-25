@@ -1,5 +1,5 @@
 import { nextActions } from "../../lib/agent-status.js";
-import { formatUsd } from "../../lib/format.js";
+import { costUnknown, formatUsd } from "../../lib/format.js";
 import { formatRunElapsed } from "../../lib/run-elapsed.js";
 import {
   buildFailed,
@@ -62,7 +62,18 @@ export function VariantRow({ variant: v, now, href, busy, onAction }: Props) {
       {...(href ? { href, openLabel: `打开变体 ${v.name ?? v.id}` } : {})}
       errorDetail={stopReason(v)?.text}
       columns={[
-        { label: "模型", content: v.agent?.modelId ?? "订阅默认", width: "128px" },
+        // 所用模型：档案名（快照）+ 模型 id，窄列里放档案名、悬停看全（REQ-010 台账可见）
+        {
+          label: "模型",
+          content: v.agent ? (
+            <span title={[v.agent.profileName, v.agent.modelId ?? "订阅默认模型"].filter(Boolean).join(" · ")}>
+              {v.agent.profileName ?? v.agent.modelId ?? "订阅默认"}
+            </span>
+          ) : (
+            "订阅默认"
+          ),
+          width: "128px",
+        },
         { label: "Agent 用时", content: v.agent ? formatRunElapsed(v.agent, now) : "—", width: "56px", numeric: true },
         {
           label: "估价",
@@ -70,7 +81,13 @@ export function VariantRow({ variant: v, now, href, busy, onAction }: Props) {
           width: "64px",
           numeric: true,
         },
-        { label: "花费", content: `${formatUsd(spentOf(v))} 估`, width: "72px", numeric: true },
+        {
+          label: "花费",
+          // Agent 那段没填单价算不出：不写一个看似完整的 $x（10.4 审查 S1-M2）
+          content: costUnknown(v.agent) ? "未知" : `${formatUsd(spentOf(v))} 估`,
+          width: "72px",
+          numeric: true,
+        },
       ]}
       actions={
         <div className="flex w-[232px] items-center justify-end gap-1">

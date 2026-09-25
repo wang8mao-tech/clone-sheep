@@ -1,7 +1,7 @@
 import type { ReactElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, type RenderResult } from "@testing-library/react";
-import { RouterProvider, createMemoryRouter } from "react-router";
+import { MemoryRouter, RouterProvider, createMemoryRouter } from "react-router";
 import { vi } from "vitest";
 import type { Health } from "../lib/api.js";
 import { routeConfig } from "../app/routes.js";
@@ -17,10 +17,14 @@ function freshQueryClient(): QueryClient {
   });
 }
 
-export function renderWithProviders(ui: ReactElement): RenderResult {
+/**
+ * 组件级渲染：带上查询与提示。`withRouter`：组件里有 <Link> 又没自带路由的（比如单独渲染的 CMP-009 横条，
+ * 确认框里的 CMP-010 有「管理模型…」）传 true；自带路由的用例（renderApp、自己包了 MemoryRouter 的）别传
+ */
+export function renderWithProviders(ui: ReactElement, withRouter = false): RenderResult {
   return render(
     <QueryClientProvider client={freshQueryClient()}>
-      <ToastProvider>{ui}</ToastProvider>
+      <ToastProvider>{withRouter ? <MemoryRouter>{ui}</MemoryRouter> : ui}</ToastProvider>
     </QueryClientProvider>,
   );
 }
@@ -96,6 +100,30 @@ export function stubFetch(routes: Record<string, RouteStub | ((init?: RequestIni
  * 将来有组件读 dataRoot 之类会拿到 undefined 而不报错。
  */
 export const healthStubs: Record<string, RouteStub> = {
+  // CMP-010（①参考、④变体、重跑确认框）都要拉模型档案：默认只有内置订阅，关心档案的用例自己覆盖
+  "/api/model-profiles": {
+    body: {
+      profiles: [
+        {
+          id: "subscription",
+          name: "本机 Claude Code 订阅",
+          kind: "subscription",
+          baseUrl: null,
+          modelId: null,
+          fastModelId: null,
+          supportsVision: true,
+          supportsWebSearch: true,
+          priceIn: null,
+          priceOut: null,
+          verifiedAt: null,
+          isDefault: true,
+          builtin: true,
+          token: null,
+          budgetNote: null,
+        },
+      ],
+    },
+  },
   "/api/health/checks": { body: { checks: [], passed: 0, total: 0, blockingFailures: [] } },
   "/api/health": {
     body: {

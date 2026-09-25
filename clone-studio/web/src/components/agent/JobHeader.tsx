@@ -2,7 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { Square } from "lucide-react";
 import { agentApi, isActive, type AgentJobView } from "../../lib/agent.js";
 import { statusMarkOf } from "../../lib/agent-status.js";
-import { formatUsd } from "../../lib/format.js";
+import { COST_UNKNOWN, costUnknown, formatUsd } from "../../lib/format.js";
 import { formatRunElapsed } from "../../lib/run-elapsed.js";
 import { Button } from "../ui/Button.js";
 import { StatusMark } from "../ui/StatusMark.js";
@@ -53,11 +53,18 @@ export function JobHeader({
         <span className="shrink-0" aria-label="用时">
           {formatRunElapsed(job, now)}
         </span>
-        <span className="shrink-0" aria-label="花费与上限">
-          {formatUsd(job.costUsd)}
-          <span className="text-text-tertiary"> / {budgetUsd === null ? "—" : formatUsd(budgetUsd)}</span>
-          {job.costIsEstimate ? <span className="text-text-tertiary"> 估</span> : null}
-        </span>
+        {costUnknown(job) ? (
+          // 没填单价：花费算不出、也没有 $ 熔断，不能摆一个「$0.00 / $5.00」让人以为又便宜又有兜底（10.4 审查 S1-M2）
+          <span className="shrink-0 text-text-tertiary" aria-label="花费与上限" title="这个档案没填单价：没有 $ 熔断">
+            {COST_UNKNOWN}
+          </span>
+        ) : (
+          <span className="shrink-0" aria-label="花费与上限">
+            {formatUsd(job.costUsd)}
+            <span className="text-text-tertiary"> / {budgetUsd === null ? "—" : formatUsd(budgetUsd)}</span>
+            {job.costIsEstimate ? <span className="text-text-tertiary"> 估</span> : null}
+          </span>
+        )}
       </div>
       {abort.isError ? (
         <div role="alert" className="text-caption break-words text-danger">

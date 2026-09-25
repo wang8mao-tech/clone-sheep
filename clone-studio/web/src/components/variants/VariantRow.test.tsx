@@ -116,6 +116,26 @@ describe("行尾动作", () => {
     expect(within(row).getByText("$0.20 估")).toBeInTheDocument();
   });
 
+  it("没填单价的档案跑的：花费写「未知」；模型列写档案名，悬停看模型 id（REQ-010，10.4 审查 S1-M2 / S1-L2）", async () => {
+    const v = variant(17, {
+      status: "done",
+      name: "兼容端点写的",
+      agent: agentJob({
+        id: "job-17",
+        status: "done",
+        costUsd: 0,
+        costBasis: "none",
+        profileName: "方舟",
+        modelId: "ark-code-latest",
+      }),
+    });
+    variantsBackend([batch({ variants: [v] })]);
+    await mountVariants();
+    const row = await screen.findByRole("listitem");
+    expect(within(row).getByText("未知")).toBeInTheDocument();
+    expect(within(row).getByText("方舟")).toHaveAttribute("title", "方舟 · ark-code-latest");
+  });
+
   it("没有标记的行也画一条透明竖线，和带标记的行、列头对齐", async () => {
     variantsBackend([batch({ variants: [variant(16, { name: "普通的" })] })]);
     await mountVariants();

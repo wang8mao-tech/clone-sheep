@@ -91,6 +91,26 @@ describe("花费明细 CMP-008（AC-024）", () => {
     expect(await within(dialog).findByRole("table", { name: "Agent 任务花费" })).toHaveTextContent("$0.80估");
   });
 
+  it("Agent 行写档案名与模型；兼容端点没填单价的花费写「未知」不写 $0（REQ-010，Task 10.4）", async () => {
+    outputsBackend([output(1)], {
+      "/api/productions/:id/costs": {
+        body: costs({
+          agent: [
+            { ...costs().agent[0]!, profileName: "DeepSeek", model: "deepseek-flash", costBasis: "none", costUsd: 0 },
+          ],
+        }),
+      },
+    });
+    const { dialog } = await openCard("播放 成片 1");
+    const table = await within(dialog).findByRole("table", { name: "Agent 任务花费" });
+    expect(table).toHaveTextContent("DeepSeek");
+    expect(table).toHaveTextContent("deepseek-flash");
+    expect(table).toHaveTextContent("未知");
+    expect(table).not.toHaveTextContent("$0.00");
+    // 合计下面写明不含算不出的那部分（10.4 审查 S1-M2）
+    expect(within(dialog).getByText("不含没填单价、算不出的 Agent 花费")).toBeInTheDocument();
+  });
+
   it("花费读不到：写明并给重试", async () => {
     outputsBackend([output(1)], {
       "/api/productions/:id/costs": { status: 500, body: { error: { code: "INTERNAL", message: "炸了" } } },

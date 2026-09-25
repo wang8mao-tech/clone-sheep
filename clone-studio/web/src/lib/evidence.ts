@@ -55,6 +55,8 @@ export interface StartEvidenceBody {
   note?: string;
   url?: string;
   uploadPath?: string;
+  /** Agent 模型档案（REQ-010、CMP-010）；复刻要支持看图 */
+  profileId?: string;
 }
 
 /** 设计稿「① 参考」清单的文案。转写注明走本地 WhisperX（REQ-002 MUST） */

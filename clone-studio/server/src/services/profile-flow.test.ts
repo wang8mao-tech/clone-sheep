@@ -140,12 +140,12 @@ describe("④ 变体提交", () => {
     expect(batches()).toBe(count);
   });
 
-  it("老接口只给模型 id：仍走内置订阅 + 这个模型", async () => {
+  it("不给档案：用默认档案", async () => {
     const v = await bootVariants();
-    v.submit(["手机排行 A"], { modelId: "claude-sonnet-5" });
+    v.submit(["手机排行 A"]);
     expect(v.db().prepare("SELECT profile_id, model_id FROM agent_jobs").get()).toEqual({
       profile_id: "subscription",
-      model_id: "claude-sonnet-5",
+      model_id: null,
     });
   });
 });

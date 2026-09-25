@@ -75,4 +75,16 @@ export async function bootVariants() {
   };
 }
 
+/** 「本机订阅 · 指定模型」档案（Sonnet）：替代 Phase 8 的按模型 id 提交（REQ-010） */
+export async function sonnetProfile(): Promise<string> {
+  const { createProfile } = await import("../agent/profiles.js");
+  return createProfile({
+    name: "订阅 · Sonnet",
+    kind: "subscription",
+    modelId: "claude-sonnet-5",
+    supportsVision: true,
+    supportsWebSearch: true,
+  }).id;
+}
+
 export type BootedVariants = Awaited<ReturnType<typeof bootVariants>>;

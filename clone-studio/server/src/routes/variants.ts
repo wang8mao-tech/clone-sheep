@@ -1,6 +1,5 @@
 import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { AGENT_MODELS } from "../agent/agent-models.js";
 import {
   cancelVariant,
   listVariants,
@@ -23,7 +22,6 @@ const SubmitBody = z.object({
     .regex(/^[a-z]{2,3}(-[A-Za-z]{2,4})?$/)
     .nullish(),
   note: z.string().nullish(),
-  modelId: z.string().nullish(),
   profileId: z.string().nullish(),
   budgetUsd: z.number().nullish(),
 });
@@ -39,11 +37,9 @@ function variantErrorHandler(error: FastifyError, request: FastifyRequest, reply
   archiveErrorHandler(error, request, reply);
 }
 
-/** ④ 变体（REQ-005、SCREEN-006）：批量提交、队列、取消；模型清单是 Phase 10 档案落地前的过渡 */
+/** ④ 变体（REQ-005、SCREEN-006）：批量提交、队列、取消；Agent 模型按档案选（REQ-010） */
 export async function variantRoutes(app: FastifyInstance): Promise<void> {
   app.setErrorHandler(variantErrorHandler);
-
-  app.get("/api/agent-models", async () => ({ models: AGENT_MODELS }));
 
   app.get("/api/templates/:id/variants", async (request) => {
     const { id } = request.params as { id: string };

@@ -10,7 +10,11 @@ import { requireOutput, type ProductionOutputRow } from "./output-store.js";
 
 export interface AgentCostLine {
   jobId: string;
+  /** 用的模型档案名（快照，档案删了也在，REQ-010） */
+  profileName: string | null;
   model: string | null;
+  /** 花费口径：none = 兼容端点没填单价，花费算不出（界面写「未知」） */
+  costBasis: string | null;
   status: string;
   /** 运行用时（等额度、排队不计） */
   elapsedMs: number;
@@ -48,7 +52,9 @@ export interface OutputCosts {
 interface JobRow {
   id: string;
   owner_kind: string;
+  profile_name: string | null;
   model_id: string | null;
+  cost_basis: string | null;
   status: string;
   run_elapsed_ms: number;
   run_started_at: string | null;
@@ -81,7 +87,7 @@ export function productionCosts(
 ): OutputCosts {
   const jobs = db()
     .prepare(
-      `SELECT id, owner_kind, model_id, status, run_elapsed_ms, run_started_at, cost_usd, cost_is_estimate, created_at
+      `SELECT id, owner_kind, profile_name, model_id, cost_basis, status, run_elapsed_ms, run_started_at, cost_usd, cost_is_estimate, created_at
          FROM agent_jobs
         WHERE (owner_kind = 'production' AND owner_id = ?) OR (? = 'replica' AND owner_kind = 'template' AND owner_id = ?)
         ORDER BY created_at, rowid`,
@@ -96,7 +102,9 @@ export function productionCosts(
 
   const agent = jobs.map((j): AgentCostLine => ({
     jobId: j.id,
+    profileName: j.profile_name,
     model: j.model_id,
+    costBasis: j.cost_basis,
     status: j.status,
     elapsedMs:
       j.run_elapsed_ms +

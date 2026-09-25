@@ -10,6 +10,7 @@ import { renderWithProviders, stubFetch } from "../test/harness.js";
 import { installEventSource } from "../test/fake-event-source.js";
 import { agentJob } from "../test/agent-fixtures.js";
 import { drawerBackend, TPL } from "../test/agent-drawer-kit.js";
+import { DS, SUB } from "../test/profiles-kit.js";
 
 /** CMP-009 熔断 / 中断横条：出不出、出哪些按钮、继续 / 重跑怎么调、失败怎么显示、和抽屉是不是同一份数据 */
 
@@ -25,6 +26,7 @@ async function mount(withDrawer = false) {
       <BreakerBar />
       {withDrawer ? <AgentDrawer /> : null}
     </AgentFeedProvider>,
+    true,
   );
   act(() => findSource(`template:${TPL}`)?.open());
   await waitFor(() => {
@@ -66,6 +68,7 @@ describe("什么时候出横条、出哪些按钮", () => {
       <AgentFeedProvider templateId={TPL}>
         <BreakerBar />
       </AgentFeedProvider>,
+      true,
     );
     act(() => findSource(`template:${TPL}`)?.open());
     await waitFor(() => expect(calls).toEqual(["snapshot"]));
@@ -216,7 +219,7 @@ describe("请求状态只属于这一个任务的这一次停下（复审 S2-M1 
         </AgentFeedProvider>
       );
     }
-    renderWithProviders(<Page />);
+    renderWithProviders(<Page />, true);
     act(() => findSource("template:tpl-1")?.open());
     const a = await screen.findByRole("status", { name: "任务已熔断" });
     await user.click(within(a).getByRole("button", { name: "继续" }));
@@ -287,5 +290,120 @@ describe("请求状态只属于这一个任务的这一次停下（复审 S2-M1 
     const bar2 = await screen.findByRole("status", { name: "任务失败" });
     await waitFor(() => expect(bar2).toHaveTextContent("缺少 TIMELINE.md"));
     expect(within(bar2).queryByText(/继续失败/)).toBeNull();
+  });
+});
+
+describe("重跑可重选档案（REQ-010、CMP-009 + CMP-010，Task 10.4）", () => {
+  it("确认框里默认原档案；复刻的任务不看图的档案置灰；改选订阅后重跑带上它", async () => {
+    const user = userEvent.setup();
+    const { db } = drawerBackend(
+      {
+        job: agentJob({
+          status: "tripped",
+          stopReason: "timeout：运行超过 45 分钟",
+          profileId: "p-ds",
+          profileName: "DeepSeek",
+        }),
+      },
+      {
+        "/api/model-profiles": {
+          body: { profiles: [SUB, DS, { ...DS, id: "p-blind", name: "方舟", supportsVision: false }] },
+        },
+      },
+    );
+    await mount(true);
+    const el = await screen.findByRole("status", { name: "任务已熔断" });
+    await user.click(within(el).getByRole("button", { name: "重跑" }));
+    const dialog = screen.getByRole("dialog");
+    const select = await within(dialog).findByLabelText("用哪个模型档案重跑");
+    await waitFor(() => expect(select).toHaveValue("p-ds"));
+    expect(within(select).getByRole("option", { name: /方舟（不可选：不支持看图/ })).toBeDisabled();
+    await user.selectOptions(select, "subscription");
+    await user.click(within(dialog).getByRole("button", { name: "清掉产物并重跑" }));
+    await waitFor(() => expect(db.rerunBodies).toEqual([{ profileId: "subscription" }]));
+  });
+
+  it("原档案已经删了：默认选默认档案", async () => {
+    const user = userEvent.setup();
+    drawerBackend(
+      { job: agentJob({ status: "failed", stopReason: "x", profileId: "gone" }) },
+      { "/api/model-profiles": { body: { profiles: [SUB, DS] } } },
+    );
+    await mount();
+    const el = await screen.findByRole("status", { name: "任务失败" });
+    await user.click(within(el).getByRole("button", { name: "重跑" }));
+    await waitFor(() =>
+      expect(within(screen.getByRole("dialog")).getByLabelText("用哪个模型档案重跑")).toHaveValue("subscription"),
+    );
+  });
+});
+
+describe("老任务与没填单价（10.4 审查 S1-M1、S1-M2）", () => {
+  it("没记档案的老任务：默认选内置订阅（不是默认档案）；不换就不带档案，交给服务端按原档案", async () => {
+    const user = userEvent.setup();
+    const { db } = drawerBackend(
+      { job: agentJob({ status: "tripped", stopReason: "timeout：x", profileId: null, modelId: "claude-sonnet-5" }) },
+      {
+        "/api/model-profiles": {
+          body: {
+            profiles: [
+              { ...SUB, isDefault: false },
+              { ...DS, isDefault: true },
+            ],
+          },
+        },
+      },
+    );
+    await mount();
+    const el = await screen.findByRole("status", { name: "任务已熔断" });
+    await user.click(within(el).getByRole("button", { name: "重跑" }));
+    const dialog = screen.getByRole("dialog");
+    await waitFor(() => expect(within(dialog).getByLabelText("用哪个模型档案重跑")).toHaveValue("subscription"));
+    await user.click(within(dialog).getByRole("button", { name: "清掉产物并重跑" }));
+    await waitFor(() => expect(db.rerunBodies).toEqual([null]));
+  });
+
+  it("没填单价的任务：横条上的花费写「未知」，不写 $0.00", async () => {
+    drawerBackend({ job: agentJob({ status: "tripped", stopReason: "timeout：x", costUsd: 0, costBasis: "none" }) });
+    await mount();
+    const el = await screen.findByRole("status", { name: "任务已熔断" });
+    expect(el).toHaveTextContent("花费 未知（没填单价）");
+    expect(el).not.toHaveTextContent("$0.00");
+  });
+
+  it("没填单价的任务：抽屉顶栏写「未知」，不摆「$0.00 / $5.00」", async () => {
+    drawerBackend({ job: agentJob({ status: "running", costUsd: 0, costBasis: "none" }) });
+    await mount(true);
+    const header = await screen.findByLabelText("花费与上限");
+    expect(header).toHaveTextContent("未知（没填单价）");
+    expect(header).not.toHaveTextContent("$");
+  });
+});
+
+describe("结束卡与横条：没填单价（10.4 第二轮审查 S1-M-A、LOW-2）", () => {
+  it("抽屉结束卡写「未知」，横条不在「未知」后面挂「（估）」", async () => {
+    drawerBackend({
+      job: agentJob({ status: "failed", stopReason: "x", costUsd: 0, costBasis: "none", costIsEstimate: true }),
+    });
+    await mount(true);
+    const bar = await screen.findByRole("status", { name: "任务失败" });
+    expect(bar).toHaveTextContent("花费 未知（没填单价）");
+    expect(bar).not.toHaveTextContent("（估）");
+    const drawer = screen.getByRole("complementary", { name: "Agent 过程" });
+    const end = await within(drawer).findByRole("status", { name: /结束/ });
+    expect(end).toHaveTextContent("花费 未知（没填单价）");
+    expect(end).not.toHaveTextContent("$0.00");
+  });
+
+  it("重跑确认框里读不到档案：说重跑会沿用原档案（不是默认档案）", async () => {
+    const user = userEvent.setup();
+    drawerBackend(
+      { job: agentJob({ status: "failed", stopReason: "x" }) },
+      { "/api/model-profiles": { status: 500, body: { error: { message: "炸了" } } } },
+    );
+    await mount();
+    const el = await screen.findByRole("status", { name: "任务失败" });
+    await user.click(within(el).getByRole("button", { name: "重跑" }));
+    expect(await within(screen.getByRole("dialog")).findByText(/重跑会沿用原档案/)).toBeInTheDocument();
   });
 });

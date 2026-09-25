@@ -190,6 +190,14 @@ describe("outputCosts：花费明细 CMP-008", () => {
     expect(c.totalIsEstimate).toBe(true);
   });
 
+  it("Agent 行带档案名与花费口径（快照，REQ-010）", async () => {
+    const b = await bootOutputs();
+    const id = b.production();
+    b.job("production", id, 0);
+    b.d.prepare("UPDATE agent_jobs SET profile_name = '方舟', cost_basis = 'none'").run();
+    expect(b.costs.outputCosts(id).agent[0]).toMatchObject({ profileName: "方舟", costBasis: "none" });
+  });
+
   it("复刻片：模板的复刻会话列出来、标共用，不计入这一条的合计；有实际金额的出片不标估", async () => {
     const b = await bootOutputs();
     const r = b.production({ kind: "replica", name: null, runPath: "reference.svrun" });

@@ -49,6 +49,8 @@ export interface OutputCosts {
   /** 这一条自己的合计（不含共用的复刻会话） */
   totalUsd: number;
   totalIsEstimate: boolean;
+  /** 这一条自己的 Agent 任务里有没填单价、花费算不出的（没进合计）：界面标「含未知」（Task 11.4） */
+  totalHasUnknown: boolean;
 }
 
 interface JobRow {
@@ -139,5 +141,6 @@ export function productionCosts(
     builds: buildLines,
     totalUsd: own.reduce((s, a) => s + a.costUsd, 0) + buildLines.reduce((s, b) => s + b.costUsd, 0),
     totalIsEstimate: own.some((a) => a.isEstimate) || buildLines.some((b) => b.isEstimate),
+    totalHasUnknown: own.some((a) => a.costBasis === "none"),
   };
 }

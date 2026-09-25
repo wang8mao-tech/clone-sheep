@@ -2,6 +2,7 @@
 // 收到的 argv、cwd、NODE_OPTIONS、参考图内容写进 FAKE_CODEX_LOG，供断言。
 import { spawn } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 const mode = process.env.FAKE_CODEX_MODE ?? "ok";
@@ -113,10 +114,12 @@ switch (mode) {
     setInterval(() => {}, 1000);
     break;
   case "orphanpipe": {
-    // 自己马上退出，留一个继承了 stdout 的孙进程占着管道（审查 LOW-A 的复现方式）
+    // 自己马上退出，留一个继承了 stdout 的孙进程占着管道（审查 LOW-A 的复现方式）；
+    // 孙进程的 cwd 放到系统临时目录，不占着用例的目录（11.4 第七轮审查 S7-M2）
     const grandchild = spawn(process.execPath, ["-e", "setTimeout(() => {}, 20000)"], {
       stdio: "inherit",
       detached: true,
+      cwd: tmpdir(),
     });
     if (process.env.FAKE_GRANDCHILD_PID) writeFileSync(process.env.FAKE_GRANDCHILD_PID, String(grandchild.pid));
     grandchild.unref();

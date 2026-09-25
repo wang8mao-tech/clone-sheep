@@ -193,5 +193,13 @@ describe("侧栏树与统计", () => {
        VALUES ('p2', ?, 'variant', 'done', ?, ?)`,
     ).run(template.id, now, now);
     expect(archive.templateStats(template).outputs).toBe(1);
+    expect(archive.templateStats(template).costHasUnknown).toBe(false);
+    // 有一条变体任务用的档案没填单价：花费算不出、没进合计，标「含未知」（Phase 10 交接，Task 11.4）
+    d.prepare(
+      `INSERT INTO agent_jobs (id, owner_kind, owner_id, status, cost_usd, cost_is_estimate, cost_basis, created_at)
+       VALUES ('j2', 'production', 'p2', 'done', 0, 1, 'none', ?)`,
+    ).run(now);
+    expect(archive.templateStats(template)).toMatchObject({ costHasUnknown: true });
+    expect(archive.templateStats(template).totalCostUsd).toBeCloseTo(0.92, 6);
   });
 });

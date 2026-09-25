@@ -21,6 +21,8 @@ export interface OutputView {
   coverUrl: string | null;
   costUsd: number;
   costIsEstimate: boolean;
+  /** 这条的 Agent 任务有没填单价的：花费里标「含未知」（Task 11.4） */
+  costHasUnknown: boolean;
   /** 完成且文件还在：能播放、下载、打包 */
   downloadable: boolean;
   /** 能重试出片（服务端与 build/retry 同一套判断，含「重跑后运行文件已清掉」） */

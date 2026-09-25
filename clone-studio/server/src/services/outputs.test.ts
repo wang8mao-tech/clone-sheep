@@ -203,6 +203,30 @@ describe("outputCosts：花费明细 CMP-008", () => {
     ]);
   });
 
+  it("没填单价的 Agent 任务：成片卡片与花费明细标「含未知」（Task 11.4）；共用的复刻会话不算这一条的", async () => {
+    const b = await bootOutputs();
+    const id = b.production();
+    b.job("production", id, 0.2);
+    b.build(id, { estimate: 0 });
+    expect(b.costs.outputCosts(id).totalHasUnknown).toBe(false);
+    b.job("production", id, 0);
+    b.d.prepare("UPDATE agent_jobs SET cost_basis = 'none' WHERE cost_usd = 0").run();
+    expect(b.costs.outputCosts(id).totalHasUnknown).toBe(true);
+    const card = b.outputs.listOutputs(b.template.id).find((o) => o.id === id);
+    expect(card).toMatchObject({ costHasUnknown: true });
+  });
+
+  it("复刻片：模板那条共用的复刻会话没填单价，不算这一条的「含未知」（它不进这一条的合计）", async () => {
+    const b = await bootOutputs();
+    const replica = b.production({ kind: "replica" });
+    b.build(replica, { estimate: 0 });
+    b.job("template", b.template.id, 0);
+    b.d.prepare("UPDATE agent_jobs SET cost_basis = 'none'").run();
+    const c = b.costs.outputCosts(replica);
+    expect(c.agent[0]).toMatchObject({ shared: true, costBasis: "none" });
+    expect(c.totalHasUnknown).toBe(false);
+  });
+
   it("Agent 行带档案名与花费口径（快照，REQ-010）", async () => {
     const b = await bootOutputs();
     const id = b.production();

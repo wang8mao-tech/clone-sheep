@@ -71,6 +71,34 @@ describe("首页空状态（SCREEN-002）", () => {
 });
 
 describe("客户页：模板紧凑行列表（CMP-002）", () => {
+  it("累计里有没填单价的 Agent 任务：这一行标「含未知」（Task 11.4）", async () => {
+    stubFetch(
+      base({
+        [`/api/clients/${CLIENT_ID}`]: {
+          body: {
+            client,
+            templates: [
+              template(TPL_A, "足球榜单", {
+                status: "approved",
+                hasSource: true,
+                stats: {
+                  outputs: 1,
+                  totalCostUsd: 0.5,
+                  costIsEstimate: true,
+                  costHasUnknown: true,
+                  lastActivityAt: new Date().toISOString(),
+                },
+              }),
+            ],
+          },
+        },
+      }),
+    );
+    renderApp(`/clients/${CLIENT_ID}`);
+    const list = await screen.findByRole("list", { name: "模板列表" });
+    expect(within(within(list).getByRole("listitem")).getByText("含未知")).toBeInTheDocument();
+  });
+
   it("列出 Design-Brief 点名的那几列：状态点、模板名、成片数、累计花费、最近活动", async () => {
     stubFetch(
       base({
@@ -101,6 +129,7 @@ describe("客户页：模板紧凑行列表（CMP-002）", () => {
     expect(within(row).getByText("已验货")).toBeInTheDocument();
     expect(within(row).getByText("12")).toBeInTheDocument();
     expect(within(row).getByText("$3.50")).toBeInTheDocument();
+    expect(within(row).queryByText("含未知")).toBeNull();
     expect(within(row).getByText("刚刚")).toBeInTheDocument();
     // SCREEN-002 字面点名的六列之一：参考视频缩略帧。删掉它这条要红
     expect(within(row).getByTitle(/参考视频已导入/)).toBeInTheDocument();

@@ -15,6 +15,8 @@ import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
  * 另加自动 / 手动压缩：压缩那次调用不出 assistant 消息也不出流式事件，result 的 usage 也不含它
  * （Task 10.5 假端点实测：resume 时先压缩，上游收到两次调用、只记了一次）。按 compact_boundary 的
  * pre_tokens（压缩时读入的整段上下文）记输入、post_tokens（压缩后的摘要）记输出，单独加在上面。
+ * 压缩失败时 SDK 只发 `status` 带 `compact_result: "failed"`、不给 token 数，那次调用照样可能计费：
+ * 按这一段见过的最大读入上下文（含缓存）记一笔输入——宁可高估；这一段还没见过调用就没有依据，不记（Task 11.4）。
  */
 interface Usage {
   input_tokens?: number | null;
@@ -32,6 +34,8 @@ export class PriceMeter {
   private anonymous = 0;
   private settled = 0;
   private compactions = 0;
+  /** 这一段见过的最大一次读入上下文（输入 + 缓存读写 token）：压缩失败时拿它估那次调用 */
+  private widestInput = 0;
 
   constructor(private readonly pricing: { in: number; out: number }) {}
 
@@ -43,6 +47,9 @@ export class PriceMeter {
 
   private count(id: string, usage: Usage): void {
     this.calls.set(id, Math.max(this.calls.get(id) ?? 0, this.priced(usage)));
+    const input =
+      (usage.input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0);
+    this.widestInput = Math.max(this.widestInput, input);
   }
 
   private streamEvent(
@@ -85,6 +92,10 @@ export class PriceMeter {
     }
     if (message.type === "result") {
       if (message.usage) this.settled = Math.max(this.settled, this.priced(message.usage));
+      return;
+    }
+    if (message.type === "system" && message.subtype === "status" && message.compact_result === "failed") {
+      this.compactions += this.priced({ input_tokens: this.widestInput });
       return;
     }
     if (message.type === "system" && message.subtype === "compact_boundary") {

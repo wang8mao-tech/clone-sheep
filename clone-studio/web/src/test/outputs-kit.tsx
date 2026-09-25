@@ -32,6 +32,7 @@ export const output = (n: number, over: Partial<OutputView> = {}): OutputView =>
   coverUrl: `/api/productions/p${n}/cover?v=b${n}`,
   costUsd: 0.8,
   costIsEstimate: true,
+  costHasUnknown: false,
   downloadable: true,
   retryable: false,
   stop: null,

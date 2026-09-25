@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,7 +15,42 @@ beforeEach(() => {
   root = mkdtempSync(path.join(tmpdir(), "cs-runner-"));
   log = path.join(root, "calls.jsonl");
 });
-afterEach(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }));
+/** 用例留下、收尾要杀的进程：放在 afterEach 里杀，前面断言失败也不遗留 */
+let leftovers: number[] = [];
+afterEach(async () => {
+  const pids = leftovers;
+  leftovers = [];
+  const pidFile = path.join(root, "grandchild.pid");
+  if (existsSync(pidFile)) pids.push(Number(readFileSync(pidFile, "utf8")));
+  await killAndWait(pids);
+  // 刚退的进程要一会儿才放开 cwd（杀毒扫描也会短暂占着）：用异步 rm 按间隔重试。
+  // 同步 rmSync 在 Windows 上遇 EPERM 直接抛、不重试（11.4 第七轮审查 S7-M2 实测）
+  await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+}, 20_000);
+
+/** 杀掉用例留下的进程并等它真没了：taskkill 返回时进程可能还占着 cwd，删目录会偶发 EPERM */
+async function killAndWait(pids: number[]) {
+  for (const pid of pids) {
+    try {
+      if (process.platform === "win32")
+        execFileSync("taskkill", ["/T", "/F", "/PID", String(pid)], { stdio: "ignore" });
+      else process.kill(pid, "SIGKILL");
+    } catch {
+      // 已经退了：taskkill 返回非 0，不算失败
+    }
+  }
+  const alive = (pid: number) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const deadline = Date.now() + 5_000;
+  while (pids.some(alive) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 100));
+  expect(pids.some(alive)).toBe(false);
+}
 
 function run(mode: string, extra: { prompt?: string; images?: string[]; timeoutMs?: number; kills?: number[] } = {}) {
   return runCodex({
@@ -156,17 +192,15 @@ describe("runCodex：杀不掉也不永远挂着（11.1 审查 LOW-1）", () => 
       env: { ...process.env, FAKE_CODEX_MODE: "hang", CODEX_HOME: root },
       timeoutMs: 300,
       killGraceMs: 500,
-      killTree: (pid) => pids.push(pid), // 什么都不杀
+      killTree: (pid) => {
+        pids.push(pid); // 什么都不杀，afterEach 收尾
+        leftovers.push(pid);
+      },
     });
     expect(out.timedOut).toBe(true);
     expect(out.exitCode).toBeNull();
     expect(Date.now() - started).toBeLessThan(10_000);
-    // 收尾：同步杀掉这个假 codex（它还占着 cwd，Windows 上不死透删不掉目录）
-    for (const pid of pids) {
-      if (process.platform === "win32")
-        execFileSync("taskkill", ["/T", "/F", "/PID", String(pid)], { stdio: "ignore" });
-      else process.kill(pid, "SIGKILL");
-    }
+    expect(pids).toHaveLength(1); // 超时确实调了 killTree
   });
 });
 
@@ -187,8 +221,5 @@ describe("runCodex：codex 退了、孙进程占着管道（11.1 第二轮审查
     expect(out.timedOut).toBe(true);
     expect(out.events.threadId).toBe("019bd456-d3d4-70c3-90de-51d31a6c8571");
     expect(Date.now() - started).toBeLessThan(10_000);
-    const pid = Number(readFileSync(pidFile, "utf8"));
-    if (process.platform === "win32") execFileSync("taskkill", ["/T", "/F", "/PID", String(pid)], { stdio: "ignore" });
-    else process.kill(pid, "SIGKILL");
   });
 });

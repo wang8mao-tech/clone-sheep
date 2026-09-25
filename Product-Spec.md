@@ -1,6 +1,6 @@
 # 产品需求规范：Clone Studio（暂定名）
 
-> 版本 v1.10.5 · 2026-09-25 · 内核：Hypit 0.2.6（本地副本 `hypit-main/`）· 技术调研见 `Hypit-Research.md`
+> 版本 v1.10.6 · 2026-09-25 · 内核：Hypit 0.2.6（本地副本 `hypit-main/`）· 技术调研见 `Hypit-Research.md`
 > Phase 0 先行验证结论见 `clone-studio/docs/spike-notes.md`，本版据其回写。
 
 ## 0. AI 使用说明
@@ -475,8 +475,8 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
   - 重跑可带档案（模板与变体都行），不带就用原档案，原档案没了用默认档案。
   - ①参考 导入时选的档案（没选就是当时的默认档案，同样要支持看图）记在模板上，证据做完自动起复刻时用它；到那时它被删了、或被改成不支持看图，就用内置订阅（快照照实记下）。
   - 不支持联网搜索的档案：会话里禁用 WebSearch 工具，并在系统提示里说明改用 Bash（curl 等）与 WebFetch 找图。
-  - 凭据不外泄：Agent 点名读凭据变量或整份导出环境变量的命令（printenv、env、set、`dir env:`、process.env 整体之类，含 sudo / sh -c / cmd /c 等包一层的写法）一律拦下，读单个普通变量照常；Claude Code 自己的登录凭据文件（`~/.claude/.credentials.json` 与 CLAUDE_CONFIG_DIR 下的）同宿主密钥文件一样不许碰；万一消息、停因或拦截记录里出现了注入的 key，落库、推界面前换成打码。不用 Claude Code 的 `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`：它会把权限模式强制改回 default，无头会话里每个工具调用都会卡住等批准。
-  - 花费：订阅与 Anthropic key 档案用 SDK 的估算；兼容端点填了单价的，按每次调用的 token 用量 × 单价折算并以此熔断（运行中读流式事件里每次调用的输入与输出用量，收尾再和这一段的合计用量比，取大的；SDK 自动 / 手动压缩上下文的那次调用不出消息，按压缩时读入的上下文 token 记输入、压缩后的摘要 token 记输出，另外加上）；没填单价的不做 $ 熔断、花费记「未知（没填单价）」——抽屉顶栏、熔断横条、④ 队列行与花费明细都写「未知」，不写 $0，也不摆熔断上限。口径按每一段开跑时档案的单价定（中途补填或清掉单价，从下一段起换口径，已记下的花费不动）。
+  - 凭据不外泄：Agent 点名读凭据变量或整份导出环境变量的命令（printenv、env、set、`dir env:`、按通配列的 `gci env:ANTH*`（数组、管道（路径在哪一行、哪个块里都算）、括号、续行里与 `Environment::` 写法同样算，先 `cd env:` 再列也算；grep / echo / heredoc 正文里的「env:」字样不算；变量间接、编码命令、字符串拼接这类刻意混淆按 REQ-003 的边界不保证拦住）、process.env 整体之类，含 sudo / sh -c / cmd /c 等包一层的写法）一律拦下，读单个普通变量照常；Claude Code 自己的登录凭据文件（`~/.claude/.credentials.json` 与 CLAUDE_CONFIG_DIR 下的）与 Codex 的 `$CODEX_HOME/auth.json` 同宿主密钥文件一样不许碰，Git Bash 的 `/c/Users/...` 写法同样认，`~/.codex` 与 `~/.claude` 一样按家目录的各种写法（`~`、`$HOME`、`$USERPROFILE`、`${env:USERPROFILE}`、HOMEDRIVE / HOMEPATH）认通配与整目录操作，先进家目录再用相对路径（`cd ~; cat .codex/auth*`、`tar -C ~ .codex`）、路径后面直接跟分隔符（`cd ~/.codex; …`）同样算；对整个家目录递归搜索（`grep -r … ~`）按 REQ-003 边界不保证拦住。以上都是按命令文本匹配的尽力拦截（与 REQ-003「拦截的边界」同一口径）：常规写法拦住，同一类的其它拼写以后发现了按低优先级补、不阻塞交付；要彻底隔离得靠系统账户或沙箱，放到后续 Phase 评估；万一消息、停因或拦截记录里出现了注入的 key，落库、推界面前换成打码。不用 Claude Code 的 `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`：它会把权限模式强制改回 default，无头会话里每个工具调用都会卡住等批准。
+  - 花费：订阅与 Anthropic key 档案用 SDK 的估算；兼容端点填了单价的，按每次调用的 token 用量 × 单价折算并以此熔断（运行中读流式事件里每次调用的输入与输出用量，收尾再和这一段的合计用量比，取大的；SDK 自动 / 手动压缩上下文的那次调用不出消息，按压缩时读入的上下文 token 记输入、压缩后的摘要 token 记输出，另外加上；压缩失败时 SDK 不给 token 数，按这一段见过的最大读入上下文记一笔输入）；没填单价的不做 $ 熔断、花费记「未知（没填单价）」——抽屉顶栏、熔断横条、④ 队列行与花费明细都写「未知」，不写 $0，也不摆熔断上限；⑤ 成片卡片、模板页头与客户页的累计里有这种任务时，金额后面标「含未知」（那部分算不出、没进合计）。口径按每一段开跑时档案的单价定（中途补填或清掉单价，从下一段起换口径，已记下的花费不动）。
 - MUST 只支持 API key 接入。ChatGPT Plus、Gemini Advanced、豆包 App 这类聊天订阅不提供 API，界面在预设旁明说"需要 API key，聊天订阅不可用"。
 - MUST 每个档案带"支持看图"开关。复刻任务必须看帧，选中不支持看图的档案启动复刻时拦截并说明（①参考 提交与模板重跑时拒绝，不建 AgentJob）；变体任务仅警告。
 - MUST 每个档案带"支持联网搜索"开关。Anthropic 的 WebSearch 是服务端工具，第三方端点下不可用；该开关为关时，运行器在系统提示里告知 Agent 改用 Bash（curl / yt-dlp 等）与 WebFetch 找图，并在素材审核界面提示"该模型无原生搜索，素材缺口可能偏多"。

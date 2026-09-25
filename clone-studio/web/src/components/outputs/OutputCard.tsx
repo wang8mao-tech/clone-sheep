@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { CostUnknownBadge } from "../CostUnknownBadge.js";
 import { formatUsd } from "../../lib/format.js";
 import { formatClipSeconds, type OutputView } from "../../lib/outputs.js";
 import { Badge } from "../ui/Badge.js";
@@ -128,11 +129,13 @@ export function OutputCard({
           <StatusMark status={status.kind} size="sm" {...(status.label ? { label: status.label } : {})} />
         </span>
         {/* 金额和「估」是一个整体：换行时一起换、靠右（9.2 第五轮审查 S1-M1）；REQ-009 MUST：两类花费一律标「估」 */}
-        <span className="ml-auto inline-flex shrink-0 items-center gap-0.5">
+        {/* 「含未知」在窄卡片（6 列刚过 700px、4 列窄于 500px）放不下时自己换到下一行，金额和「估」不拆（11.4 审查 S2-M2） */}
+        <span className="ml-auto inline-flex max-w-full flex-wrap items-center justify-end gap-0.5">
           <span className="font-mono text-text tabular-nums">{formatUsd(o.costUsd)}</span>
           <Badge tone="warning" title="花费均为估算，以 Provider 侧为准">
             估
           </Badge>
+          <CostUnknownBadge show={o.costHasUnknown} />
         </span>
       </div>
     </div>

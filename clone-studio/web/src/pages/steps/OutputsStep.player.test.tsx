@@ -45,6 +45,20 @@ describe("播放与下载（AC-020）", () => {
   });
 });
 
+describe("成片卡片的「含未知」（Task 11.4）", () => {
+  it("这条的 Agent 任务没填单价：卡片花费后面标「含未知」；没有就不标", async () => {
+    outputsBackend([output(1, { costHasUnknown: true }), output(2)]);
+    await mountOutputs();
+    const cards = await screen.findAllByText(/^成片 \d$/);
+    expect(cards).toHaveLength(2);
+    expect(screen.getAllByText("含未知")).toHaveLength(1);
+    // 标在成片 1 那张卡上，不是成片 2（11.4 审查 S2-L5）
+    const cardOf = (name: string) => screen.getByRole("button", { name: `播放 ${name}` }).parentElement!.parentElement!;
+    expect(within(cardOf("成片 1")).getByText("含未知")).toBeInTheDocument();
+    expect(within(cardOf("成片 2")).queryByText("含未知")).toBeNull();
+  });
+});
+
 describe("花费明细 CMP-008（AC-024）", () => {
   it("Agent 任务与出片两笔分列，都标「估」，给合计", async () => {
     outputsBackend([output(1)]);

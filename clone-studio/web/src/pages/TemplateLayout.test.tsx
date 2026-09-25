@@ -11,7 +11,10 @@ const BASE = `/clients/${CLIENT_ID}/templates/${TPL_ID}`;
 const client = { id: CLIENT_ID, name: "老王工作室", createdAt: "2026-09-20T04:10:35.093Z" };
 const tree = { clients: [{ ...client, templates: [{ id: TPL_ID, name: "足球榜单", status: "importing" }] }] };
 
-function detail(status: TemplateStatus, over: { hasSource?: boolean; outputs?: number; cost?: number } = {}) {
+function detail(
+  status: TemplateStatus,
+  over: { hasSource?: boolean; outputs?: number; cost?: number; unknown?: boolean } = {},
+) {
   return {
     id: TPL_ID,
     clientId: CLIENT_ID,
@@ -31,6 +34,7 @@ function detail(status: TemplateStatus, over: { hasSource?: boolean; outputs?: n
       outputs: over.outputs ?? 0,
       totalCostUsd: over.cost ?? 0,
       costIsEstimate: false,
+      costHasUnknown: over.unknown ?? false,
       lastActivityAt: "2026-09-20T04:10:35.093Z",
     },
   };
@@ -68,6 +72,13 @@ describe("模板页头", () => {
     expect(await screen.findByText("$12.50")).toBeInTheDocument();
     expect(screen.getByText("模板累计")).toBeInTheDocument();
     expect(screen.getByText("估")).toBeInTheDocument();
+    expect(screen.queryByText("含未知")).toBeNull();
+  });
+
+  it("有 Agent 任务没填单价：页头累计后面标「含未知」（Phase 10 交接，Task 11.4）", async () => {
+    stub("approved", { cost: 12.5, outputs: 2, unknown: true });
+    renderApp(BASE);
+    expect(await screen.findByText("含未知")).toHaveAttribute("title", expect.stringContaining("没填单价"));
   });
 
   it("点标题就地改名，改完发 PATCH", async () => {

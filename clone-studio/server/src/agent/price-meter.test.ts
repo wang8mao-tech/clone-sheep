@@ -170,3 +170,78 @@ describe("PriceMeter：压缩那次调用（Task 10.5 真机：resume 先压缩�
     expect(meter.cost).toBe(0);
   });
 });
+
+describe("PriceMeter：压缩失败那次调用（Phase 10 交接，Task 11.4）", () => {
+  const failed = {
+    type: "system",
+    subtype: "status",
+    status: null,
+    compact_result: "failed",
+    compact_error: "x",
+  } as unknown as SDKMessage;
+  const ev = (event: Record<string, unknown>) =>
+    ({ type: "stream_event", event, parent_tool_use_id: null }) as unknown as SDKMessage;
+
+  it("SDK 不给 token 数：按这一段见过的最大读入上下文（含缓存）记一笔输入，另外加上", () => {
+    const meter = new PriceMeter({ in: 1, out: 1 });
+    meter.observe(
+      ev({
+        type: "message_start",
+        message: {
+          id: "m1",
+          usage: {
+            input_tokens: 1_000_000,
+            cache_creation_input_tokens: 1_000_000,
+            cache_read_input_tokens: 2_000_000,
+          },
+        },
+      }),
+    );
+    meter.observe(ev({ type: "message_delta", usage: { output_tokens: 500_000 } }));
+    expect(meter.cost).toBeCloseTo(4.5);
+    meter.observe(failed);
+    expect(meter.cost).toBeCloseTo(8.5);
+  });
+
+  it("普通的 status（requesting / compacting，不带 compact_result）不记：前面有过调用也一样（11.4 第八轮审查 S8-M2）", () => {
+    const meter = new PriceMeter({ in: 1, out: 1 });
+    meter.observe(ev({ type: "message_start", message: { id: "m1", usage: { input_tokens: 2_000_000 } } }));
+    expect(meter.cost).toBeCloseTo(2);
+    meter.observe({ type: "system", subtype: "status", status: "requesting" } as unknown as SDKMessage);
+    meter.observe({ type: "system", subtype: "status", status: "compacting" } as unknown as SDKMessage);
+    expect(meter.cost).toBeCloseTo(2);
+  });
+
+  it("取见过的最大那次，不是最后一次：大调用之后又来一个小调用，压缩失败仍按大的记", () => {
+    const meter = new PriceMeter({ in: 1, out: 1 });
+    meter.observe(ev({ type: "message_start", message: { id: "m1", usage: { input_tokens: 3_000_000 } } }));
+    meter.observe(ev({ type: "message_start", message: { id: "m2", usage: { input_tokens: 1_000_000 } } }));
+    expect(meter.cost).toBeCloseTo(4);
+    meter.observe(failed);
+    expect(meter.cost).toBeCloseTo(7);
+  });
+
+  it("这一段还没见过任何调用（续跑一上来就压缩失败）：没有依据，不记", () => {
+    const meter = new PriceMeter({ in: 1, out: 1 });
+    meter.observe(failed);
+    expect(meter.cost).toBe(0);
+  });
+
+  it("压缩成功的 status 不在这里记（由 compact_boundary 记），失败两次记两笔", () => {
+    const meter = new PriceMeter({ in: 1, out: 1 });
+    meter.observe({
+      type: "assistant",
+      message: { id: "a1", content: [], usage: { input_tokens: 1_000_000, output_tokens: 0 } },
+    } as unknown as SDKMessage);
+    meter.observe({
+      type: "system",
+      subtype: "status",
+      status: null,
+      compact_result: "success",
+    } as unknown as SDKMessage);
+    expect(meter.cost).toBeCloseTo(1);
+    meter.observe(failed);
+    meter.observe(failed);
+    expect(meter.cost).toBeCloseTo(3);
+  });
+});

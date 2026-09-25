@@ -1,7 +1,11 @@
 import "@testing-library/jest-dom/vitest";
 import { afterEach, vi } from "vitest";
-import { cleanup } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
 import { mediaStateOf as stateOf } from "./media.js";
+
+// findBy / waitFor 默认只等 1 秒：仓库根门禁里三个包的测试接连跑、机器忙时首屏渲染会超过 1 秒（真测 1.3～1.5 秒），
+// 放宽到 3 秒只影响「还没出来就再等等」，不改变断言（11.4 第八轮审查 L12）
+configure({ asyncUtilTimeout: 3000 });
 
 /**
  * jsdom 的补丁层。

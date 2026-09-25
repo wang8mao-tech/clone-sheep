@@ -50,6 +50,8 @@ export interface TemplateStats {
   totalCostUsd: number;
   /** 合计里含估算值，界面要带「估」徽标 */
   costIsEstimate: boolean;
+  /** 有 Agent 任务的档案没填单价，那部分算不出、不在合计里：界面标「含未知」（Task 11.4） */
+  costHasUnknown: boolean;
   lastActivityAt: string;
 }
 

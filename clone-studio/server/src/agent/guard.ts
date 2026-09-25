@@ -4,6 +4,7 @@ import { isInside, isReallyInside } from "../lib/safe-path.js";
 import { containsPath, resolveFrom, samePath } from "./guard-paths.js";
 import { findDeniedHypit, normalize, tokenize } from "./shell-scan.js";
 import { writtenPaths } from "./written-paths.js";
+import { readsCredentialEnv } from "./env-read.js";
 import { installsPackages, NODE_MODULES_WHY, writesNodeModules } from "./node-modules-rule.js";
 
 export { findDeniedHypit } from "./shell-scan.js";
@@ -230,59 +231,32 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 }
 
 /**
- * 读凭据变量或整份导出环境的命令（REQ-010：key 只进 SDK 子进程）。Agent 有完整 Bash，`printenv` 一下
- * 就能把档案的 token 打进消息流、写进工作目录；消息流另有打码兜底（scheduler），这里先拦住。
- * 只拦「整份导出」与「点名凭据变量」：读单个普通变量（`$env:PATH`、`process.env.HOME`）照常放行（10.2 审查 S2-L3）。
- * 没用 Claude Code 的 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB：它会把权限模式强制改回 default（anthropics/claude-code#51258），
- * 无头会话里的每个工具调用都会卡在等人批准
- */
-/** 点名凭据变量；`${!ANTHROPIC*}` 这种按前缀列变量名的间接展开也算（数组下标 `${!arr[@]}` 不算） */
-const CREDENTIAL_VARS = /\b(ANTHROPIC_(AUTH_TOKEN|API_KEY)|CLAUDE_CODE_OAUTH_TOKEN)\b|\$\{!(?!\w+\[[@*]\]\})/i;
-/** 命令位置：行首、分隔符之后、`$(` 里，或跟在 sudo / time / nohup / sh -c / cmd /c（Git Bash 写成 //c）后面 */
-const AT_COMMAND = String.raw`(^|[;&|\x60]\s*|\$\(\s*|\b(sudo|time|nohup|command|exec|xargs|builtin)\s+|-c\s+["']?|\bcmd(\.exe)?\s+/{1,2}[ck]\s+["']?)(\S*[\\/])?`;
-/** 命令结束：行尾、分隔符、重定向、收尾的引号 / 括号 */
-const END = String.raw`\s*($|[;&|)\x60>"'}])`;
-/**
- * 整份导出环境：env / printenv 只带选项（-0、-u NAME、--null…）、不跑别的命令也不点名；
- * set / export / export -p / declare -p|-x / typeset -p|-x / compgen -e 不带参数（`set -e` 是设开关，不算）
- */
-const ENV_DUMP = new RegExp(
-  `${AT_COMMAND}((env|printenv)(\\.exe)?(\\s+(-u\\s+\\S+|-C\\s+\\S+|--?[\\w-]+))*|(set|export(\\s+-p)?|declare\\s+-[px]+|typeset\\s+-[px]+|compgen\\s+-e)(\\.exe)?)${END}`,
-  "im",
-);
-/** cmd 的 `set 前缀` 会列出所有以它开头的变量（`cmd /c set ANTH` 就把 key 列出来了） */
-const CMD_SET = /\bcmd(\.exe)?\s+\/{1,2}[ck]\s+["']?\s*set(\s+[^\s=&|"']+)?\s*($|["'|&>])/i;
-/** 各语言里整体读环境的写法（点名读单个变量的不算：`$env:PATH`、`env:PATH`、process.env.HOME、os.environ['PATH']） */
-const ENV_READ = new RegExp(
-  [
-    String.raw`\b(Get-ChildItem|Get-Item|gci|gi|dir|ls)\s+(-(Path|LiteralPath)\s+)?["']?env:(?![\w])`,
-    String.raw`\b(Set-Location|Push-Location|cd|sl)\s+["']?env:`,
-    String.raw`\[(System\.)?Environment\]::GetEnvironmentVariables`,
-    String.raw`/proc/[^\s]*/environ`,
-    String.raw`\bprocess\s*(\.\s*env\b|\[\s*["']env["']\s*\])(?!\s*[.[])`,
-    String.raw`[)\]]\s*\.env\b(?!\s*[.[])`,
-    String.raw`\bos\.environ\b(?!\s*(\[|\.get\())`,
-    String.raw`\bSystem\.getenv\(\s*\)`,
-    String.raw`%ENV\b`,
-    String.raw`\bruby\b.*\bENV\b(?!\s*[[=.])`,
-  ].join("|"),
-  "i",
-);
-
-export function readsCredentialEnv(command: string): boolean {
-  return CREDENTIAL_VARS.test(command) || ENV_DUMP.test(command) || CMD_SET.test(command) || ENV_READ.test(command);
-}
-
-/**
  * 命令里提到了 Claude Code 的配置目录（`~/.claude`、`$HOME/.claude`、CLAUDE_CONFIG_DIR 那一处）：不点凭据文件名、
- * 用通配（`.cred*`）或整目录操作（`grep -r … ~/.claude`、`cp -r ~/.claude`）同样能读到登录凭据（10.2 第二轮审查 S2-L1）
+ * 用通配（`.cred*`）或整目录操作（`grep -r … ~/.claude`、`cp -r ~/.claude`）同样能读到登录凭据（10.2 第二轮审查 S2-L1）；
+ * Git Bash 继承的 `$USERPROFILE` 与引号收在中间的 `"$HOME"/.claude` 同样认（11.4 第二轮审查 R2-M1）；
+ * Codex 的 `~/.codex`（放 auth.json）同理（11.4 第三轮审查 R3-H2）；PowerShell 的 `${env:USERPROFILE}`、`$($HOME)`
+ * 与 Agent 环境里也有的 HOMEDRIVE / HOMEPATH 拼法同样认（11.4 第四轮审查 S4-M2）
  */
-const HOME_CLAUDE =
-  /(^|[\s"'=:(])(~|\$home|\$\{home\}|%userprofile%|\$env:userprofile|[a-z]:\/users\/[^/\s"']+)\/\.claude(\/|[\s"')]|$)/i;
+const HOME = String.raw`(^|[\s"'=:(])(~|\$home|\$\{home\}|\$\(\$home\)|%userprofile%|\$env:userprofile|\$\{env:userprofile\}|\$userprofile|\$\{userprofile\}|((\$env:|\$\{env:|\$\{?|%)homedrive\}?%?)?(\$env:|\$\{env:|\$\{?|%)homepath\}?%?|[a-z]:\/users\/[^/\s"';&|)]+)["']?`;
+// 路径后面直接跟 ; & | < > , 也算到头了（`cd ~/.codex; …`，11.4 第七轮审查 S7-M1）
+const HOME_CLAUDE = new RegExp(String.raw`${HOME}\/\.(claude|codex)(\/|[\s"';&|<>),]|$)`, "i");
+/**
+ * 先进家目录、再用相对路径（`cd ~; cat .codex/auth*`、`tar -C ~ .codex`）：家目录单独作参数，同一条命令里又出现
+ * 相对的 `.codex` / `.claude`（11.4 第五轮审查 S5-M2）。对整个家目录递归搜索（`grep -r … ~`）按 REQ-003 边界不拦
+ */
+const HOME_ALONE = new RegExp(String.raw`${HOME}\/?(?=[\s;&|)"']|$)`, "i");
+const RELATIVE_CONFIG = /(^|[\s"'=:(,])(\.\/)?\.(claude|codex)(\/|[\s"';&|)]|$)/i;
 
 function mentionsClaudeConfigDir(command: string, credentialFiles: readonly string[]): boolean {
-  const flat = normalize(command).replace(/\\/g, "/").toLowerCase();
-  if (HOME_CLAUDE.test(flat)) return true;
+  // Git Bash 把 C:\Users 写成 /c/Users：先换成 c:/users 再比（Task 11.4）
+  const flat = normalize(command)
+    .replace(/\\/g, "/")
+    .toLowerCase()
+    // `~//.codex`、`~/./.codex` 与 `~/.codex` 是同一处（11.4 第四轮审查 S4-M2）
+    .replace(/\/(\.\/)+/g, "/")
+    .replace(/(?<!:)\/{2,}/g, "/")
+    .replace(/(^|[\s"'=:(])\/([a-z])\//g, "$1$2:/");
+  if (HOME_CLAUDE.test(flat) || (HOME_ALONE.test(flat) && RELATIVE_CONFIG.test(flat))) return true;
   return credentialFiles
     .map((file) => path.dirname(file).replace(/\\/g, "/").toLowerCase())
     .some((dir) => flat.includes(dir));

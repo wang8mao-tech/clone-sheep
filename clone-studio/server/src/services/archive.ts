@@ -244,6 +244,8 @@ export interface TemplateStats {
   /** 合计花费。Agent 花费与 build 估价都是估算值，前端要带「估」徽标。 */
   totalCostUsd: number;
   costIsEstimate: boolean;
+  /** 有 Agent 任务的档案没填单价、花费算不出（不在合计里）：界面标「含未知」（Phase 10 交接，Task 11.4） */
+  costHasUnknown: boolean;
   lastActivityAt: string;
 }
 
@@ -263,12 +265,13 @@ export function templateStats(template: TemplateRow): TemplateStats {
   const agent = d
     .prepare(
       `SELECT COALESCE(SUM(cost_usd), 0) AS sum,
-              SUM(CASE WHEN cost_usd > 0 AND cost_is_estimate = 1 THEN 1 ELSE 0 END) AS est
+              SUM(CASE WHEN cost_usd > 0 AND cost_is_estimate = 1 THEN 1 ELSE 0 END) AS est,
+              SUM(CASE WHEN cost_basis = 'none' THEN 1 ELSE 0 END) AS unknown
          FROM agent_jobs
         WHERE (owner_kind = 'template' AND owner_id = ?)
            OR (owner_kind = 'production' AND owner_id IN (SELECT id FROM productions WHERE template_id = ?))`,
     )
-    .get(template.id, template.id) as { sum: number; est: number | null };
+    .get(template.id, template.id) as { sum: number; est: number | null; unknown: number | null };
 
   const build = d
     .prepare(
@@ -289,6 +292,7 @@ export function templateStats(template: TemplateRow): TemplateStats {
     outputs,
     totalCostUsd: agent.sum + build.sum,
     costIsEstimate: (agent.est ?? 0) > 0 || (build.est ?? 0) > 0,
+    costHasUnknown: (agent.unknown ?? 0) > 0,
     lastActivityAt: lastProduction && lastProduction > template.updated_at ? lastProduction : template.updated_at,
   };
 }

@@ -46,6 +46,8 @@ export interface OutputView {
   /** 这条自己的花费：同花费明细的合计（变体 = Agent 任务 + 出片；复刻片不含共用的复刻会话） */
   costUsd: number;
   costIsEstimate: boolean;
+  /** 这条的 Agent 任务有没填单价的：花费标「含未知」（Task 11.4） */
+  costHasUnknown: boolean;
   /** 完成且文件还在：能播放、下载、打包 */
   downloadable: boolean;
   /**
@@ -176,6 +178,7 @@ export function listOutputs(templateId: string): OutputView[] {
       coverUrl: meta?.coverPath ? `/api/productions/${row.id}/cover?v=${encodeURIComponent(build?.id ?? "")}` : null,
       costUsd: cost.totalUsd,
       costIsEstimate: cost.totalIsEstimate,
+      costHasUnknown: cost.totalHasUnknown,
       downloadable: done,
       retryable,
       stop: stopOf(row, build, retryable),

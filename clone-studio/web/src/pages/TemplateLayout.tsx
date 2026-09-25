@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { CostUnknownBadge } from "../components/CostUnknownBadge.js";
 import { Navigate, Outlet, useParams } from "react-router";
 import { useArchiveActions } from "../app/useArchiveActions.js";
 import { Badge } from "../components/ui/Badge.js";
@@ -112,6 +113,7 @@ export function TemplateLayout() {
           <Badge tone="warning" title="花费均为估算，以 Provider 侧为准">
             估
           </Badge>
+          <CostUnknownBadge show={template?.stats.costHasUnknown ?? false} />
         </div>
       </div>
 

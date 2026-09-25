@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { CostUnknownBadge } from "../components/CostUnknownBadge.js";
 import { useParams } from "react-router";
 import { Film, Plus } from "lucide-react";
 import { useArchiveActions } from "../app/useArchiveActions.js";
@@ -20,6 +21,14 @@ import { formatActivityTime, formatUsd } from "../lib/format.js";
  * 状态点、模板名、参考视频缩略帧（小）、成片数、累计花费、最近活动时间。
  * 缩略帧要等 Phase 4 抽帧才有，这里先留位并标明没有。
  */
+/** 表头和每一行共用的列宽：只改一处，表头不会和行错开（11.4 第八轮审查 S8-M1） */
+const COLUMN_WIDTH = {
+  outputs: "4rem",
+  // 「$ + 估 + 含未知」约 131px，6rem 会把「含未知」裁掉；四位整数金额约 146px（11.4 审查 S2-M1、R2-L2）
+  cost: "10rem",
+  activity: "6rem",
+} as const;
+
 export function ClientPage() {
   const { clientId = "" } = useParams();
   const actions = useArchiveActions();
@@ -106,9 +115,15 @@ export function ClientPage() {
             <span className="w-2 shrink-0" />
             <span className="w-8 shrink-0" />
             <span className="min-w-0 flex-1">模板</span>
-            <span className="w-16 shrink-0 text-right">成片</span>
-            <span className="w-24 shrink-0 text-right">累计花费</span>
-            <span className="w-24 shrink-0 text-right">最近活动</span>
+            <span className="shrink-0 text-right" style={{ width: COLUMN_WIDTH.outputs }}>
+              成片
+            </span>
+            <span className="shrink-0 text-right" style={{ width: COLUMN_WIDTH.cost }}>
+              累计花费
+            </span>
+            <span className="shrink-0 text-right" style={{ width: COLUMN_WIDTH.activity }}>
+              最近活动
+            </span>
             <span className="w-5 shrink-0" />
           </div>
           <ul aria-label="模板列表" className="flex flex-col">
@@ -147,10 +162,10 @@ export function ClientPage() {
                   }
                   title={<span className="text-text">{tpl.name}</span>}
                   columns={[
-                    { label: "成片", width: "4rem", numeric: true, content: tpl.stats.outputs },
+                    { label: "成片", width: COLUMN_WIDTH.outputs, numeric: true, content: tpl.stats.outputs },
                     {
                       label: "累计花费",
-                      width: "6rem",
+                      width: COLUMN_WIDTH.cost,
                       numeric: true,
                       content: (
                         // REQ-009 MUST：两类花费一律标"估"，不看 costIsEstimate 分支。
@@ -160,12 +175,13 @@ export function ClientPage() {
                           <Badge tone="warning" title="花费均为估算，以 Provider 侧为准">
                             估
                           </Badge>
+                          <CostUnknownBadge show={tpl.stats.costHasUnknown} />
                         </span>
                       ),
                     },
                     {
                       label: "最近活动",
-                      width: "6rem",
+                      width: COLUMN_WIDTH.activity,
                       numeric: true,
                       content: formatActivityTime(tpl.stats.lastActivityAt),
                     },

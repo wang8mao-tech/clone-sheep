@@ -230,7 +230,9 @@ describe("队列", () => {
   });
 
   it("后端推 variants / estimate / build 事件：队列重拉", async () => {
-    const db = variantsBackend([batch()]);
+    // 夹具用待确认花费：它不在轮询的状态里，队列不会自己 3 秒重拉，重拉只能是事件触发的。
+    // 默认的排队中会轮询，事件监听坏了也可能被下一轮轮询救过去（11.4 第十轮审查 R10-M1）
+    const db = variantsBackend([batch({ variants: [variant(1, { status: "awaiting_cost_confirm" })] })]);
     await mountVariants();
     await screen.findByRole("list", { name: "批次 毒舌风格 的变体" });
     const before = db.reads;

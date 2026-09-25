@@ -26,6 +26,7 @@ export const version = (n: number, over: Partial<ReviewVersion> = {}): ReviewVer
   createdAt: "",
   build: { id: `b${n}`, status: "done", errorCode: null, endedAt: "" },
   videoUrl: `/api/productions/p${n}/video`,
+  outputDeleted: false,
   ...over,
 });
 

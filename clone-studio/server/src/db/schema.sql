@@ -80,6 +80,8 @@ CREATE TABLE IF NOT EXISTS productions (
                 CHECK (status IN ('queued','agent_running','awaiting_quota','asset_review',
                                   'awaiting_cost_confirm','building','done','failed',
                                   'tripped','interrupted','cancelled')),
+  -- ⑤ 删除了成片（REQ-007）：文件删掉、从网格隐藏；花费仍计入累计
+  output_deleted_at TEXT,
   created_at  TEXT NOT NULL,
   updated_at  TEXT NOT NULL
 );
@@ -201,6 +203,10 @@ CREATE TABLE IF NOT EXISTS builds (
   output_path    TEXT,
   -- 失败时记下的机器状态（可用内存）与最后一条进度，排查偶发渲染失败用（已知风险）
   context_json   TEXT,
+  -- ⑤ 成片的时长与封面帧（ffprobe / ffmpeg 取一次缓存下来；取不到也记下时间，不反复重试）
+  duration_s     REAL,
+  cover_path     TEXT,
+  meta_checked_at TEXT,
   started_at     TEXT,
   ended_at       TEXT,
   created_at     TEXT NOT NULL

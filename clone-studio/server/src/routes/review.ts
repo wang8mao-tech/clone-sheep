@@ -2,6 +2,9 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { present } from "../agent/agent-service.js";
 import { latestBuildRow, readProduction } from "../services/build-store.js";
+import { attachment } from "../lib/content-disposition.js";
+import { outputName, readOutputRow } from "../services/output-store.js";
+import { safeFileStem } from "../services/output-zip.js";
 import { EvidenceError } from "../services/evidence-types.js";
 import { approveReplica, reviewState, reworkReplica } from "../services/review.js";
 import { archiveErrorHandler } from "./errors.js";
@@ -32,13 +35,24 @@ export async function reviewRoutes(app: FastifyInstance): Promise<void> {
     return { job: present(reworkReplica(id, body.note)), review: reviewState(id) };
   });
 
-  /** 出片单位导出的 mp4（③ 验货右路）。最新一次 build 出完才有 */
+  /**
+   * 出片单位导出的 mp4（③ 验货右路、⑤ 成片播放）。最新一次 build 出完才有；删除过成片的没有。
+   * `?download=1` 带 Content-Disposition，以成片名下载（REQ-007、AC-020）
+   */
   app.get("/api/productions/:id/video", async (request, reply) => {
     const { id } = request.params as { id: string };
     if (!readProduction(id)) throw new EvidenceError("PRODUCTION_NOT_FOUND", "出片单位不存在。", 404);
+    const row = readOutputRow(id);
     const build = latestBuildRow(id);
     const noOutput = new EvidenceError("NO_OUTPUT", "这条还没有出好的片子。", 404);
-    if (!build || build.status !== "done" || !build.output_path) throw noOutput;
-    return sendVideoFile(request, reply, build.output_path, noOutput);
+    if (!row || row.output_deleted_at || !build || build.status !== "done" || !build.output_path) throw noOutput;
+    const download = (request.query as { download?: string }).download === "1";
+    return sendVideoFile(
+      request,
+      reply,
+      build.output_path,
+      noOutput,
+      download ? { "Content-Disposition": attachment(`${safeFileStem(outputName(row))}.mp4`, "output.mp4") } : {},
+    );
   });
 }

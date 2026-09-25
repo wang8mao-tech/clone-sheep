@@ -244,7 +244,8 @@ export function templateStats(template: TemplateRow): TemplateStats {
     d
       .prepare(
         `SELECT COUNT(*) AS n FROM productions
-          WHERE template_id = ? AND status = 'done' AND (kind = 'variant' OR (? = 'approved' AND id = ?))`,
+          WHERE template_id = ? AND status = 'done' AND output_deleted_at IS NULL
+            AND (kind = 'variant' OR (? = 'approved' AND id = ?))`,
       )
       .get(template.id, template.status, template.approved_replica_id) as { n: number }
   ).n;

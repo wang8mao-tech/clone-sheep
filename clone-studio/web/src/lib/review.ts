@@ -12,8 +12,10 @@ export interface ReviewVersion {
   status: string;
   createdAt: string;
   build: { id: string; status: string; errorCode: string | null; endedAt: string | null } | null;
-  /** 已出片的播放地址；没出片是 null */
+  /** 已出片的播放地址；没出片、或成片在 ⑤ 删掉了是 null */
   videoUrl: string | null;
+  /** 这一版的成片在 ⑤ 删掉了：不能通过，只能打回重出 */
+  outputDeleted: boolean;
 }
 
 export interface ReviewState {

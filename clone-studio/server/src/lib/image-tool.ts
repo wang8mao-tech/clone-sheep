@@ -19,14 +19,14 @@ export class ImageToolError extends Error {
 
 const TIMEOUT_MS = 60_000;
 
-function resolveTool(name: "ffmpeg" | "ffprobe"): string {
+export function resolveTool(name: "ffmpeg" | "ffprobe"): string {
   const found = which(name);
   if (!found) throw new ImageToolError("TOOL_MISSING", `${name} 不在 PATH，先在设置页的环境体检里装好`);
   if (found.isBatch) throw new ImageToolError("TOOL_MISSING", `${name} 是批处理垫片（${found.path}），需要真正的 exe`);
   return found.path;
 }
 
-function run(
+export function run(
   exe: string,
   args: readonly string[],
 ): Promise<{ code: number; stdout: string; stderr: string; timedOut: boolean }> {

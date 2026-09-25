@@ -51,6 +51,7 @@ function backend() {
         createdAt: "",
         build: { id: "b1", status: "done", errorCode: null, endedAt: "" },
         videoUrl: "/api/productions/p1/video",
+        outputDeleted: false,
       },
     ],
     approvable: db.status === "awaiting_review",

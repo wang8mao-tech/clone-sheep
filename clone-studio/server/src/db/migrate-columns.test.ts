@@ -189,4 +189,18 @@ describe("加列迁移", () => {
       job_ended_at: null,
     });
   });
+
+  it("老库补上成片库的列：productions.output_deleted_at、builds 的时长 / 封面 / 检查时间，已有记录不动（Task 9.1）", async () => {
+    const { db, migrate } = await freshModules();
+    const d = db();
+    migrate();
+    d.exec("ALTER TABLE productions DROP COLUMN output_deleted_at");
+    for (const c of ["duration_s", "cover_path", "meta_checked_at"]) d.exec(`ALTER TABLE builds DROP COLUMN ${c}`);
+    d.prepare("DELETE FROM schema_migrations WHERE version = 9").run();
+    expect(columnsOf(d, "productions")).not.toContain("output_deleted_at");
+
+    migrate();
+    expect(columnsOf(d, "productions")).toContain("output_deleted_at");
+    expect(columnsOf(d, "builds")).toEqual(expect.arrayContaining(["duration_s", "cover_path", "meta_checked_at"]));
+  });
 });

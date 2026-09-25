@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -75,6 +75,7 @@ describe("GET /api/productions/:id/video", () => {
     const missing = await server.inject({ url: `/api/productions/${v1}/video` });
     expect(missing.statusCode).toBe(403);
     await server.close();
+    rmSync(path.dirname(outside), { recursive: true, force: true });
   });
 });
 

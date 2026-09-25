@@ -5,6 +5,7 @@ import { appendReworkPending, REWORK_PENDING_TYPE } from "../agent/message-store
 import { rejectPrompt } from "../agent/prompts.js";
 import { ArchiveError, requireTemplate, type TemplateStatus } from "./archive.js";
 import { latestBuildRow } from "./build-store.js";
+import { readOutputRow } from "./output-store.js";
 import { latestReplica } from "./replicas.js";
 
 /**
@@ -27,6 +28,8 @@ export interface ReviewVersion {
   build: { id: string; status: string; errorCode: string | null; endedAt: string | null } | null;
   /** 已出片的播放地址（复刻片 mp4，走 range）；没出片是 null */
   videoUrl: string | null;
+  /** 这一版的成片在 ⑤ 删掉了 */
+  outputDeleted: boolean;
 }
 
 export interface ReviewState {
@@ -48,13 +51,14 @@ export function reviewState(templateId: string): ReviewState {
   const job = latestJobOf("template", templateId);
   const versions = roundReplicas(templateId, job).map(presentVersion);
   const latest = versions.at(-1);
+  // 最新一版的成片在 ⑤ 删掉了：不能通过它（approveReplica 也会拒），只能打回重出（9.1 第二轮审查 S2-M2）
   const reviewing = template.status === "awaiting_review" && latest?.status === "done";
   return {
     templateId,
     templateStatus: template.status,
     approvedReplicaId: template.approved_replica_id,
     versions,
-    approvable: reviewing,
+    approvable: reviewing && !latest?.outputDeleted,
     reworkable: reviewing && job?.status === "done" && Boolean(job.session_id),
     nextRound: job ? reworkCount(job.id) + 2 : 2,
   };
@@ -69,6 +73,10 @@ export function approveReplica(templateId: string, productionId: string): Review
   const latest = latestReplica(templateId);
   if (!latest || latest.id !== productionId || latest.status !== "done") {
     throw new ArchiveError("只能通过最新一版已出片的复刻片", "NOT_LATEST", 409);
+  }
+  // ⑤ 删掉了这一版的成片：通过它等于把一条看不见的片子当成第一条成片（9.1 审查 S2-1）
+  if (readOutputRow(productionId)?.output_deleted_at) {
+    throw new ArchiveError("这一版的成片已经在 ⑤ 删掉了，先打回重出一版", "OUTPUT_DELETED", 409);
   }
   if (activeJobsOf("template", templateId).length > 0) {
     throw new ArchiveError("复刻任务还在跑，等它结束再验货", "AGENT_ACTIVE", 409);
@@ -117,19 +125,22 @@ export function reworkReplica(templateId: string, note: string): AgentJobRow {
 function roundReplicas(templateId: string, job: AgentJobRow | undefined) {
   return db()
     .prepare(
-      `SELECT id, version, status, created_at FROM productions
+      `SELECT id, version, status, output_deleted_at, created_at FROM productions
         WHERE template_id = ? AND kind = 'replica' AND status <> 'cancelled' AND created_at >= ?
         ORDER BY version`,
     )
-    .all(templateId, job?.created_at ?? "") as Array<{
-    id: string;
-    version: number;
-    status: string;
-    created_at: string;
-  }>;
+    .all(templateId, job?.created_at ?? "") as VersionRow[];
 }
 
-function presentVersion(row: { id: string; version: number; status: string; created_at: string }): ReviewVersion {
+interface VersionRow {
+  id: string;
+  version: number;
+  status: string;
+  output_deleted_at: string | null;
+  created_at: string;
+}
+
+function presentVersion(row: VersionRow): ReviewVersion {
   const build = latestBuildRow(row.id);
   return {
     id: row.id,
@@ -137,7 +148,9 @@ function presentVersion(row: { id: string; version: number; status: string; crea
     status: row.status,
     createdAt: row.created_at,
     build: build ? { id: build.id, status: build.status, errorCode: build.error_code, endedAt: build.ended_at } : null,
-    videoUrl: row.status === "done" && build?.output_path ? `/api/productions/${row.id}/video` : null,
+    videoUrl:
+      row.status === "done" && build?.output_path && !row.output_deleted_at ? `/api/productions/${row.id}/video` : null,
+    outputDeleted: row.output_deleted_at !== null,
   };
 }
 

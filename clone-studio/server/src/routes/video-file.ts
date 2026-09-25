@@ -15,6 +15,8 @@ export async function sendVideoFile(
   reply: FastifyReply,
   file: string,
   notFound: EvidenceError,
+  /** 文件确实打开了才加的响应头（下载的 Content-Disposition：出错时别让浏览器把错误 JSON 存成 mp4） */
+  headers: Record<string, string> = {},
 ): Promise<FastifyReply> {
   const handle = await openInsideDataRoot(file, notFound);
   let handedOff = false;
@@ -24,6 +26,7 @@ export async function sendVideoFile(
     const info = await handle.stat();
     // 文件被换成了目录之类：当作没有，别让 read 冒出 500 EISDIR（复审 Q4）
     if (!info.isFile()) throw notFound;
+    for (const [name, value] of Object.entries(headers)) void reply.header(name, value);
     const size = info.size;
     void reply.header("Accept-Ranges", "bytes");
     // 工作目录里的文件会随重新导入 / 重出而变，别让浏览器缓存住旧的

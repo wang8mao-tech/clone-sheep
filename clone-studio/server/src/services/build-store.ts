@@ -50,6 +50,10 @@ export interface BuildRow {
   started_at: string | null;
   ended_at: string | null;
   created_at: string;
+  /** ⑤ 成片的时长与封面帧缓存（Task 9.1） */
+  duration_s?: number | null;
+  cover_path?: string | null;
+  meta_checked_at?: string | null;
 }
 
 export interface ProductionRow {

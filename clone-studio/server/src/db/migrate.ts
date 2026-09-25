@@ -99,6 +99,25 @@ const STEPS: ReadonlyArray<{ version: number; run: (d: ReturnType<typeof db>) =>
               WHERE status = 'approved' AND approved_replica_id IS NULL`);
     },
   },
+  {
+    // Task 9.1：成片库——删除成片的标记、成片的时长与封面帧缓存
+    version: 9,
+    run: (d) => {
+      const prod = new Set(
+        (d.prepare("PRAGMA table_info(productions)").all() as Array<{ name: string }>).map((c) => c.name),
+      );
+      if (prod.size > 0 && !prod.has("output_deleted_at"))
+        d.exec("ALTER TABLE productions ADD COLUMN output_deleted_at TEXT");
+      const builds = new Set(
+        (d.prepare("PRAGMA table_info(builds)").all() as Array<{ name: string }>).map((c) => c.name),
+      );
+      if (builds.size > 0) {
+        if (!builds.has("duration_s")) d.exec("ALTER TABLE builds ADD COLUMN duration_s REAL");
+        if (!builds.has("cover_path")) d.exec("ALTER TABLE builds ADD COLUMN cover_path TEXT");
+        if (!builds.has("meta_checked_at")) d.exec("ALTER TABLE builds ADD COLUMN meta_checked_at TEXT");
+      }
+    },
+  },
 ];
 
 /** agent_jobs 补列：老库里那张表已经存在，schema.sql 的 CREATE TABLE IF NOT EXISTS 不会给它加列 */

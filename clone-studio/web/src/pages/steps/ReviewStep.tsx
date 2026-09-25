@@ -146,6 +146,14 @@ function ReviewBody({ templateId }: { templateId: string }) {
             )
           }
         />
+      ) : shown.outputDeleted ? (
+        // 出片卡会说「已出片、在 ③ 并排看」，而文件已经删了（9.1 第三轮审查 S1-M2）
+        // 只在真能打回时才提打回：已通过验货、看的是旧版、会话不在，都打回不了（9.1 第四轮审查 S1-M1）
+        <p className="text-caption text-text-secondary">
+          {shown.id === latest.id && data.reworkable
+            ? "这一版的成片已在 ⑤ 删掉了，打回重出一版。"
+            : "这一版的成片已在 ⑤ 删掉了。"}
+        </p>
       ) : (
         <div className="max-w-[360px]">
           <BuildCard productionId={shown.id} />
@@ -229,7 +237,11 @@ function ActionBar({
   const approveBlocked = !data.approvable
     ? data.templateStatus === "approved"
       ? "已经通过验货了"
-      : "复刻片出好之后才能验货"
+      : data.versions.at(-1)?.outputDeleted
+        ? data.reworkable
+          ? "这一版的成片已在 ⑤ 删掉了，打回重出一版"
+          : "这一版的成片已在 ⑤ 删掉了"
+        : "复刻片出好之后才能验货"
     : !shownIsLatest
       ? `只能通过最新一版 v${latestVersion}`
       : undefined;

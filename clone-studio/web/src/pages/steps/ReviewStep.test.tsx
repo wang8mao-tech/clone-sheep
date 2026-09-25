@@ -11,6 +11,36 @@ beforeEach(() => {
   installReviewSources();
 });
 
+describe("通过验货的那一版在 ⑤ 删掉了（9.1 第四轮审查 S1-M1）", () => {
+  it("打回不了：只说删掉了，不提打回", async () => {
+    backend(
+      state({
+        templateStatus: "approved",
+        approvedReplicaId: "p1",
+        versions: [version(1, { videoUrl: null, outputDeleted: true })],
+        approvable: false,
+        reworkable: false,
+      }),
+    );
+    await mount();
+    expect(await screen.findByText("这一版的成片已在 ⑤ 删掉了。")).toBeInTheDocument();
+    expect(screen.queryByText(/打回重出/)).toBeNull();
+  });
+});
+
+describe("最新一版的成片在 ⑤ 删掉了（9.1 第二轮审查 S2-M2）", () => {
+  it("「通过」不可点并写明要打回重出", async () => {
+    backend(state({ versions: [version(1, { videoUrl: null, outputDeleted: true })], approvable: false }));
+    await mount();
+    const approve = await screen.findByRole("button", { name: /通过验货/ });
+    expect(approve).toBeDisabled();
+    expect(approve).toHaveAttribute("title", "这一版的成片已在 ⑤ 删掉了，打回重出一版");
+    // 右路不放出片卡：它会说「已出片、在 ③ 并排看」，而文件已经删了
+    expect(screen.getByText("这一版的成片已在 ⑤ 删掉了，打回重出一版。")).toBeInTheDocument();
+    expect(screen.queryByText("已出片")).toBeNull();
+  });
+});
+
 describe("并排播放与版本", () => {
   it("左原片右复刻片 v1，右路放出片单位的 mp4，逐帧按原片探测到的 fps", async () => {
     backend(state());

@@ -72,6 +72,18 @@ describe("listOutputs：网格收哪些", () => {
     expect(b.outputs.listOutputs(b.template.id)[0]).toMatchObject({ status: "failed", productionStatus: "tripped" });
   });
 
+  it("retryable 与 build/retry 同一套：出片失败能重试；重跑后（运行文件清掉）Agent 又失败、熔断都不能（9.2 第三轮审查 S1-1）", async () => {
+    const b = await bootOutputs();
+    const failed = b.production({ name: "出片失败", status: "failed" });
+    b.build(failed, { status: "failed", file: null });
+    const rerun = b.production({ name: "重跑后又失败", status: "failed", runPath: null });
+    b.build(rerun, { status: "failed", file: null });
+    const tripped = b.production({ name: "熔断", status: "tripped" });
+    b.build(tripped, { status: "failed", file: null });
+    const byName = Object.fromEntries(b.outputs.listOutputs(b.template.id).map((o) => [o.name, o.retryable]));
+    expect(byName).toEqual({ 出片失败: true, 重跑后又失败: false, 熔断: false });
+  });
+
   it("空模板给空表；模板不存在 404", async () => {
     const b = await bootOutputs();
     expect(b.outputs.listOutputs(b.template.id)).toEqual([]);

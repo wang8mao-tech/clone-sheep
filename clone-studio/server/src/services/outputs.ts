@@ -1,8 +1,10 @@
 import { notify } from "../agent/agent-service.js";
+import { latestJobOf } from "../agent/job-store.js";
 import { db } from "../db/index.js";
 import { ArchiveError, normalizeName, requireTemplate } from "./archive.js";
 import type { BuildView } from "./build-store.js";
 import { latestBuild, logBackgroundError } from "./build-run.js";
+import { currentEstimate } from "./estimate-store.js";
 import { productionCosts } from "./output-costs.js";
 import { cachedOutputMeta, ensureOutputMeta } from "./output-meta.js";
 import { downloadableFile } from "./output-zip.js";
@@ -16,6 +18,13 @@ import {
 } from "./output-store.js";
 
 /** ⑤ 成片库（REQ-007、SCREEN-008）：网格里的出片单位、改名。收哪些见 LISTED */
+
+export interface OutputStop {
+  step: "estimate" | "build" | "agent";
+  text: string;
+  /** Agent 那一段停下时任务的原始停因（`budget：花费达到上限`、`user_abort` …）：界面用 ④ 同一个 describeStop 翻成人话 */
+  reason?: string | null;
+}
 
 export type OutputStatus = "done" | "building" | "pending" | "failed" | "cancelled" | "interrupted";
 
@@ -39,6 +48,17 @@ export interface OutputView {
   costIsEstimate: boolean;
   /** 完成且文件还在：能播放、下载、打包 */
   downloadable: boolean;
+  /**
+   * 能「重试出片」：与 build/retry 同一套判断（失败 / 中断、出过片、最近一次出片失败或被取消、还有运行文件）。
+   * 变体在 ④ 重跑后运行文件清掉了，Agent 再失败时旧的出片失败还在台账里，前端分不出来，由这里说（9.2 第三轮审查 S1-1）
+   */
+  retryable: boolean;
+  /**
+   * 停下的变体 / 复刻片停在哪一步、原文是什么：先说哪一步失败，再给原文（Design-Brief §6.2）。
+   * 顺序同 ④ 的 stopReason：估价比最近一次出片新而没过 → 估价；能重试出片 → 出片；变体 Agent 那一段停下 → Agent。
+   * 由服务端给，前端不再从卡片状态猜（9.2 第四轮审查 S1-H1 / S1-M1）
+   */
+  stop: OutputStop | null;
   build: BuildView | null;
   createdAt: string;
   updatedAt: string;
@@ -64,6 +84,28 @@ function replicaHead(templateId: string): number | null {
     .prepare("SELECT MAX(version) AS v FROM productions WHERE template_id = ? AND kind = 'replica' AND status = 'done'")
     .get(templateId) as { v: number | null };
   return newest.v;
+}
+
+const STOPPED = new Set(["failed", "interrupted", "tripped"]);
+
+function stopOf(row: ProductionOutputRow, build: BuildView | null, retryable: boolean): OutputStop | null {
+  if (!STOPPED.has(row.status)) return null;
+  const estimate = currentEstimate(row.id);
+  if (estimate?.decision === "blocked" && (!build || estimate.createdAt > build.createdAt)) {
+    return {
+      step: "estimate",
+      text: ["估价没过，不出片", estimate.reason ?? estimate.error].filter(Boolean).join("\n"),
+    };
+  }
+  if (retryable && build) {
+    const head = `出片失败${build.errorCode ? ` · ${build.errorCode}` : ""}`;
+    return { step: "build", text: [head, build.errorMessage].filter(Boolean).join("\n") };
+  }
+  if (row.kind === "variant") {
+    const job = latestJobOf("production", row.id);
+    return { step: "agent", text: "Agent 写稿停下", reason: job?.stop_reason ?? null };
+  }
+  return null;
 }
 
 function cardStatus(row: ProductionOutputRow): OutputStatus {
@@ -116,6 +158,11 @@ export function listOutputs(templateId: string): OutputView[] {
     if (done && build && !meta) missing.push(build.id);
     const cost = productionCosts(row);
     const approved = row.id === template.approved_replica_id;
+    const retryable =
+      (row.status === "failed" || row.status === "interrupted") &&
+      row.run_path !== null &&
+      build !== null &&
+      (build.status === "failed" || build.status === "cancelled");
     return {
       id: row.id,
       kind: row.kind,
@@ -130,6 +177,8 @@ export function listOutputs(templateId: string): OutputView[] {
       costUsd: cost.totalUsd,
       costIsEstimate: cost.totalIsEstimate,
       downloadable: done,
+      retryable,
+      stop: stopOf(row, build, retryable),
       build,
       createdAt: row.created_at,
       updatedAt: row.updated_at,

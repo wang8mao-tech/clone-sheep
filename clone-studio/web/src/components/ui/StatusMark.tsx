@@ -42,10 +42,24 @@ const SPEC: Record<StatusKind, Spec> = {
   cancelled: { label: "已取消", dot: "bg-text-tertiary", text: "text-text-tertiary", strike: true },
 };
 
-export function StatusMark({ status, label }: { status: StatusKind; label?: string }) {
+export function StatusMark({
+  status,
+  label,
+  size = "md",
+}: {
+  status: StatusKind;
+  label?: string;
+  /** sm = 11px：⑤ 成片卡片下的状态行（设计稿 11px），其余照旧 13px */
+  size?: "md" | "sm";
+}) {
   const spec = SPEC[status];
   return (
-    <span className="inline-flex items-center gap-2 whitespace-nowrap">
+    <span
+      className={[
+        "inline-flex items-center whitespace-nowrap",
+        size === "sm" ? "max-w-full min-w-0 gap-1" : "gap-2",
+      ].join(" ")}
+    >
       <span
         aria-hidden
         className={[
@@ -55,11 +69,22 @@ export function StatusMark({ status, label }: { status: StatusKind; label?: stri
           spec.hatched ? "opacity-60 outline-1 outline-text-tertiary outline-dashed" : "",
         ].join(" ")}
       />
-      <span className={[spec.text, "text-[13px]", spec.strike ? "line-through" : ""].join(" ")}>
+      <span
+        className={[
+          spec.text,
+          // 小号用在窄卡片里：放不下就省略号，不硬裁（9.2 第三轮审查 S1-2）
+          size === "sm" ? "min-w-0 truncate text-[11px]" : "text-[13px]",
+          spec.strike ? "line-through" : "",
+        ].join(" ")}
+      >
         {label ?? spec.label}
       </span>
-      {spec.icon === "check" ? <Check aria-hidden className="size-3.5 text-success" /> : null}
-      {spec.icon === "cross" ? <X aria-hidden className="size-3.5 text-danger" /> : null}
+      {spec.icon === "check" ? (
+        <Check aria-hidden className={`${size === "sm" ? "size-3" : "size-3.5"} text-success`} />
+      ) : null}
+      {spec.icon === "cross" ? (
+        <X aria-hidden className={`${size === "sm" ? "size-3" : "size-3.5"} text-danger`} />
+      ) : null}
     </span>
   );
 }

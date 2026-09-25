@@ -1,24 +1,13 @@
 import { useParams } from "react-router";
-import { isStepKey, type StepKey } from "../../lib/steps.js";
+import { isStepKey } from "../../lib/steps.js";
 import { CloneStep } from "./CloneStep.js";
+import { OutputsStep } from "./OutputsStep.js";
 import { ReferenceStep } from "./ReferenceStep.js";
 import { ReviewStep } from "./ReviewStep.js";
 import { VariantsStep } from "./VariantsStep.js";
 
-/** 每一步的工作区各自在哪个 Phase 落地，写清楚免得看的人以为忘了做 */
-const OWNER: Record<Exclude<StepKey, "reference" | "clone" | "review" | "variants">, string> = {
-  outputs: "Phase 9：成片库、下载与花费明细",
-};
-
-const TITLE: Record<Exclude<StepKey, "reference" | "clone" | "review" | "variants">, string> = {
-  outputs: "⑤ 成片",
-};
-
 /**
- * 步骤工作区。
- *
- * ①参考 在 Phase 4 落地、②复刻 在 Phase 6、③验货 在 Phase 7、④变体 在 Phase 8；⑤成片属于 Phase 9，这里如实标出归属，
- * 而不是放一句含糊的「敬请期待」。
+ * 步骤工作区：①参考（Phase 4）、②复刻（Phase 6）、③验货（Phase 7）、④变体（Phase 8）、⑤成片（Phase 9）。
  */
 export function StepWorkspace() {
   const { step } = useParams();
@@ -29,11 +18,5 @@ export function StepWorkspace() {
   if (step === "clone") return <CloneStep />;
   if (step === "review") return <ReviewStep />;
   if (step === "variants") return <VariantsStep />;
-
-  return (
-    <section aria-label={`${TITLE[step]} 工作区`} className="rounded-md border border-dashed border-border p-6">
-      <h2 className="text-[13px] font-semibold text-text">{TITLE[step]}</h2>
-      <p className="mt-1 text-[13px] text-text-secondary">这一步的工作区在 {OWNER[step]} 落地。</p>
-    </section>
-  );
+  return <OutputsStep />;
 }

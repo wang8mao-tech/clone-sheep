@@ -50,6 +50,7 @@ export function ConfirmDangerDialog({
   return (
     <dialog
       ref={ref}
+      aria-label={title}
       onCancel={(e) => {
         e.preventDefault();
         if (!busy) onCancel();

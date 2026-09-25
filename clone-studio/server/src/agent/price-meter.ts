@@ -11,6 +11,10 @@ import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
  *   输出只记了 1（Task 10.5 假端点实测：assistant 里 output_tokens=1，result 里是 1,000,000）
  * - 收尾 result 的 `usage`（主循环这一段 turn 的合计，SDK 注明 per-turn）。
  *   不读 result 的 modelUsage / total_cost_usd：resume 的会话会把转录里之前的累计也带上，和已记下的花费重复
+ *
+ * 另加自动 / 手动压缩：压缩那次调用不出 assistant 消息也不出流式事件，result 的 usage 也不含它
+ * （Task 10.5 假端点实测：resume 时先压缩，上游收到两次调用、只记了一次）。按 compact_boundary 的
+ * pre_tokens（压缩时读入的整段上下文）记输入、post_tokens（压缩后的摘要）记输出，单独加在上面。
  */
 interface Usage {
   input_tokens?: number | null;
@@ -27,6 +31,7 @@ export class PriceMeter {
   private readonly current = new Map<string, string>();
   private anonymous = 0;
   private settled = 0;
+  private compactions = 0;
 
   constructor(private readonly pricing: { in: number; out: number }) {}
 
@@ -82,6 +87,11 @@ export class PriceMeter {
       if (message.usage) this.settled = Math.max(this.settled, this.priced(message.usage));
       return;
     }
+    if (message.type === "system" && message.subtype === "compact_boundary") {
+      const { pre_tokens, post_tokens } = message.compact_metadata;
+      this.compactions += this.priced({ input_tokens: pre_tokens, output_tokens: post_tokens ?? 0 });
+      return;
+    }
     if (message.type !== "assistant") return;
     const { usage } = message.message;
     if (!usage) return;
@@ -94,6 +104,6 @@ export class PriceMeter {
   get cost(): number {
     let streamed = 0;
     for (const value of this.calls.values()) streamed += value;
-    return Math.max(streamed, this.settled);
+    return Math.max(streamed, this.settled) + this.compactions;
   }
 }

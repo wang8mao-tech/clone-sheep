@@ -96,6 +96,26 @@ describe("花费口径", () => {
     expect(store.requireJob(j.id).cost_usd).toBeCloseTo(5.5);
   });
 
+  it("按单价折算：继续时 SDK 先压缩——压缩那次调用也记上，超线就熔断（Task 10.5 真机）", async () => {
+    const { scheduler, calls, profiles, store } = await withProfiles();
+    const p = profiles.createProfile(DEEPSEEK);
+    const j = scheduler.enqueue({ ...job("t1"), profileId: p.id });
+    calls[0]!.emit(init("s-1"));
+    calls[0]!.emit(assistant("m1", 1_000_000, 0)); // $1
+    await scheduler.abort(j.id);
+    scheduler.continueJob(j.id);
+    calls[1]!.emit(init("s-1"));
+    // 压缩：读入 500 万上下文、摘要 1 万——没有 assistant、没有流式事件
+    calls[1]!.emit({
+      type: "system",
+      subtype: "compact_boundary",
+      compact_metadata: { trigger: "auto", pre_tokens: 5_000_000, post_tokens: 10_000 },
+    });
+    await flush();
+    expect(store.requireJob(j.id)).toMatchObject({ status: "tripped", cost_basis: "price" });
+    expect(store.requireJob(j.id).cost_usd).toBeCloseTo(1 + 5.01);
+  });
+
   it("按单价折算：继续之后叠在已记下的花费上", async () => {
     const { scheduler, calls, profiles, store } = await withProfiles();
     const p = profiles.createProfile(DEEPSEEK);

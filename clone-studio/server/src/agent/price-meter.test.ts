@@ -122,3 +122,51 @@ describe("PriceMeter：代理不回消息 id 的流式事件（10.4 第二轮审
     expect(meter.cost).toBeCloseTo(8);
   });
 });
+
+describe("PriceMeter：压缩那次调用（Task 10.5 真机：resume 先压缩，上游两次调用只记了一次）", () => {
+  const compact = (pre: number, post?: number) =>
+    ({
+      type: "system",
+      subtype: "compact_boundary",
+      compact_metadata: { trigger: "auto", pre_tokens: pre, ...(post === undefined ? {} : { post_tokens: post }) },
+    }) as unknown as SDKMessage;
+  const ev = (event: Record<string, unknown>) =>
+    ({ type: "stream_event", event, parent_tool_use_id: null }) as unknown as SDKMessage;
+  const result = (input: number, output: number) =>
+    ({
+      type: "result",
+      subtype: "success",
+      usage: { input_tokens: input, output_tokens: output },
+    }) as unknown as SDKMessage;
+
+  it("compact_boundary 按 pre_tokens 记输入、post_tokens 记输出，加在这段运行的调用之上", () => {
+    const meter = new PriceMeter({ in: 1, out: 2 });
+    meter.observe(compact(3_000_000, 500_000));
+    expect(meter.cost).toBeCloseTo(4);
+    meter.observe(ev({ type: "message_start", message: { id: "m1", usage: { input_tokens: 1_000_000 } } }));
+    meter.observe(ev({ type: "message_delta", usage: { output_tokens: 1_000_000 } }));
+    expect(meter.cost).toBeCloseTo(7);
+  });
+
+  it("result 的合计不含压缩：收尾之后压缩那笔仍在（不被 result 的 max 吃掉）", () => {
+    const meter = new PriceMeter({ in: 1, out: 1 });
+    meter.observe(compact(2_000_000));
+    meter.observe(ev({ type: "message_start", message: { id: "m1", usage: { input_tokens: 1_000_000 } } }));
+    meter.observe(result(1_000_000, 1_000_000));
+    expect(meter.cost).toBeCloseTo(4);
+  });
+
+  it("没有 post_tokens：只按输入记；一段里压缩两次各记一笔", () => {
+    const meter = new PriceMeter({ in: 1, out: 1 });
+    meter.observe(compact(1_000_000));
+    meter.observe(compact(1_000_000, 1_000_000));
+    expect(meter.cost).toBeCloseTo(3);
+  });
+
+  it("别的 system 消息（init、status compacting）不计价", () => {
+    const meter = new PriceMeter({ in: 1, out: 1 });
+    meter.observe({ type: "system", subtype: "init" } as unknown as SDKMessage);
+    meter.observe({ type: "system", subtype: "status", status: "compacting" } as unknown as SDKMessage);
+    expect(meter.cost).toBe(0);
+  });
+});

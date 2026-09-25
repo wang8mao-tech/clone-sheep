@@ -80,7 +80,7 @@ describe("AgentFeed 跟随的变体不存在（9.3 审查 S2-L5）", () => {
     };
     const feed = new AgentFeed(TPL, api, "v9");
     await feed.connected();
-    expect(feed.getState()).toMatchObject({ job: null, loaded: true });
+    expect(feed.getState()).toMatchObject({ job: null, loaded: true, missing: true });
   });
 });
 

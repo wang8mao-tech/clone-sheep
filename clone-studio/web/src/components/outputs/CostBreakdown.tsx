@@ -73,7 +73,7 @@ function Tables({ data }: { data: OutputCosts }) {
             <thead className={N_HEAD}>
               <tr className="border-b border-border">
                 <th className={th}>模型</th>
-                <th className={`${th} w-[56px]`}>时长</th>
+                <th className={`${th} w-[72px]`}>时长</th>
                 <th className={`${th} w-[104px] text-right`}>等价花费</th>
               </tr>
             </thead>
@@ -93,8 +93,10 @@ function Tables({ data }: { data: OutputCosts }) {
                       </span>
                     ) : null}
                   </td>
-                  <td className={`${td} font-mono tabular-nums`}>{formatDuration(a.elapsedMs)}</td>
-                  <td className={`${td} text-right`}>
+                  <td className={`${td} font-mono tabular-nums ${N_LABEL}`} data-label="时长">
+                    {formatDuration(a.elapsedMs)}
+                  </td>
+                  <td className={`${td} text-right ${N_LABEL}`} data-label="等价花费">
                     <Money usd={a.costUsd} estimate />
                   </td>
                 </tr>

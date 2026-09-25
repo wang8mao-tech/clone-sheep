@@ -142,5 +142,7 @@ describe("通过与换参考视频", () => {
     });
     const row = b.db().prepare("SELECT approved_replica_id FROM templates WHERE id = ?").get(b.templateId);
     expect(row).toEqual({ approved_replica_id: null });
+    // 等新一轮证据跑完再收尾：不然它在临时目录删掉之后还写库，把目录又建出来（Phase 9 收口查出的临时目录泄漏）
+    await until(() => ["done", "failed"].includes(b.evidence.evidenceState(b.templateId).status), "新证据跑完");
   });
 });

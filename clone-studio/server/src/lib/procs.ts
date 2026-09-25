@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 
 /** Agent 会话进程的登记名：删对象时按它判定要不要连子孙一起杀 */
@@ -18,18 +18,41 @@ const FORCE_KILL_GRACE_MS = 2_000;
  * 拿 -pid 去杀要么 ESRCH 被静默吞掉、要么 PID 复用时误伤无关进程组。
  * v1 只跑本机 Windows（Spec OUT-002），POSIX 这条路退回只杀进程本身，
  * 宁可漏掉孙进程也不能杀错人。
+ *
+ * taskkill 默认异步起：它要枚举整棵进程树，机器忙（本机渲染、无头浏览器）时要几百毫秒到几十秒，
+ * 同步等会把整个后端卡住——出片交接时每次卡 0.5 秒，Phase 8 真机还卡过一次 27 秒（Task 9.4 CPU profile 定位）。
+ * 调用方本来就靠 exit 事件判断死没死，不需要等 taskkill 返回。只有后端退出收尸（killAll）要同步：进程马上要没了，
+ * 异步起的 taskkill 来不及跑。
  */
-function forceKillTree(child: ChildProcess, pid: number): void {
+function forceKillTree(child: ChildProcess, pid: number, mode: "async" | "sync" = "async"): Promise<void> {
   try {
-    if (process.platform === "win32") {
-      spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
-    } else {
+    if (process.platform !== "win32") {
       child.kill("SIGKILL");
+      return Promise.resolve();
     }
+    const args = ["/PID", String(pid), "/T", "/F"];
+    if (mode === "sync") {
+      spawnSync("taskkill", args, { stdio: "ignore", windowsHide: true });
+      return Promise.resolve();
+    }
+    const killer = spawn("taskkill", args, { stdio: "ignore", windowsHide: true });
+    // 返回 taskkill 自己结束的时刻：删目录之前要等它把孙进程也杀完（只等、不堵事件循环；9.4 审查 S2-M1）。
+    // 进程可能已经自己退了（taskkill 报找不到）：杀不到就是好事，错误也当结束
+    return new Promise<void>((resolve) => {
+      killer.once("exit", () => resolve());
+      killer.once("error", () => resolve());
+    });
   } catch {
-    // 进程可能已经自己退了，杀不到就是好事
+    // 同上
+    return Promise.resolve();
   }
 }
+
+/** taskkill 最多等这么久：再久就不等了，后面删目录撞 EPERM 照常报 DIRECTORY_BUSY */
+const KILLER_CAP_MS = 30_000;
+
+/** taskkill 结束后父进程的 exit 还没到：最多再等这么久 */
+const EXIT_AFTER_KILLER_MS = 500;
 
 /** 子进程归属哪个对象。删除客户/模板时要按它定位并中止（REQ-001 MUST）。 */
 export interface ProcSubject {
@@ -133,7 +156,7 @@ class ProcRegistry {
       child.kill("SIGTERM");
 
       killTimer = setTimeout(() => {
-        forceKillTree(child, pid);
+        void forceKillTree(child, pid);
         // 强杀后再给一点时间收 exit 事件；还不来就不等了，
         // 真没退的话后面移目录会撞 EPERM，照常报 DIRECTORY_BUSY
         graceTimer = setTimeout(finish, FORCE_KILL_GRACE_MS);
@@ -159,7 +182,8 @@ class ProcRegistry {
     if (!entry) return false;
     const { child } = entry;
     if (child.exitCode !== null || child.signalCode !== null) return true;
-    await new Promise<void>((resolve) => {
+    let killerDone: Promise<void> = Promise.resolve();
+    const parentGone = new Promise<void>((resolve) => {
       const timer = setTimeout(done, graceMs);
       function done(): void {
         clearTimeout(timer);
@@ -167,8 +191,29 @@ class ProcRegistry {
         resolve();
       }
       child.once("exit", done);
-      forceKillTree(child, pid);
+      killerDone = forceKillTree(child, pid);
     });
+    // 父进程退了（或宽限到了）并且 taskkill 本身跑完（封顶 30 秒）才返回：父进程先没了而孙进程还在杀的那段，
+    // 调用方（删对象）紧接着改名目录会撞占用
+    let cap: NodeJS.Timeout | undefined;
+    await Promise.all([
+      parentGone,
+      Promise.race([killerDone, new Promise<void>((r) => (cap = setTimeout(r, KILLER_CAP_MS)))]).finally(() =>
+        clearTimeout(cap),
+      ),
+    ]);
+    // 宽限先到期、taskkill 刚结束：目标多半已经死了，只是 exit 还没派发出来——再等一小会儿（9.4 第二轮审查 S2-L1）
+    if (child.exitCode === null && child.signalCode === null) {
+      await new Promise<void>((resolve) => {
+        const t = setTimeout(done, EXIT_AFTER_KILLER_MS);
+        function done(): void {
+          clearTimeout(t);
+          child.off("exit", done);
+          resolve();
+        }
+        child.once("exit", done);
+      });
+    }
     return true;
   }
 
@@ -186,7 +231,7 @@ class ProcRegistry {
       // Windows 上先连树杀，父进程还在时 taskkill /T 才枚举得到子孙（复审 S2-M1 实测）；
       // POSIX 上 SIGTERM 可捕获，先给一次体面退出的机会，再 SIGKILL
       if (process.platform !== "win32") entry.child.kill("SIGTERM");
-      forceKillTree(entry.child, pid);
+      void forceKillTree(entry.child, pid, "sync");
     }
     this.entries.clear();
   }

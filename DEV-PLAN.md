@@ -823,6 +823,25 @@ start / continue / auto_resume，`continueJob(jobId, note)` 区分不了打回�
 - `clone-studio/server/src/hypit/workspace.ts` — 修改：bindings 与 package-root
 - `clone-studio/web/src/pages/settings/CodexImage.tsx`
 
+**技术核实（2026-09-25，spike 在 scratch 里跑，hypit 0.2.6）**：
+- Provider 形状：`@hypit/hypit/endpoint-kit` 的 `defineEndpointPackage` + `lifecycle: "immediate"`（本机进程，handler 直接回结果，不走 start/poll）；`pricing: { kind: "local" }` → plan 里 `localRequestCount` 计 1、`pricing.kind: local`，现有估价逻辑自动算 $0。
+  activation 直接写 `.ts`（`hypit.activation: "./src/activation.ts"`）能被加载：发行版在 CLI 与 Worker 进程里都注册了 tsx，spike 里 plan 解析到 endpoint、build 由 Worker 调到 handler 并把 handler 的错误原文带回 build failure。不用先编译。
+- 包怎么让 hypit 找到：`--package-root` 只有 `check / plan / pricing / build` 认；`doctor`、`programs`、`runtime` 都不认，profile 里一出现这个包就报「cannot resolve installed package」——whisperx 的 `programs up`、收尾的 `runtime down`、体检的 `doctor` 全会坏。
+  而且已经在跑的 Worker 会被复用、不看新的 package-root。hypit 找包时会从工作目录往上逐级查 `node_modules/<包名>`，所以改为：宿主把 Provider 包同步一份到 `<数据根>/node_modules/@clone-studio/codex-image`（所有模板工作目录都在数据根下），spike 里 doctor / programs status / plan / build 不带任何参数都通过。
+  **不追加 `--package-root`**（Spec 与原计划写的是追加，按上面的证据改，Spec 同步）。
+- 本机 codex 是 npm 的 `.cmd` 垫片（`%APPDATA%\npm\codex.cmd` → `node …\@openai\codex\bin\codex.js`）；`shell: false` 起不了 `.cmd`，宿主解析出 `codex.js` 用 `node codex.js …` 起，原生 `.exe` 就直接起。
+- gpt-image 端口：prompt、aspectRatio（16 种）、resolution（1K / 2K / 4K）、background（transparent / opaque / auto，可省）、images（最多 16 张参考图）。Provider 只收 ≤4 张参考图，background=transparent 回「不支持」（plan 阶段就拒，不起 Codex）。
+
+**Task 拆分（2026-09-25）**，按序做，每个走 review→fix 循环，两阶段 PASS 后单独 commit：
+
+| Task | 内容 | 覆盖 | 状态 |
+|---|---|---|---|
+| 11.1 | Provider 包（`clone-studio/providers/codex-image`，pnpm workspace 成员，进 `pnpm run check`）：`codex-runner` 按 REQ-011 的参数数组起 codex（`shell: false`、清 `NODE_OPTIONS`、Windows elevated 沙箱、一图一进程、参考图最多 4 张走 `--image`、10 分钟超时杀进程树、JSONL 按行切分单行上限 4 MB、首条 `thread.started` 取 thread_id）；提示词里 `$imagegen` 恰好一次、结尾「仅生成图片…」、要求复制到 `./images/<name>.png`；成败：exit 0 且产物存在且 >0 字节；找图两路互为兜底（`<cwd>/images/<name>.png`、`$CODEX_HOME/generated_images/<thread_id>/` 运行区间内最新 PNG）；JSONL `error` 事件或 stderr 含 rate limit / quota → 失败带原文；exit 0 没图 → 失败带 JSONL 末段；`supports`：透明背景、>4 张参考图、非 gpt-image 端口 → 不支持并写原因；零价 `pricing: local`；activation 配置（codex 命令与前置参数、CODEX_HOME、超时、并发）严格校验。单测用假 codex（node 脚本）驱动，生命周期测试走 hypit 的 EndpointRegistry，不发真实请求 | REQ-011 Provider、AC-032 | ✅ 两轮 review→fix，第二轮两阶段 PASS（首轮 2 MEDIUM：清理临时目录抛错会盖掉原来的结果、甚至把成功判成失败（Windows 上进程还占着目录时 EPERM）——改为带重试、失败只报诊断；JSONL 末段与错误原文不截断，一条 Build 错误最大可到几十 MB——逐行截断、错误最多 8 条。另收：杀了之后没有第二道截止、同步 spawn 异常没前缀、额度原话「usage limit」认不出、超时与单行超长没有 provider 层用例、参考图扩展名。第二轮只剩 LOW，提交前收了两条：codex 已退出但孙进程占着管道时宽限计时不启动（实测复现后修）、截断只留开头会切掉行尾的额度原话（改为留头留尾））。端到端：scratch 里用真实 `hypit build` + 假 codex 出图 complete、`none` 模式 build 失败带 JSONL 末段。变异自检 37 条全杀（独立拷贝，工作区 md5 未变） |
+| 11.2 | 宿主接入（server）：Provider 包同步到数据根 `node_modules`（启动时与启用时，只动这个目录、比对内容有变才写、不顺链接）；启用后 runtime profile 写 `codex.local` endpoint 与 `@hypit/gpt-image@1#gpt-image-2` 绑定、并发 1，config 由宿主解析 codex 入口；体检行改为 CLI ≥0.128 且 `$CODEX_HOME/auth.json`（默认 `~/.codex`）存在，只看在不在、不读内容，未过提示 `codex login`；启用开关服务端校验体检，不过不让开；「试出一张图」接口：在临时 hypit 工程里 build 一个只含一个 gpt:Image 的 run，回图、耗时、Codex 原文错误；台账：估价行记张数（gpt-image 走 codex 的请求数）；guard 禁止 Agent 写数据根 `node_modules`。Spec（+CHANGELOG）同步 | REQ-011 宿主、AC-031、AC-033 后端 | |
+| 11.3 | 设置页 Codex（web）：生成服务分区里 Codex 行（版本、登录状态、未过时写 `codex login`）、启用开关（体检不过禁用并写原因）、「试出一张图」（进行中、成功显示图与耗时、失败展开原文、再试）；CMP-008 Build 表 codex 那行显示张数 | REQ-011 界面、AC-033 前端 | |
+| 11.4 | Phase 10 交接：压缩失败（`status` 带 `compact_result: failed`，SDK 不给 token 数）按这一段最近一次调用读入的上下文估一笔；⑤ 成片卡片与模板累计遇「未知（没填单价）」标「含未知」；拦截读凭据变量补 PowerShell `env:ANTH*` 通配与 Git Bash `/c/Users/...` 形式路径 | Phase 10 交接 | |
+| 11.5 | Phase 11 真机验收与收口：隔离环境；AC-031 启用后出一条含 1 个 gpt-image 请求的片子（真实 Codex，贴子进程命令行、PNG 尺寸、build 里的图、台账 $0 与张数 1）；「试出一张图」成功一次；AC-032 假 codex（exit 0 不出图）真跑；AC-033 CODEX_HOME 指向空目录模拟未登录截图；全程开 CDP Network 事件，遇请求卡住就记下并定性；四步验证 | Phase 11 验收标准 | |
+
 **验收标准**：
 - AC-031、AC-032、AC-033 通过
 - Provider 自带的生命周期测试不发真实请求即可跑过

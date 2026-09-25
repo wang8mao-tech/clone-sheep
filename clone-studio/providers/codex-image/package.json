@@ -1,0 +1,22 @@
+{
+  "name": "@clone-studio/codex-image",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Clone Studio 自有的 Hypit Provider：经本机 Codex CLI 的 $imagegen 用订阅额度出图（REQ-011）",
+  "hypit": {
+    "activation": "./src/activation.ts"
+  },
+  "exports": {
+    ".": "./src/provider.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0",
+    "vitest": "^5.0.0"
+  }
+}

@@ -1,6 +1,6 @@
 # 产品需求规范：Clone Studio（暂定名）
 
-> 版本 v1.10.3 · 2026-09-25 · 内核：Hypit 0.2.6（本地副本 `hypit-main/`）· 技术调研见 `Hypit-Research.md`
+> 版本 v1.10.4 · 2026-09-25 · 内核：Hypit 0.2.6（本地副本 `hypit-main/`）· 技术调研见 `Hypit-Research.md`
 > Phase 0 先行验证结论见 `clone-studio/docs/spike-notes.md`，本版据其回写。
 
 ## 0. AI 使用说明
@@ -526,11 +526,11 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 - MUST Windows 上带 `-c windows.sandbox="elevated"`；不得用 `unelevated` 或 `danger-full-access`。
 - MUST 提示词里 `$imagegen` 出现且只出现一次；末尾写明"仅生成图片；不要写入、复制或修改任何其它文件"；要求把成品复制到 `./images/<name>.png`。
 - MUST 成败判定：exit code 0 且产物文件存在且大小 > 0 才算成功。找图两条路互为兜底：`<cwd>/images/<name>.png`；`~/.codex/generated_images/<thread_id>/` 下修改时间落在本次运行区间内的最新 PNG（thread_id 取自 JSONL 首条 `thread.started`）。
-- MUST JSONL 出现 `error` 事件，或 stderr 含 `rate limit` / `quota` → 失败，原文进 Build 错误，由"重试出片"接续。
-- MUST 单张超时 10 分钟，超时 kill 子进程。JSONL 按行切分的单行上限 4 MB。
+- MUST JSONL 出现 `error` 事件（Codex 断流重连时发的「Reconnecting... n/m」是进度提示，不算）或 `turn.failed`，或 stderr 含 `rate limit` / `quota` / `usage limit`（订阅额度用完的原话是「You've hit your usage limit…」）→ 失败，原文进 Build 错误，由"重试出片"接续。带回的原文有上限：JSONL 末段每行、每条错误原文截断并标明，避免一条 Build 错误有几 MB。
+- MUST 单张超时 10 分钟，超时 kill 子进程（杀了仍不退出的，宽限期后不再等，照样判超时）。JSONL 按行切分的单行上限 4 MB。比例与分辨率写进提示词，Codex 不保证产出尺寸与之一致。
 - MUST 该 Provider 的请求在 plan/pricing 里计为零价，台账记录张数。
 - MUST 设置页体检增加：Codex CLI ≥ 0.128 且 `~/.codex/auth.json` 存在；提供"试出一张图"按钮。
-- MUST 不支持透明背景：请求带透明背景参数时以"不支持"失败，不静默忽略。
+- MUST 不支持透明背景：请求带透明背景参数时以"不支持"失败，不静默忽略。参考图超过 4 张同样以"不支持"失败。两者都在 plan 阶段由 Provider 的 supports 拒掉，不起 Codex。
 - MUST NOT 直连 `chatgpt.com/backend-api`。
 - MUST NOT 把 `--sandbox workspace-write` 收紧到禁止执行命令。内置 `image_gen` 不接受目标路径参数，Codex 是先生成到 `$CODEX_HOME/generated_images/` 再执行一条复制命令把图搬到 `./images/`，禁命令就拿不到图。
 - SHOULD 并发默认 1（订阅额度约 40-50 张 / 3 小时滚动窗口）。单张固定带约 87K input tokens 开销（Codex 每次先读一遍 `imagegen/SKILL.md`，其中约 71K 命中缓存），美元计价仍为 $0，但影响单张耗时。

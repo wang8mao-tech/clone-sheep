@@ -40,7 +40,7 @@ export default tseslint.config(
   },
 
   {
-    files: ["server/**/*.ts"],
+    files: ["server/**/*.ts", "providers/**/*.ts"],
     languageOptions: { globals: globals.node },
   },
 

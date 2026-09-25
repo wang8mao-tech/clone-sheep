@@ -1,6 +1,6 @@
 # 产品需求规范：Clone Studio（暂定名）
 
-> 版本 v1.10.4 · 2026-09-25 · 内核：Hypit 0.2.6（本地副本 `hypit-main/`）· 技术调研见 `Hypit-Research.md`
+> 版本 v1.10.5 · 2026-09-25 · 内核：Hypit 0.2.6（本地副本 `hypit-main/`）· 技术调研见 `Hypit-Research.md`
 > Phase 0 先行验证结论见 `clone-studio/docs/spike-notes.md`，本版据其回写。
 
 ## 0. AI 使用说明
@@ -518,7 +518,7 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 
 **用途：** 用户有 ChatGPT/Codex 订阅，让生图走订阅额度而不是按量付费。依据：用户提供的《Codex 生图配置说明》（已在用户的其它项目中实跑，不随仓库分发）。
 
-**行为：** 在本项目代码目录（不在 `hypit-main/` 内）写一个 Hypit Provider 包，参照 `hypit-main/examples/provider-package` 与 `@hypit/endpoint-kit`，承接 `@hypit/gpt-image@1` 的生图能力。每个生图请求 spawn 一次 Codex CLI，由提示词里的 `$imagegen` 出图（走 Codex 内置 `image_gen` 工具，**底层模型不详【未验证】**——`gpt-image-2` 是 CLI fallback 路径的默认模型，内置路径的输出里没有任何字段暴露实际模型），PNG 交回 Build。设置里启用后，后端生成的 `hypit.runtime.json` 把 gpt-image 能力绑定到它。
+**行为：** 在本项目代码目录（不在 `hypit-main/` 内）写一个 Hypit Provider 包，参照 `hypit-main/examples/provider-package` 与 `@hypit/endpoint-kit`，承接 `@hypit/gpt-image@1` 的生图能力。每个生图请求 spawn 一次 Codex CLI，由提示词里的 `$imagegen` 出图（走 Codex 内置 `image_gen` 工具，**底层模型不详【未验证】**——`gpt-image-2` 是 CLI fallback 路径的默认模型，内置路径的输出里没有任何字段暴露实际模型），PNG 交回 Build。设置里启用后，后端生成的 `hypit.runtime.json` 把 gpt-image 能力绑定到它。包由后端同步到 `<数据根>/node_modules/@clone-studio/codex-image`（启动时、启用时、试出一张图时），hypit 从工作目录往上找 `node_modules` 找到它——不用 `--package-root`：它只有 check / plan / pricing / build 认，doctor、programs、runtime 不认且会因解析不到包报错，在跑的 Worker 也不看新值（Phase 11 实测）。npm 装的 codex 是 `.cmd` 垫片，后端解析出它指向的 `codex.js` 用 node 起。这条找包路径「离工作目录最近的优先」：工作目录里的 `node_modules` 能盖掉宿主同步的包，所以 Agent 不许往工作目录与模板目录（变体会话往上到模板根）的任何 `node_modules` 里写、也不许在那里装包（npm / pnpm / yarn / bun 的 install / add / ci），后端每次调 hypit 前也查一遍（从工作目录到数据根之间有 `node_modules/@clone-studio` 就拒绝调用）。包没同步上时不绑定 gpt-image（否则所有模板的估价都因解析不到包而失败），体检行写出原因。`$CODEX_HOME/auth.json` 与 Claude Code 的登录凭据一样，Agent 不许读。
 
 **规则：**
 - MUST 一图一进程，绝不批量。参数数组：`codex exec --ignore-user-config --json --ephemeral -c windows.sandbox="elevated" --sandbox workspace-write --skip-git-repo-check -C <临时工作目录> [--image <参考图绝对路径> …最多 4 张] -- "<提示词>"`。
@@ -528,8 +528,8 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 - MUST 成败判定：exit code 0 且产物文件存在且大小 > 0 才算成功。找图两条路互为兜底：`<cwd>/images/<name>.png`；`~/.codex/generated_images/<thread_id>/` 下修改时间落在本次运行区间内的最新 PNG（thread_id 取自 JSONL 首条 `thread.started`）。
 - MUST JSONL 出现 `error` 事件（Codex 断流重连时发的「Reconnecting... n/m」是进度提示，不算）或 `turn.failed`，或 stderr 含 `rate limit` / `quota` / `usage limit`（订阅额度用完的原话是「You've hit your usage limit…」）→ 失败，原文进 Build 错误，由"重试出片"接续。带回的原文有上限：JSONL 末段每行、每条错误原文截断并标明，避免一条 Build 错误有几 MB。
 - MUST 单张超时 10 分钟，超时 kill 子进程（杀了仍不退出的，宽限期后不再等，照样判超时）。JSONL 按行切分的单行上限 4 MB。比例与分辨率写进提示词，Codex 不保证产出尺寸与之一致。
-- MUST 该 Provider 的请求在 plan/pricing 里计为零价，台账记录张数。
-- MUST 设置页体检增加：Codex CLI ≥ 0.128 且 `~/.codex/auth.json` 存在；提供"试出一张图"按钮。
+- MUST 该 Provider 的请求在 plan/pricing 里计为零价，台账记录张数（出片记录上记本次走 Codex 的请求数，花费明细 CMP-008 显示）。
+- MUST 设置页体检增加：Codex CLI ≥ 0.128 且 `$CODEX_HOME/auth.json`（默认 `~/.codex`）存在，只看在不在、不读内容；未过写原因并提示修法（未登录提示 `codex login`），启用开关由后端按体检把关，不过不让开。提供"试出一张图"按钮：在数据根下的临时 hypit 工程里 build 一个只含一个 gpt:Image 的 run（走真实绑定与 Provider），回图、耗时或原文错误；一次只跑一个，只留最近一次。
 - MUST 不支持透明背景：请求带透明背景参数时以"不支持"失败，不静默忽略。参考图超过 4 张同样以"不支持"失败。两者都在 plan 阶段由 Provider 的 supports 拒掉，不起 Codex。
 - MUST NOT 直连 `chatgpt.com/backend-api`。
 - MUST NOT 把 `--sandbox workspace-write` 收紧到禁止执行命令。内置 `image_gen` 不接受目标路径参数，Codex 是先生成到 `$CODEX_HOME/generated_images/` 再执行一条复制命令把图搬到 `./images/`，禁命令就拿不到图。
@@ -711,7 +711,7 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 | Q-001 | 排行榜类片子的旁白/主持人声音怎么来：TokenDance 无独立 TTS | 阻塞含配音片子的出片验收，不阻塞开发 | 三条路：Seedance 直出带声音的口播镜头；连 HypiHub 用其 TTS；用户自供音频。默认先走第一条，不够再连 HypiHub |
 | Q-002 | 联网搜图的版权风险由用户自担，是否需要在审核界面加免责提示 | No | 默认加一行小字 |
 | Q-005 | 用户的 Gemini / ChatGPT 是聊天订阅还是 API key | No | 聊天订阅无法接入；只有 API key 能用，且需自起 LiteLLM |
-| Q-007 | Hypit 能否从 `hypit-main/` 之外加载自写 Provider 包（`--package-root` 或项目 `packages/`），以及 gpt-image 能力的请求/响应契约 | No | 已基本解答：`hypit-main/examples/provider-package` 证明项目自有 Provider 放在包目录、经 runtime profile 的 `bindings` 绑到 `@hypit/gpt-image@1#gpt-image-2` 即可；剩 `--package-root` 指向 hypit-main 之外目录的实测，排在 DEV-PLAN Phase 11 |
+| Q-007 | Hypit 能否从 `hypit-main/` 之外加载自写 Provider 包（`--package-root` 或项目 `packages/`），以及 gpt-image 能力的请求/响应契约 | No | 已基本解答：`hypit-main/examples/provider-package` 证明项目自有 Provider 放在包目录、经 runtime profile 的 `bindings` 绑到 `@hypit/gpt-image@1#gpt-image-2` 即可；Phase 11 实测：`--package-root` 只有 check / plan / pricing / build 认，改为把包同步到数据根 `node_modules`、从工作目录往上找到（见 REQ-011） |
 | ~~Q-004~~ | **已解答（Phase 10，2026-09-25 联网核实）**：火山方舟 Anthropic 兼容端点 | 不再阻塞 | 官方文档「Coding Plan 个人版」给 `https://ark.cn-beijing.volces.com/api/coding`（只消耗 Coding Plan 额度，`/api/v3` 另行计费、不是 Anthropic 协议），模型可填 `ark-code-latest`；是否看图随所选模型，预设默认关，用户自行打开。写进 REQ-010 豆包预设 |
 | ~~Q-003~~ | **已解答（Phase 0）**：`hypit pricing` 给不出可用估价，build 后也拿不到实际花费 | 不再阻塞 | `pricing.kind` 仅 `page`/`local`，Result 无金额字段。兜底方案转为正式决定：Clone Studio 自维护费率表算估价、全部花费标"估"，见 REQ-006 估价来源与 REQ-009。证据见 `clone-studio/docs/spike-notes.md` 验证一 |
 

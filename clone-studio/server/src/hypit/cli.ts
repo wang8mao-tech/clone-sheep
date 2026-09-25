@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { config, paths } from "../config.js";
 import { db } from "../db/index.js";
 import { procs } from "../lib/procs.js";
+import { findShadowPackages } from "./shadow-packages.js";
 
 /** hypit 的错误信封：`hypit.cli-error@1` */
 export interface HypitCliError {
@@ -57,6 +58,20 @@ export async function runHypit<T = unknown>(
   options: HypitRunOptions,
 ): Promise<HypitResult<T>> {
   const started = Date.now();
+  // 工作目录里有人放了 node_modules/@clone-studio：hypit 会优先加载它而不是宿主同步的 Provider 包，
+  // 等于让写它的人（Agent）在带凭据的宿主进程里跑代码。查到就不起 hypit（11.2 审查 H1）
+  // 也查 --workspace 指的目录：以后有调用把 cwd 设在别处时不漏（11.2 第二轮审查 L-c）
+  const flag = args.indexOf("--workspace");
+  const workspaceArg = flag >= 0 ? args[flag + 1] : undefined;
+  const shadows = [
+    ...new Set([...findShadowPackages(options.cwd), ...(workspaceArg ? findShadowPackages(workspaceArg) : [])]),
+  ];
+  if (shadows.length > 0) {
+    throw new HypitError(
+      "SHADOW_PACKAGE",
+      `工作目录里有不该有的 Provider 包，拒绝运行 hypit：${shadows.join("、")}。删掉这些 node_modules 目录后重试。`,
+    );
+  }
   const argv = [paths.hypitCli, ...args];
 
   const child = spawn(process.execPath, argv, {

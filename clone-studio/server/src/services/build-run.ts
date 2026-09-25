@@ -15,6 +15,7 @@ import {
   type BuildRow,
   type BuildView,
 } from "./build-store.js";
+import { CODEX_ENDPOINT_ID } from "../hypit/runtime-profile.js";
 import { currentEstimate } from "./estimate-store.js";
 import { estimateProduction } from "./estimate-run.js";
 
@@ -96,6 +97,12 @@ export async function startBuild(productionId: string): Promise<BuildView> {
   return beginBuild(productionId);
 }
 
+/** 放行的估价里走 Codex 订阅生图的请求数（REQ-011：零价，台账记张数）；没有就是 null */
+export function codexImages(lines: ReadonlyArray<{ endpoint: string | null; count: number }>): number | null {
+  const n = lines.filter((l) => l.endpoint === CODEX_ENDPOINT_ID).reduce((sum, l) => sum + l.count, 0);
+  return n > 0 ? n : null;
+}
+
 /** 校验、落台账、把执行过程放到后台；同步返回，错误同步抛（pump 据此计数） */
 function beginBuild(productionId: string): BuildView {
   if (running.has(productionId)) throw new BuildError("这条正在出片", "BUILD_IN_FLIGHT", 409);
@@ -114,10 +121,10 @@ function beginBuild(productionId: string): BuildView {
   const now = new Date().toISOString();
   db()
     .prepare(
-      `INSERT INTO builds (id, production_id, estimate_usd, status, started_at, created_at)
-       VALUES (?, ?, ?, 'running', ?, ?)`,
+      `INSERT INTO builds (id, production_id, estimate_usd, codex_images, status, started_at, created_at)
+       VALUES (?, ?, ?, ?, 'running', ?, ?)`,
     )
-    .run(buildId, productionId, estimate.totalUsd, now, now);
+    .run(buildId, productionId, estimate.totalUsd, codexImages(estimate.lines), now, now);
   setProductionStatus(productionId, "building", now);
   const entry: RunningBuild = { buildId, dir, controller: new AbortController(), progress: null };
   running.set(productionId, entry);

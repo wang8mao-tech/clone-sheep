@@ -37,6 +37,8 @@ export interface BuildCostLine {
   isEstimate: boolean;
   receiptId: string | null;
   receiptUrl: string | null;
+  /** 走 Codex 订阅生图的张数（零价）；没走是 null */
+  codexImages: number | null;
   createdAt: string;
 }
 
@@ -73,6 +75,7 @@ interface BuildRow {
   actual_usd: number | null;
   receipt_id: string | null;
   receipt_url: string | null;
+  codex_images: number | null;
   created_at: string;
 }
 
@@ -95,7 +98,7 @@ export function productionCosts(
     .all(row.id, row.kind, row.template_id) as JobRow[];
   const builds = db()
     .prepare(
-      `SELECT id, hypit_build_id, video_channel, video_model, status, estimate_usd, actual_usd, receipt_id, receipt_url, created_at
+      `SELECT id, hypit_build_id, video_channel, video_model, status, estimate_usd, actual_usd, receipt_id, receipt_url, codex_images, created_at
          FROM builds WHERE production_id = ? ORDER BY created_at, rowid`,
     )
     .all(row.id) as BuildRow[];
@@ -126,6 +129,7 @@ export function productionCosts(
     isEstimate: b.actual_usd === null,
     receiptId: b.receipt_id,
     receiptUrl: b.receipt_url,
+    codexImages: b.codex_images,
     createdAt: b.created_at,
   }));
   const own = agent.filter((a) => !a.shared);

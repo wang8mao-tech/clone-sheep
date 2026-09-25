@@ -4,6 +4,7 @@ import { isInside, isReallyInside } from "../lib/safe-path.js";
 import { containsPath, resolveFrom, samePath } from "./guard-paths.js";
 import { findDeniedHypit, normalize, tokenize } from "./shell-scan.js";
 import { writtenPaths } from "./written-paths.js";
+import { installsPackages, NODE_MODULES_WHY, writesNodeModules } from "./node-modules-rule.js";
 
 export { findDeniedHypit } from "./shell-scan.js";
 
@@ -52,6 +53,8 @@ export interface GuardContext {
   binDir?: string;
   /** hypit-main：可以跑、可以读，不许改 */
   hypitRoot?: string;
+  /** 数据根的 node_modules：宿主同步进来的 Provider 包（Codex 生图），改了等于换掉出图的代码 */
+  packagesDir?: string;
 }
 
 /** 工作目录里宿主生成的 Runtime Profile 与它的选择文件 */
@@ -105,6 +108,7 @@ export function judgeToolCall(toolName: string, input: unknown, ctx: GuardContex
       };
     }
     if (isProfile(ctx.workspace, resolved)) return profileDenial(target);
+    if (writesNodeModules(profileRoots(ctx.workspace), resolved)) return protectedDenial(target, NODE_MODULES_WHY);
   }
   return undefined;
 }
@@ -167,10 +171,15 @@ function protectedInCommand(command: string, ctx: GuardContext): Denial | undefi
     return protectedDenial(command, "Claude Code 的配置目录里有登录凭据，Agent 不许碰");
   }
   const written = writtenPaths(command, ctx.workspace);
+  const roots = profileRoots(ctx.workspace);
+  if (installsPackages(command) || written.some((p) => writesNodeModules(roots, p))) {
+    return protectedDenial(command, NODE_MODULES_WHY);
+  }
   for (const [dir, why] of [
     [ctx.pluginDir, "Agent 插件目录由宿主维护，可以读，不许改动"],
     [ctx.binDir, "hypit 启动器目录由宿主维护，不许改动"],
     [ctx.hypitRoot, "hypit-main 可以运行与阅读，不许改动"],
+    [ctx.packagesDir, "数据根里的 Provider 包由宿主维护，不许改动"],
   ] as const) {
     if (dir && written.some((p) => isInside(dir, p))) return protectedDenial(command, why);
   }

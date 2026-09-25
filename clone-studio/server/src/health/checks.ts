@@ -6,6 +6,8 @@ import { config, paths } from "../config.js";
 import { db } from "../db/index.js";
 import { hasSecret } from "../lib/secrets.js";
 import { which } from "../lib/which.js";
+import { codexReadiness } from "../hypit/codex.js";
+import { codexPackageProblem } from "../hypit/codex-package.js";
 import { checkWhisperX } from "./whisperx.js";
 
 export type CheckStatus = "pass" | "fail" | "warn" | "checking";
@@ -188,28 +190,26 @@ async function checkUv(): Promise<CheckResult> {
   );
 }
 
-async function checkCodex(): Promise<CheckResult> {
-  const { code, stdout } = await run("codex", ["--version"]);
-  const authPath = path.join(homedir(), ".codex", "auth.json");
-  const loggedIn = existsSync(authPath);
-  if (code !== 0) {
+/**
+ * Codex 订阅生图（REQ-011）：CLI ≥ 0.128 且 `$CODEX_HOME/auth.json` 在（只看在不在，不读内容）。
+ * 可选项：没过不挡别的操作，只是设置页的启用开关不让开（AC-033）。
+ */
+export async function checkCodex(): Promise<CheckResult> {
+  const r = await codexReadiness();
+  const base = { id: "codex", name: "Codex CLI（订阅生图，可选）", blocking: false } as const;
+  const pkg = codexPackageProblem();
+  if (r.ready && pkg) {
+    // CLI 与登录都好，但 Provider 包没进数据根：开着也不会绑定出图（11.2 审查 M1）
     return {
-      id: "codex",
-      name: "Codex CLI（订阅生图，可选）",
+      ...base,
       status: "warn",
-      detail: "不在 PATH",
-      fix: "npm i -g @openai/codex",
-      blocking: false,
+      detail: `codex-cli ${r.version ?? ""} · 已登录 · ${pkg}`,
+      fix: "重启后端，或把开关关掉再打开",
     };
   }
-  return {
-    id: "codex",
-    name: "Codex CLI（订阅生图，可选）",
-    status: loggedIn ? "pass" : "warn",
-    detail: loggedIn ? `${firstLine(stdout)} · 已登录` : `${firstLine(stdout)} · 未登录`,
-    fix: loggedIn ? null : "codex login",
-    blocking: false,
-  };
+  if (r.ready) return { ...base, status: "pass", detail: `codex-cli ${r.version ?? ""} · 已登录`, fix: null };
+  const version = r.version ? `codex-cli ${r.version} · ` : "";
+  return { ...base, status: "warn", detail: `${version}${r.problem ?? "没准备好"}`, fix: r.fix };
 }
 
 async function checkClaudeLogin(): Promise<CheckResult> {

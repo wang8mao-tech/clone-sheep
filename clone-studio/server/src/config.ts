@@ -52,4 +52,6 @@ export const paths = {
   outputs: path.join(config.dataRoot, "outputs"),
   hypitCli: path.join(config.hypitRoot, "bin", "hypit.mjs"),
   hypitSkill: path.join(config.hypitRoot, "skills", "hypit"),
+  /** Codex 订阅生图 Provider 的源码（REQ-011）：src 与 dist 都在 server/ 下一层，往上两级是 clone-studio */
+  codexProviderSource: path.resolve(here, "..", "..", "providers", "codex-image"),
 } as const;

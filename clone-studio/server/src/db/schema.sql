@@ -215,6 +215,8 @@ CREATE TABLE IF NOT EXISTS builds (
   meta_checked_at TEXT,
   started_at     TEXT,
   ended_at       TEXT,
+  -- 这次出片里走 Codex 订阅生图的张数（REQ-011：零价，台账记张数）；没走 Codex 为空
+  codex_images   INTEGER,
   created_at     TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_builds_production ON builds (production_id);

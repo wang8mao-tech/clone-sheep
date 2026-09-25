@@ -310,3 +310,58 @@ describe("进度、取消、重试", () => {
     expect(b.build.retryBuild("p-stale").queued).toBe(true);
   });
 });
+
+describe("台账记 Codex 生图张数（REQ-011，Task 11.2）", () => {
+  it("放行的估价里有 2 个走 codex.local 的 gpt-image 请求：出片记 codex_images = 2，估价仍 $0", async () => {
+    const b = await boot();
+    b.setBuild({ lines: PROGRESS, json: BUILD_OK });
+    const gpt = (request: string) => ({
+      request,
+      capability: "@hypit/gpt-image@1#gpt-image-2",
+      status: "resolved",
+      endpoint: "codex.local",
+      pricing: { kind: "local" },
+    });
+    b.setPlan({
+      ...LOCAL_PLAN,
+      providers: [...LOCAL_PLAN.providers, gpt("g1"), gpt("g2")],
+      needs: [
+        ...LOCAL_PLAN.needs,
+        { request: "g1", summary: { fields: {} } },
+        { request: "g2", summary: { fields: {} } },
+      ],
+    });
+    b.setStatus("cloning");
+    b.clone.startClone(b.templateId);
+    b.writeProducts();
+    await b.finishRun();
+    await until(() => b.clone.latestReplica(b.templateId) !== undefined, "复刻片建出来");
+    const id = (b.clone.latestReplica(b.templateId) as { id: string }).id;
+    await until(() => productionStatus(b, id) === "done", "出片完成");
+    const row = b.db().prepare("SELECT codex_images, estimate_usd FROM builds WHERE production_id = ?").get(id);
+    expect(row).toEqual({ codex_images: 2, estimate_usd: 0 });
+  });
+
+  it("没走 Codex：codex_images 为空", async () => {
+    const b = await boot();
+    b.setBuild({ lines: PROGRESS, json: BUILD_OK });
+    const id = await released(b);
+    await until(() => productionStatus(b, id) === "done", "出片完成");
+    expect(b.db().prepare("SELECT codex_images FROM builds WHERE production_id = ?").get(id)).toEqual({
+      codex_images: null,
+    });
+  });
+
+  it("codexImages：只数 endpoint 是 codex.local 的行", async () => {
+    const { codexImages } = await import("./build-run.js");
+    expect(
+      codexImages([
+        { endpoint: "codex.local", count: 3 },
+        { endpoint: "tokendance.default", count: 5 },
+        { endpoint: "codex.local", count: 1 },
+      ]),
+    ).toBe(4);
+    expect(codexImages([{ endpoint: null, count: 2 }])).toBeNull();
+    expect(codexImages([])).toBeNull();
+  });
+});

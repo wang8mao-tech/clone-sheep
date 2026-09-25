@@ -204,3 +204,18 @@ describe("加列迁移", () => {
     expect(columnsOf(d, "builds")).toEqual(expect.arrayContaining(["duration_s", "cover_path", "meta_checked_at"]));
   });
 });
+
+describe("加列迁移：builds.codex_images（Task 11.2）", () => {
+  it("老库的 builds 补上 codex_images，已有记录原样、这一列为空", async () => {
+    const { db, migrate } = await freshModules();
+    const d = db();
+    migrate();
+    d.exec("ALTER TABLE builds DROP COLUMN codex_images");
+    d.prepare("DELETE FROM schema_migrations WHERE version = 12").run();
+    expect(columnsOf(d, "builds")).not.toContain("codex_images");
+    migrate();
+    expect(columnsOf(d, "builds")).toContain("codex_images");
+    migrate();
+    expect(columnsOf(d, "builds").filter((c) => c === "codex_images")).toHaveLength(1);
+  });
+});

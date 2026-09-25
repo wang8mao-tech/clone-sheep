@@ -5,6 +5,8 @@ import { config } from "../config.js";
 import { db } from "../db/index.js";
 import { runHypit } from "../hypit/cli.js";
 import { ensureWhisperX } from "../hypit/whisperx-service.js";
+import { refreshRuntimeProfile } from "../hypit/workspace.js";
+import { workspaceServices } from "./archive.js";
 import { isReallyInside } from "../lib/safe-path.js";
 import { checkProbe, STEP_TIMEOUT_MS, transcribeNote, type EvidenceStep, type ProbeFacts } from "./evidence-rules.js";
 import { listSteps, markDone, noteRunning } from "./evidence-store.js";
@@ -157,6 +159,9 @@ async function transcribe(ctx: StepContext): Promise<unknown> {
   // 先拉起来。冷启动约 3 分钟，与转写共用这一步的 10 分钟预算
   const started = Date.now();
   const subject = { kind: "template", id: ctx.templateId };
+  // programs up 要加载整份 Runtime Profile：磁盘上那份可能还是开 Codex 时写的，包没同步上就会解析失败，
+  // 连不用 Codex 的转写都起不来。先按当前设置重写（同估价 / 出片前，11.2 第二轮审查 L-a）
+  refreshRuntimeProfile(ctx.workspace, workspaceServices());
   let readiness: Awaited<ReturnType<typeof ensureWhisperX>>;
   try {
     readiness = await ensureWhisperX(

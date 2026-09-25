@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { buildRuntimeProfile } from "./workspace.js";
+import { buildRuntimeProfile } from "./runtime-profile.js";
 
 const BASE = { renderWorkers: 4, renderConcurrency: 1 } as const;
 
@@ -73,6 +73,37 @@ describe("buildRuntimeProfile", () => {
   it("credentials 永远声明 env store，否则 apiKey 引用解析不了", () => {
     const p = buildRuntimeProfile({ ...BASE, tokendance: true, hypihub: false, whisperx: false });
     expect(p.credentials.env).toEqual({ use: "@hypit/credential-store-env" });
+  });
+});
+
+describe("buildRuntimeProfile：Codex 订阅生图（REQ-011）", () => {
+  const off = { ...BASE, tokendance: false, hypihub: false, whisperx: false };
+
+  it("启用：写 codex.local（包名、pool、起法、并发 1），gpt-image-2 绑过去", () => {
+    const p = buildRuntimeProfile({ ...off, codex: { command: "node", prefixArgs: ["C:/npm/codex.js"] } });
+    expect(p.endpoints["codex.local"]).toEqual({
+      use: "@clone-studio/codex-image",
+      pool: "codex.local",
+      config: { command: "node", prefixArgs: ["C:/npm/codex.js"], concurrency: 1 },
+    });
+    expect(p.bindings["@hypit/gpt-image@1#gpt-image-2"]).toBe("codex.local");
+  });
+
+  it("CODEX_HOME 给了才写 codexHome；没启用（null / 不给）不写 endpoint 也不绑", () => {
+    const withHome = buildRuntimeProfile({
+      ...off,
+      codex: { command: "codex.exe", prefixArgs: [], codexHome: "C:/ch" },
+    });
+    expect(withHome.endpoints["codex.local"]?.config).toEqual({
+      command: "codex.exe",
+      prefixArgs: [],
+      codexHome: "C:/ch",
+      concurrency: 1,
+    });
+    for (const p of [buildRuntimeProfile({ ...off, codex: null }), buildRuntimeProfile(off)]) {
+      expect(p.endpoints["codex.local"]).toBeUndefined();
+      expect(p.bindings["@hypit/gpt-image@1#gpt-image-2"]).toBeUndefined();
+    }
   });
 });
 

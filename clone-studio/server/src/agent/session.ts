@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import path from "node:path";
+import { config } from "../config.js";
 import type { HookCallback, Options } from "@anthropic-ai/claude-agent-sdk";
 import { judgeToolCall, type Denial, type GuardContext } from "./guard.js";
 import { HYPIT_SKILL } from "./plugin.js";
@@ -164,6 +165,15 @@ export function claudeCredentialFiles(env: NodeJS.ProcessEnv = process.env): str
   return dirs.map((dir) => path.join(dir, ".credentials.json"));
 }
 
+/**
+ * 宿主要保护的全部本机登录凭据：Claude Code 的，加上 Codex 的 `$CODEX_HOME/auth.json`（默认 ~/.codex）——
+ * Codex 生图接进来之后它是产品依赖的 ChatGPT 订阅凭据，第三方模型驱动的会话读到它就会发给第三方（11.2 审查 M4）
+ */
+export function hostCredentialFiles(env: NodeJS.ProcessEnv = process.env): string[] {
+  const codexHome = env.CODEX_HOME?.trim() ? path.resolve(env.CODEX_HOME.trim()) : path.join(homedir(), ".codex");
+  return [...claudeCredentialFiles(env), path.join(codexHome, "auth.json")];
+}
+
 export interface SessionProfile {
   env: Record<string, string>;
   subscription: boolean;
@@ -208,8 +218,9 @@ export function buildSessionOptions(input: SessionInput): Options {
                 pluginDir: input.pluginDir,
                 ...(input.binDir ? { binDir: input.binDir } : {}),
                 ...(input.secretsFile ? { secretsFile: input.secretsFile } : {}),
-                credentialFiles: claudeCredentialFiles(),
+                credentialFiles: hostCredentialFiles(),
                 ...(input.hypitRoot ? { hypitRoot: input.hypitRoot } : {}),
+                packagesDir: path.join(config.dataRoot, "node_modules"),
               },
               input.onIntercept,
             ),

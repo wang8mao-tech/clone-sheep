@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
-import { createWorkspace, type WorkspaceServices } from "../hypit/workspace.js";
+import { codexEndpoint } from "../hypit/codex.js";
+import { codexPackageProblem } from "../hypit/codex-package.js";
+import { type WorkspaceServices } from "../hypit/runtime-profile.js";
+import { createWorkspace } from "../hypit/workspace.js";
 
 /**
  * 归档服务：客户与模板的创建、改名、查询（REQ-001）。
@@ -185,7 +188,7 @@ function assertTemplateNameFree(clientId: string, name: string): void {
 export function workspaceServices(): WorkspaceServices {
   const row = db()
     .prepare(
-      `SELECT render_workers, render_concurrency, tokendance_verified_at, hypihub_verified_at
+      `SELECT render_workers, render_concurrency, tokendance_verified_at, hypihub_verified_at, codex_provider_enabled
          FROM settings WHERE id = 1`,
     )
     .get() as
@@ -194,6 +197,7 @@ export function workspaceServices(): WorkspaceServices {
         render_concurrency: number;
         tokendance_verified_at: string | null;
         hypihub_verified_at: string | null;
+        codex_provider_enabled: number;
       }
     | undefined;
 
@@ -205,6 +209,10 @@ export function workspaceServices(): WorkspaceServices {
     whisperx: true,
     renderWorkers: row?.render_workers ?? 1,
     renderConcurrency: row?.render_concurrency ?? 1,
+    // 启用了、而且数据根里真有 Provider 包才绑（开关由设置接口按体检把关，REQ-011）。包不在还绑的话，每个模板的
+    // plan 与 programs up 都会因解析不到包而失败——连不用 gpt-image 的片子也出不了（11.2 审查 M1）；
+    // codex 不见了也不绑，gpt-image 会明确报缺能力
+    codex: row?.codex_provider_enabled === 1 && codexPackageProblem() === null ? codexEndpoint() : null,
   };
 }
 

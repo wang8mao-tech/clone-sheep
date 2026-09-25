@@ -5,6 +5,8 @@ import { procs } from "./lib/procs.js";
 import { purgeTrash } from "./services/deletion.js";
 import { purgeStaleUploads } from "./services/uploads.js";
 import { migrateWorkspaces } from "./services/workspace-migration.js";
+import { syncCodexPackage } from "./hypit/codex-package.js";
+import { retireTryDirs } from "./services/codex-try.js";
 import { agentScheduler, registerAgentStopper } from "./agent/agent-service.js";
 import { agentJobRoutes } from "./routes/agent-jobs.js";
 import { clientRoutes } from "./routes/clients.js";
@@ -19,6 +21,7 @@ import { cancelOrphanedBuilds, pumpBuilds, setBuildLog } from "./services/build-
 import { registerCloneFlow } from "./services/clone.js";
 import { registerVariantFlow } from "./services/variant-flow.js";
 import { settingsRoutes } from "./routes/settings.js";
+import { codexRoutes } from "./routes/codex.js";
 import { modelProfileRoutes } from "./routes/model-profiles.js";
 import { systemRoutes } from "./routes/system.js";
 import { mediaRoutes } from "./routes/media.js";
@@ -54,6 +57,25 @@ async function main(): Promise<void> {
     app.log.warn(failure, "模板的工作目录补不齐，该模板暂时无法导入参考视频");
   }
 
+  // Codex 订阅生图的 Provider 包跟着源码走（REQ-011）：升级后第一次启动就换上新版；失败不挡启动
+  try {
+    const synced = syncCodexPackage();
+    if (synced.written.length || synced.removed.length) app.log.info(synced, "更新了数据根里的 Codex Provider 包");
+  } catch (error) {
+    // 开关开着时后果更大：gpt-image 不再绑到 Codex（体检行会写原因），关掉再打开开关会重试同步（11.2 审查 M1）
+    app.log.error(
+      { error },
+      "Codex Provider 包没同步上：Codex 生图不可用，gpt-image 不绑定；重启或在设置里关掉再打开开关会重试",
+    );
+  }
+
+  // 上次在「试出一张图」途中退出：它的 hypit Worker（detached）可能还在跑、还在花 Codex 额度，停掉并收走（11.2 审查 M2）
+  await retireTryDirs()
+    .then((n) => {
+      if (n) app.log.info({ retired: n }, "收掉了上次留下的 Codex 试图工程");
+    })
+    .catch((error: unknown) => app.log.warn({ error }, "上次留下的 Codex 试图工程没收掉"));
+
   const stale = markStaleRunningAsInterrupted();
   if (stale.jobs || stale.productions || stale.builds || stale.evidence) {
     app.log.warn({ stale }, "上次退出时有未完成的任务，已标为中断");
@@ -61,6 +83,7 @@ async function main(): Promise<void> {
 
   await app.register(systemRoutes);
   await app.register(settingsRoutes);
+  await app.register(codexRoutes);
   await app.register(modelProfileRoutes);
   await app.register(clientRoutes);
   await app.register(templateRoutes);

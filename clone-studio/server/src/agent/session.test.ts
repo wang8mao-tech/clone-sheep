@@ -97,6 +97,44 @@ describe("assertSessionOptions：不合法的配置不许启动", () => {
   });
 });
 
+describe("会话真实挂上的拦截：宿主凭据与 Provider 包（11.2 审查 M4、H1）", () => {
+  it("读 $CODEX_HOME/auth.json 被拒；往工作目录的 node_modules 写被拒", async () => {
+    const saved = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = "E:/codex-home";
+    try {
+      const hook = build().hooks?.PreToolUse?.[0]?.hooks[0] as HookCallback;
+      const signal = new AbortController().signal;
+      const run = (tool: string, input: unknown) =>
+        hook(
+          {
+            hook_event_name: "PreToolUse",
+            tool_name: tool,
+            tool_input: input,
+            tool_use_id: "t",
+            session_id: "s",
+            transcript_path: "",
+            cwd: WS,
+          },
+          "t",
+          { signal },
+        );
+      expect(await run("Read", { file_path: "E:/codex-home/auth.json" })).toMatchObject({
+        hookSpecificOutput: { permissionDecision: "deny" },
+      });
+      expect(
+        await run("Write", {
+          file_path: `${WS}/node_modules/@clone-studio/codex-image/src/activation.ts`,
+          content: "x",
+        }),
+      ).toMatchObject({ hookSpecificOutput: { permissionDecision: "deny" } });
+      expect(await run("Read", { file_path: `${WS}/SCRIPT.md` })).toEqual({});
+    } finally {
+      if (saved === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = saved;
+    }
+  });
+});
+
 describe("guardHook", () => {
   const signal = new AbortController().signal;
   const call = (hook: HookCallback, tool: string, input: unknown, agentId?: string) =>

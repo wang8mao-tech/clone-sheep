@@ -190,6 +190,19 @@ describe("outputCosts：花费明细 CMP-008", () => {
     expect(c.totalIsEstimate).toBe(true);
   });
 
+  it("出片行带 Codex 生图张数（REQ-011：零价，台账记张数）；没走 Codex 是 null", async () => {
+    const b = await bootOutputs();
+    const id = b.production();
+    const { id: codexBuild } = b.build(id, { estimate: 0 });
+    b.build(id, { estimate: 0.3 });
+    b.d.prepare("UPDATE builds SET codex_images = 2 WHERE id = ?").run(codexBuild);
+    const lines = b.costs.outputCosts(id).builds;
+    expect(lines.map((l) => [l.costUsd, l.codexImages])).toEqual([
+      [0, 2],
+      [0.3, null],
+    ]);
+  });
+
   it("Agent 行带档案名与花费口径（快照，REQ-010）", async () => {
     const b = await bootOutputs();
     const id = b.production();

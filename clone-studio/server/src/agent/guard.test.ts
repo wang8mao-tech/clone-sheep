@@ -141,6 +141,44 @@ describe("judgeToolCall", () => {
       expect(judgeToolCall("Bash", { command: `cat "${ctx().hypitRoot}-backup/x" > y` }, ctx())).toBeUndefined();
     });
 
+    it("数据根的 node_modules（宿主同步进来的 Provider 包）：不许改（REQ-011）", () => {
+      const packagesDir = path.join(base, "data", "node_modules");
+      const target = path.join(packagesDir, "@clone-studio", "codex-image", "src", "provider.ts");
+      const d = judgeToolCall("Bash", { command: `echo evil > "${target}"` }, { ...ctx(), packagesDir });
+      expect(d?.rule).toBe("protected-path");
+      expect(d?.reason).toContain("Provider 包");
+      expect(judgeToolCall("Write", { file_path: target, content: "x" }, { ...ctx(), packagesDir })?.rule).toBe(
+        "write-outside-workspace",
+      );
+      expect(judgeToolCall("Bash", { command: `cat "${target}"` }, { ...ctx(), packagesDir })).toBeUndefined();
+    });
+
+    it("工作目录里的 node_modules：不许写（会盖掉宿主同步的 Provider 包，11.2 审查 H1）", () => {
+      const pkg = path.join(ctx().workspace, "node_modules", "@clone-studio", "codex-image", "src", "activation.ts");
+      const w = judgeToolCall("Write", { file_path: pkg, content: "x" }, ctx());
+      expect(w?.rule).toBe("protected-path");
+      expect(w?.reason).toContain("node_modules");
+      expect(judgeToolCall("Edit", { file_path: pkg, old_string: "a", new_string: "b" }, ctx())?.rule).toBe(
+        "protected-path",
+      );
+      expect(
+        judgeToolCall(
+          "Bash",
+          { command: `mkdir -p node_modules/@clone-studio && echo x > node_modules/@clone-studio/a.ts` },
+          ctx(),
+        )?.rule,
+      ).toBe("protected-path");
+      // 变体子目录里也一样；普通文件与名字里带 node_modules 字样的文件照常能写
+      const nested = path.join(ctx().workspace, "productions", "p1", "node_modules", "x.js");
+      expect(judgeToolCall("Write", { file_path: nested, content: "x" }, ctx())?.rule).toBe("protected-path");
+      expect(
+        judgeToolCall("Write", { file_path: path.join(ctx().workspace, "SCRIPT.md"), content: "x" }, ctx()),
+      ).toBeUndefined();
+      expect(
+        judgeToolCall("Write", { file_path: path.join(ctx().workspace, "node_modules.md"), content: "x" }, ctx()),
+      ).toBeUndefined();
+    });
+
     it("hypit 启动器目录：不许碰", () => {
       const binDir = path.join(base, "data", "agent-bin");
       const d = judgeToolCall("Bash", { command: `echo evil > "${binDir}/hypit"` }, { ...ctx(), binDir });
@@ -151,7 +189,8 @@ describe("judgeToolCall", () => {
       for (const command of ["npm install --global @hypit/hypit", "npm i -g @hypit/hypit", "pnpm add -g x"]) {
         expect(judgeToolCall("Bash", { command }, ctx())?.rule, command).toBe("protected-path");
       }
-      expect(judgeToolCall("Bash", { command: "npm install" }, ctx())).toBeUndefined();
+      // 本地装包原先放行；现在也拦：它会在工作目录造 node_modules，盖掉宿主同步的 Provider 包（11.2 第二轮审查 MEDIUM-1）
+      expect(judgeToolCall("Bash", { command: "npm install" }, ctx())?.reason).toContain("node_modules");
     });
 
     describe("密钥文件的变体读法（复审 S1-H5）", () => {
@@ -395,6 +434,23 @@ describe("Claude Code 的登录凭据文件（10.2 审查 S2-M2）", () => {
     expect(files).toHaveLength(2);
     expect(files[0]).toMatch(/[\\/]\.claude[\\/]\.credentials\.json$/);
     expect(files[1]!.replace(/\\/g, "/")).toBe("D:/cfg/.credentials.json");
+  });
+
+  it("Codex 的登录凭据（$CODEX_HOME/auth.json）也交给 guard：第三方模型驱动时不能读到 ChatGPT 订阅令牌（11.2 审查 M4）", async () => {
+    const { hostCredentialFiles } = await import("./session.js");
+    const files = hostCredentialFiles({ CODEX_HOME: "E:/codex" }).map((f) => f.replace(/\\/g, "/"));
+    expect(files).toContain("E:/codex/auth.json");
+    expect(files.some((f) => f.endsWith("/.claude/.credentials.json"))).toBe(true);
+    const defaults = hostCredentialFiles({}).map((f) => f.replace(/\\/g, "/"));
+    expect(defaults.some((f) => f.endsWith("/.codex/auth.json"))).toBe(true);
+    const { judgeToolCall } = await import("./guard.js");
+    const ctx = {
+      workspace: "C:/ws",
+      pluginDir: "C:/plugin",
+      credentialFiles: hostCredentialFiles({ CODEX_HOME: "E:/codex" }),
+    };
+    expect(judgeToolCall("Read", { file_path: "E:/codex/auth.json" }, ctx)?.rule).toBe("protected-path");
+    expect(judgeToolCall("Bash", { command: "cat ~/.codex/auth.json" }, ctx)?.rule).toBe("protected-path");
   });
 });
 

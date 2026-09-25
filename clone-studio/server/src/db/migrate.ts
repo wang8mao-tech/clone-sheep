@@ -144,6 +144,16 @@ const STEPS: ReadonlyArray<{ version: number; run: (d: ReturnType<typeof db>) =>
       }
     },
   },
+  {
+    // Task 11.2：Codex 订阅生图零价，台账记张数（REQ-011）
+    version: 12,
+    run: (d) => {
+      const builds = new Set(
+        (d.prepare("PRAGMA table_info(builds)").all() as Array<{ name: string }>).map((c) => c.name),
+      );
+      if (builds.size > 0 && !builds.has("codex_images")) d.exec("ALTER TABLE builds ADD COLUMN codex_images INTEGER");
+    },
+  },
 ];
 
 /** agent_jobs 补列：老库里那张表已经存在，schema.sql 的 CREATE TABLE IF NOT EXISTS 不会给它加列 */

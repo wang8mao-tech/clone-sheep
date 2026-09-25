@@ -1,5 +1,16 @@
 # 变更记录
 
+## [v1.10.5] - 2026-09-25
+> 本版改动来自 Task 11.2（Codex 生图宿主接入）。
+
+### 修改
+- **REQ-011 行为**：Provider 包由后端同步到 `<数据根>/node_modules/@clone-studio/codex-image`，不用 `--package-root`（只有 check / plan / pricing / build 认，doctor、programs、runtime 不认且会报错，在跑的 Worker 不看新值，Phase 11 实测）；`.cmd` 垫片解析成 node + codex.js。
+- **REQ-011 规则 · 体检与开关**：登录看 `$CODEX_HOME/auth.json`（默认 `~/.codex`），只看在不在；启用开关由后端按体检把关。
+- **REQ-011 规则 · 试出一张图**：走真实 hypit build（临时工程只含一个 gpt:Image），回图、耗时或原文错误；一次只跑一个。
+- **REQ-011 规则 · 台账**：出片记录记本次走 Codex 的请求数，花费明细显示。
+- **Q-007**：结论改为同步到数据根 node_modules。
+- **REQ-011 行为（11.2 审查后补）**：工作目录里的 `node_modules` 能盖掉宿主同步的包——Agent 不许写，后端调 hypit 前也查、查到就拒绝；包没同步上不绑定 gpt-image，体检行报原因；试出一张图时也同步；`$CODEX_HOME/auth.json` 加入 Agent 不许读的凭据；后端重启后收掉上次的试图工程（先停 Worker）。
+
 ## [v1.10.4] - 2026-09-25
 > 本版改动来自 Task 11.1（Codex 生图 Provider 包）。
 

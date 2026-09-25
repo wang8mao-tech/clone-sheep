@@ -3,6 +3,8 @@ import { z } from "zod";
 import { config, paths } from "../config.js";
 import { db } from "../db/index.js";
 import { healthSummary, verifyTokenDance } from "../health/checks.js";
+import { codexReadiness } from "../hypit/codex.js";
+import { syncCodexPackage } from "../hypit/codex-package.js";
 import { getSecret, maskSecret, setSecret } from "../lib/secrets.js";
 import { sseHub } from "../lib/sse.js";
 
@@ -89,6 +91,25 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({
         error: { code: "INVALID_BODY", message: "设置项不合法", detail: parsed.error.issues },
       });
+    }
+    // 打开 Codex 订阅生图前先过体检、把 Provider 包放进数据根（REQ-011、AC-033）；关掉不用查
+    if (parsed.data.codexProviderEnabled === true) {
+      const ready = await codexReadiness();
+      if (!ready.ready) {
+        return reply.status(409).send({
+          error: {
+            code: "CODEX_NOT_READY",
+            message: `Codex 没准备好：${ready.problem ?? "未知原因"}${ready.fix ? `（执行 ${ready.fix}）` : ""}`,
+          },
+        });
+      }
+      try {
+        syncCodexPackage();
+      } catch (error) {
+        return reply.status(500).send({
+          error: { code: "CODEX_PACKAGE", message: error instanceof Error ? error.message : String(error) },
+        });
+      }
     }
     const entries = Object.entries(parsed.data).filter(([, v]) => v !== undefined);
     if (entries.length > 0) {

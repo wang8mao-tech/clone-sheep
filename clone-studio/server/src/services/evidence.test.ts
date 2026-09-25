@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -197,6 +197,35 @@ describe("编排：顺序与失败即停", () => {
     expect(() => evidence.retryEvidence(templateId, "transcribe")).not.toThrow();
     // 重试在后台接着跑：等它跑完再收尾，不然它在临时目录删掉之后写库、把目录又建出来
     await settle(evidence, templateId);
+  });
+});
+
+describe("转写前按当前设置重写 Runtime Profile（11.2 第二轮审查 L-a）", () => {
+  it("磁盘上还留着开 Codex 时写的 codex.local：拉 WhisperX 之前换成现在的（没开就不绑）", async () => {
+    const fake = fakeHypit();
+    const { evidence, templateId, workspace, ensure } = await seed(fake);
+    const profile = path.join(workspace, "hypit.runtime.json");
+    const stale = JSON.parse(readFileSync(profile, "utf8")) as {
+      endpoints: Record<string, unknown>;
+      bindings: Record<string, string>;
+    };
+    stale.endpoints["codex.local"] = {
+      use: "@clone-studio/codex-image",
+      pool: "codex.local",
+      config: { command: "node" },
+    };
+    stale.bindings["@hypit/gpt-image@1#gpt-image-2"] = "codex.local";
+    writeFileSync(profile, JSON.stringify(stale));
+    let seen = "";
+    ensure.mockImplementation(async () => {
+      seen = readFileSync(profile, "utf8");
+      return "already-up";
+    });
+
+    await evidence.startEvidence({ templateId, source: { kind: "file", path: fakeUpload() }, language: "zh" });
+    expect((await settle(evidence, templateId)).status).toBe("done");
+    expect(seen).not.toBe("");
+    expect(seen).not.toContain("codex.local");
   });
 });
 

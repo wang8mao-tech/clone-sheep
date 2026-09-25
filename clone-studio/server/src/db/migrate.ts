@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { SUBSCRIPTION_PROFILE_ID, SUBSCRIPTION_PROFILE_NAME } from "../agent/profile-presets.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { paths } from "../config.js";
@@ -118,6 +119,18 @@ const STEPS: ReadonlyArray<{ version: number; run: (d: ReturnType<typeof db>) =>
       }
     },
   },
+  {
+    // Task 10.1：模型档案——任务记下用的是哪个档案（继续 / 打回沿用它）；档案表补 updated_at
+    version: 10,
+    run: (d) => {
+      addAgentJobColumns(d, ["profile_id"]);
+      const profiles = new Set(
+        (d.prepare("PRAGMA table_info(model_profiles)").all() as Array<{ name: string }>).map((c) => c.name),
+      );
+      if (profiles.size > 0 && !profiles.has("updated_at"))
+        d.exec("ALTER TABLE model_profiles ADD COLUMN updated_at TEXT");
+    },
+  },
 ];
 
 /** agent_jobs 补列：老库里那张表已经存在，schema.sql 的 CREATE TABLE IF NOT EXISTS 不会给它加列 */
@@ -150,6 +163,19 @@ export function migrate(): void {
   }
 
   seedSettings(d);
+  seedSubscriptionProfile(d);
+}
+
+/** 内置「本机 Claude Code 订阅」档案（REQ-010）：不可删；没有别的默认档案时它就是默认 */
+function seedSubscriptionProfile(d: ReturnType<typeof db>): void {
+  const exists = d.prepare("SELECT 1 FROM model_profiles WHERE id = ?").get(SUBSCRIPTION_PROFILE_ID);
+  if (exists) return;
+  const hasDefault = d.prepare("SELECT 1 FROM model_profiles WHERE is_default = 1").get();
+  const now = new Date().toISOString();
+  d.prepare(
+    `INSERT INTO model_profiles (id, name, kind, supports_vision, supports_web_search, is_default, builtin, created_at, updated_at)
+     VALUES (?, ?, 'subscription', 1, 1, ?, 1, ?, ?)`,
+  ).run(SUBSCRIPTION_PROFILE_ID, SUBSCRIPTION_PROFILE_NAME, hasDefault ? 0 : 1, now, now);
 }
 
 /** settings 是单例行，不存在就按 Spec REQ-008 的默认值建一行。 */

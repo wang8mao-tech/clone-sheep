@@ -1,6 +1,6 @@
 # 产品需求规范：Clone Studio（暂定名）
 
-> 版本 v1.9.10 · 2026-09-25 · 内核：Hypit 0.2.6（本地副本 `hypit-main/`）· 技术调研见 `Hypit-Research.md`
+> 版本 v1.10.0 · 2026-09-25 · 内核：Hypit 0.2.6（本地副本 `hypit-main/`）· 技术调研见 `Hypit-Research.md`
 > Phase 0 先行验证结论见 `clone-studio/docs/spike-notes.md`，本版据其回写。
 
 ## 0. AI 使用说明
@@ -461,12 +461,14 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 |---|---|---|
 | 本机 Claude Code 订阅（默认，不可删） | 不注入任何变量，走本机登录态 | |
 | Anthropic API key | 仅注入 key | |
-| DeepSeek（预设） | 官方 Anthropic 兼容端点 `https://api.deepseek.com/anthropic` | 用户只填 key 与模型 id；"支持看图"默认开（用户确认 DeepSeek 已支持图片输入），测试连接时带图验证 |
-| 豆包 / 火山方舟（预设） | 方舟的 Anthropic 兼容端点 | 端点地址见 Q-004 |
+| DeepSeek（预设） | 官方 Anthropic 兼容端点 `https://api.deepseek.com/anthropic` | 用户只填 key 与模型 id（预填 `deepseek-flash`）；"支持看图"默认开（用户确认、官方文档写明支持图片块），测试连接时带图验证；"支持联网搜索"默认开（官方文档写明 web_search 工具可用） |
+| 豆包 / 火山方舟（预设） | 方舟 Coding Plan 的 Anthropic 兼容端点 `https://ark.cn-beijing.volces.com/api/coding` | 需要 Coding Plan 的 key；模型预填 `ark-code-latest`；看图、联网搜索默认关（随所选模型，用户自行打开） |
 | Gemini、ChatGPT/OpenAI（预设） | 这两家没有原生 Anthropic 兼容端点，须经用户本机自起的 LiteLLM 代理转换；base_url 预填 `http://127.0.0.1:4000` | 本应用不内置、不托管代理，设置页给出起代理的说明 |
 | 自定义 | 任意 Anthropic 兼容端点 | |
 
 **规则：**
+- 档案管理：内置订阅档案不可改、不可删，只能设为默认（它不指定模型，用订阅的默认模型）；另可添加「本机订阅 · 指定模型」档案：同样走本机登录态、不注入任何变量，只指定主模型 id（如 Sonnet），供按任务选订阅下的模型；删除默认档案后默认回到内置订阅；还有未结束任务（排队、运行、等待额度）在用的档案不能删；改 base_url、token、模型 id，或把「支持看图」打开后，「已验证」清掉，要重新测试（看图要带图测过才算）；token 只回打码值，编辑时不填就沿用原 token；token 只收可见 ASCII 字符（不含空白），报错信息里也不回显 token。
+- 测试连接：订阅档案跑一次最小 SDK 会话；其余档案直接向 `{base_url}/v1/messages`（Anthropic key 档案是官方地址）发一条 16 token 以内的请求，兼容端点用 Bearer、官方 key 用 x-api-key。上游回 2xx 且响应是一条 Messages API 消息才算成功，失败时回上游 HTTP 状态与响应原文，档案标「未验证」；成功标「已验证 + 时间」。测试途中档案被改过的，结论不落到新配置上。
 - MUST 只支持 API key 接入。ChatGPT Plus、Gemini Advanced、豆包 App 这类聊天订阅不提供 API，界面在预设旁明说"需要 API key，聊天订阅不可用"。
 - MUST 每个档案带"支持看图"开关。复刻任务必须看帧，选中不支持看图的档案启动复刻时拦截并说明；变体任务仅警告。
 - MUST 每个档案带"支持联网搜索"开关。Anthropic 的 WebSearch 是服务端工具，第三方端点下不可用；该开关为关时，运行器在系统提示里告知 Agent 改用 Bash（curl / yt-dlp 等）与 WebFetch 找图，并在素材审核界面提示"该模型无原生搜索，素材缺口可能偏多"。
@@ -484,7 +486,7 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 | 档案名 | string | Yes | 1-30 字，不重名 |
 | base_url | url | 除订阅/Anthropic 外必填 | http/https |
 | auth token | secret | 除订阅外必填 | 非空 |
-| 主模型 id | string | 除订阅外必填 | 非空 |
+| 主模型 id | string | 除内置订阅档案外必填（「本机订阅 · 指定模型」也要填） | 非空 |
 | 快速模型 id | string | No | 映射 haiku 档，空则同主模型 |
 | 支持看图 / 支持联网搜索 | bool | Yes | 预设给默认值，可改 |
 | 输入/输出单价 | number | No | ≥0 |
@@ -636,7 +638,7 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 | DEP-003 | `@anthropic-ai/claude-agent-sdk`（TypeScript） | 无头驱动复刻/变体 Agent | Yes | 自带 Claude Code 二进制；用 query、PreToolUse hooks、plugins、skills、maxBudgetUsd、resume |
 | DEP-004 | 本机 Claude Code 订阅登录 | Agent 默认认证 | Yes | 2026-06-15 起无头用量走独立周额度池；订阅凭据仅限个人本机使用 |
 | DEP-010 | DeepSeek Anthropic 兼容端点 `https://api.deepseek.com/anthropic` | 可选 Agent 模型 | No | 官方支持 Claude Code 接入；对 metadata.user_id 字符集有限制，测试连接时验证 |
-| DEP-011 | 火山方舟（豆包）Anthropic 兼容端点 | 可选 Agent 模型 | No | 见 Q-004 |
+| DEP-011 | 火山方舟（豆包）Anthropic 兼容端点 | 可选 Agent 模型 | No | `https://ark.cn-beijing.volces.com/api/coding`（Coding Plan，Q-004 已解答） |
 | DEP-012 | LiteLLM 代理（用户自起） | 把 Gemini / OpenAI 转成 Anthropic Messages 格式 | No | 本应用不内置；经代理时 WebSearch 工具不可用 |
 | DEP-005 | TokenDance API key（`https://tokendance.space`，用户已订阅） | Seedance 视频、Seedream 生图、MiniMax H3 视频 | 出片必需 | 不含配音 TTS 与 GPT Image；Seedance 2.0/2.5 拒绝含真人脸的参考图/视频 |
 | DEP-013 | HypiHub（`https://hypit.ai`） | 补 TokenDance 没有的能力：TTS、GPT Image 等 | No | 无需找 key 页面：`hypit auth login hypihub.default` 走浏览器 OAuth 授权；也可 `--from <key 文件>` 导入静态 key |
@@ -700,9 +702,9 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 |---|---|---:|---|
 | Q-001 | 排行榜类片子的旁白/主持人声音怎么来：TokenDance 无独立 TTS | 阻塞含配音片子的出片验收，不阻塞开发 | 三条路：Seedance 直出带声音的口播镜头；连 HypiHub 用其 TTS；用户自供音频。默认先走第一条，不够再连 HypiHub |
 | Q-002 | 联网搜图的版权风险由用户自担，是否需要在审核界面加免责提示 | No | 默认加一行小字 |
-| Q-004 | 火山方舟当前的 Anthropic 兼容端点地址、模型 id 与是否支持图片输入 | No | 开发到 REQ-010 时联网核实后写进预设；核实不到则豆包预设降为"自定义"并由用户自填 |
 | Q-005 | 用户的 Gemini / ChatGPT 是聊天订阅还是 API key | No | 聊天订阅无法接入；只有 API key 能用，且需自起 LiteLLM |
 | Q-007 | Hypit 能否从 `hypit-main/` 之外加载自写 Provider 包（`--package-root` 或项目 `packages/`），以及 gpt-image 能力的请求/响应契约 | No | 已基本解答：`hypit-main/examples/provider-package` 证明项目自有 Provider 放在包目录、经 runtime profile 的 `bindings` 绑到 `@hypit/gpt-image@1#gpt-image-2` 即可；剩 `--package-root` 指向 hypit-main 之外目录的实测，排在 DEV-PLAN Phase 11 |
+| ~~Q-004~~ | **已解答（Phase 10，2026-09-25 联网核实）**：火山方舟 Anthropic 兼容端点 | 不再阻塞 | 官方文档「Coding Plan 个人版」给 `https://ark.cn-beijing.volces.com/api/coding`（只消耗 Coding Plan 额度，`/api/v3` 另行计费、不是 Anthropic 协议），模型可填 `ark-code-latest`；是否看图随所选模型，预设默认关，用户自行打开。写进 REQ-010 豆包预设 |
 | ~~Q-003~~ | **已解答（Phase 0）**：`hypit pricing` 给不出可用估价，build 后也拿不到实际花费 | 不再阻塞 | `pricing.kind` 仅 `page`/`local`，Result 无金额字段。兜底方案转为正式决定：Clone Studio 自维护费率表算估价、全部花费标"估"，见 REQ-006 估价来源与 REQ-009。证据见 `clone-studio/docs/spike-notes.md` 验证一 |
 
 ---

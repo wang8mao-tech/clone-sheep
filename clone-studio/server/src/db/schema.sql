@@ -139,6 +139,8 @@ CREATE TABLE IF NOT EXISTS agent_jobs (
   -- 花费一律是估算：SDK 自称 "An estimate, not a billing statement"（Spec REQ-009）
   cost_is_estimate INTEGER NOT NULL DEFAULT 1,
   stop_reason      TEXT,
+  -- 档案快照（REQ-010）：名称与模型 id 不随档案删除而变；profile_id 供继续 / 打回沿用原档案
+  profile_id       TEXT,
   profile_name     TEXT,
   model_id         TEXT,
   -- 任务提示原文：重跑按它从头来（Task 5.2）
@@ -257,7 +259,8 @@ CREATE TABLE IF NOT EXISTS model_profiles (
   verified_at         TEXT,
   is_default          INTEGER NOT NULL DEFAULT 0,
   builtin             INTEGER NOT NULL DEFAULT 0,
-  created_at          TEXT NOT NULL
+  created_at          TEXT NOT NULL,
+  updated_at          TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_model_profiles_name ON model_profiles (name);
 

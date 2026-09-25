@@ -195,6 +195,8 @@ describe("编排：顺序与失败即停", () => {
 
     expect(state.steps.find((s) => s.step === "transcribe")?.status).toBe("timeout");
     expect(() => evidence.retryEvidence(templateId, "transcribe")).not.toThrow();
+    // 重试在后台接着跑：等它跑完再收尾，不然它在临时目录删掉之后写库、把目录又建出来
+    await settle(evidence, templateId);
   });
 });
 

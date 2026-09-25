@@ -19,6 +19,7 @@ import { cancelOrphanedBuilds, pumpBuilds, setBuildLog } from "./services/build-
 import { registerCloneFlow } from "./services/clone.js";
 import { registerVariantFlow } from "./services/variant-flow.js";
 import { settingsRoutes } from "./routes/settings.js";
+import { modelProfileRoutes } from "./routes/model-profiles.js";
 import { systemRoutes } from "./routes/system.js";
 import { mediaRoutes } from "./routes/media.js";
 import { referenceRoutes } from "./routes/reference.js";
@@ -60,6 +61,7 @@ async function main(): Promise<void> {
 
   await app.register(systemRoutes);
   await app.register(settingsRoutes);
+  await app.register(modelProfileRoutes);
   await app.register(clientRoutes);
   await app.register(templateRoutes);
   await app.register(referenceRoutes);

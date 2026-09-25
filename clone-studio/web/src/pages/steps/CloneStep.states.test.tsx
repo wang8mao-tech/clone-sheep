@@ -131,7 +131,8 @@ describe("估价卡（CMP-006）", () => {
     // 现在改成有结论了；后端推 estimate 事件
     stubEstimate(ESTIMATE);
     pushTemplateEvent("estimate", { productionId: "prod-1", estimateId: "e1", decision: "auto" });
-    expect(await screen.findByText("限额内，将自动出片")).toBeTruthy();
+    // 等待要比估价卡 3 秒一轮的轮询短：只有 estimate 事件能让它这么快重拉，轮询等到的不算（11.4 第九轮审查 R9-M1）
+    expect(await screen.findByText("限额内，将自动出片", {}, { timeout: 1500 })).toBeTruthy();
     expect(state.estimateReads).toBeGreaterThan(reads);
   });
 

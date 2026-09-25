@@ -4,7 +4,8 @@ import { cleanup, configure } from "@testing-library/react";
 import { mediaStateOf as stateOf } from "./media.js";
 
 // findBy / waitFor 默认只等 1 秒：仓库根门禁里三个包的测试接连跑、机器忙时首屏渲染会超过 1 秒（真测 1.3～1.5 秒），
-// 放宽到 3 秒只影响「还没出来就再等等」，不改变断言（11.4 第八轮审查 L12）
+// 放宽到 3 秒（11.4 第八轮审查 L12）。代价：页面自己有 3 秒一轮的轮询时，默认等待也等得到下一轮——要证明「是事件
+// 触发的、不是轮询等到的」，那条等待得自己写比轮询间隔短的 timeout（如 CloneStep 估价事件那条，11.4 第九轮审查 R9-M1）
 configure({ asyncUtilTimeout: 3000 });
 
 /**

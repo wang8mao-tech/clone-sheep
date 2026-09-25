@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import type { AssetView, VariantReviewState } from "../../lib/variant-review.js";
 import { batch, installVariantSources, mountVariants, variant, variantsBackend } from "../../test/variants-kit.js";
+import { TPL } from "../../test/agent-drawer-kit.js";
 
 /** SCREEN-007 素材审核全幅面板：角标、来源链接、替换 / 上传、有缺口禁用通过、通过、打回、版权提示（AC-015 / AC-018 前端） */
 
@@ -23,6 +24,7 @@ const asset = (n: number, over: Partial<AssetView> = {}): AssetView => ({
 
 function reviewState(over: Partial<VariantReviewState> = {}): VariantReviewState {
   return {
+    templateId: TPL,
     variant: variant(2, { status: "asset_review", needsMe: true, name: "手机排行", brief: "换成手机品牌排行榜" }),
     assets: [
       asset(1),

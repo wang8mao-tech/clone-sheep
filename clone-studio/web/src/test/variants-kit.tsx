@@ -33,8 +33,10 @@ export const variant = (n: number, over: Partial<VariantView> = {}): VariantView
   estimate: null,
   build: null,
   needsMe: false,
-  approved: false,
   ...over,
+  // 服务端只在有运行文件时才给估价与出片（variants.ts presentVariant）：有它们就是交给过出片，默认 approved；
+  // 重跑后运行文件清掉的场景，用例自己给 approved: false
+  approved: over.approved ?? (over.build != null || over.estimate != null),
 });
 
 export const buildView = (over: Partial<BuildView> = {}): BuildView => ({
@@ -133,6 +135,10 @@ export function variantsBackend(init: BatchView[], extra: Stubs = {}): VariantsD
         db.reruns.push(url?.split("/")[3] ?? "");
         return { body: { variant: variant(1) } };
       },
+      // 007 右栏的花费明细 CMP-008（Task 9.3）：默认没有花费
+      "/api/productions/:id/costs": (_req, url) => ({
+        body: { productionId: url?.split("/")[3] ?? "", agent: [], builds: [], totalUsd: 0, totalIsEstimate: false },
+      }),
       "POST /api/productions/:id/build/retry": (_req, url) => {
         db.retries.push(url?.split("/")[3] ?? "");
         return { body: { queued: true } };

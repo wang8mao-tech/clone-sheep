@@ -51,6 +51,7 @@ export function VariantRow({ variant: v, now, href, busy, onAction }: Props) {
 
   return (
     <TaskRow
+      reserveExpander
       accent={accent}
       lead={
         <span className="inline-block w-[112px]">

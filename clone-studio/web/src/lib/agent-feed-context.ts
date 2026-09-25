@@ -3,6 +3,8 @@ import type { AgentFeed, FeedState } from "./agent-feed.js";
 
 export interface TemplateAgent {
   templateId: string | undefined;
+  /** 在 007 素材审核里时是所选变体：抽屉与熔断横条看它的任务（Task 9.3） */
+  variantId?: string | undefined;
   state: FeedState;
   feed: AgentFeed | null;
 }

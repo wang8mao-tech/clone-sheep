@@ -10,6 +10,7 @@ import {
   variant,
   variantsBackend,
 } from "../../test/variants-kit.js";
+import { TPL } from "../../test/agent-drawer-kit.js";
 
 /** SCREEN-007 素材审核面板的动作与状态（8.4 审查）：取消、替换中锁住提交、估价卡与出片卡、失败文案、从队列点开 */
 
@@ -30,6 +31,7 @@ const asset = (n: number, over: Partial<AssetView> = {}): AssetView => ({
 });
 
 const state = (over: Partial<VariantReviewState> = {}): VariantReviewState => ({
+  templateId: TPL,
   variant: variant(2, { status: "asset_review", needsMe: true, name: "手机排行" }),
   assets: [asset(1)],
   script: "台词",
@@ -75,6 +77,8 @@ describe("动作", () => {
     await waitFor(() => expect(approve).toBeDisabled());
     expect(approve).toHaveAttribute("title", "正在替换图片，换完再提交");
     expect(screen.getByRole("button", { name: "打回" })).toBeDisabled();
+    // 上传标签也写明为什么不能点，悬停看得到（Task 9.3：不再 pointer-events-none）
+    expect(screen.getByText("替换中…").closest("label")).toHaveAttribute("title", "正在替换这张图，换完再操作");
   });
 
   it("打回被拒：写明打回没提交与原因", async () => {

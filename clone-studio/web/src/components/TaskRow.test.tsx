@@ -26,3 +26,30 @@ describe("TaskRow accent", () => {
     expect(renderRow(accent)).toHaveClass("border-l-2", color);
   });
 });
+
+describe("TaskRow reserveExpander（8.3 审查 LOW：状态列与列头对齐）", () => {
+  it("没有错误原文的行：给了 reserveExpander 就留一个箭头宽的空位；不给（客户页）就不留", () => {
+    const { container, rerender } = render(
+      <ul>
+        <TaskRow title="行" columns={[]} reserveExpander />
+      </ul>,
+    );
+    expect(container.querySelector("[data-expander-slot]")).not.toBeNull();
+    rerender(
+      <ul>
+        <TaskRow title="行" columns={[]} />
+      </ul>,
+    );
+    expect(container.querySelector("[data-expander-slot]")).toBeNull();
+  });
+
+  it("有错误原文：放真正的展开按钮，不另留空位", () => {
+    const { container } = render(
+      <ul>
+        <TaskRow title="行" columns={[]} errorDetail="炸了" reserveExpander />
+      </ul>,
+    );
+    expect(screen.getByRole("button", { name: "展开错误原文" })).toBeInTheDocument();
+    expect(container.querySelector("[data-expander-slot]")).toBeNull();
+  });
+});

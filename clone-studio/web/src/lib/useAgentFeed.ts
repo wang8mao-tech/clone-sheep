@@ -10,6 +10,7 @@ const IDLE: FeedState = {
   loadingOlder: false,
   error: null,
   liveAfterSeq: 0,
+  gate: null,
 };
 
 /** 同一条 SSE 上顺带转给页面的模板事件（server/src/services/clone.ts 的 `clone`） */
@@ -22,14 +23,26 @@ const TEMPLATE_EVENTS = ["clone", "estimate", "build", "review", "variants", "ou
  * 知道任务 id 之后主题里加上 `job:<id>`，EventSource 随之重建——重建后的 `open` 走
  * 「对 seq 补齐」，快照和新订阅之间产生的消息由它补上。
  */
-export function useAgentFeed(templateId: string | undefined): { state: FeedState; feed: AgentFeed | null } {
-  const feed = useMemo(() => (templateId ? new AgentFeed(templateId, agentApi) : null), [templateId]);
+export function useAgentFeed(
+  templateId: string | undefined,
+  /** 在 007 素材审核里：跟这条变体的任务（Design-Brief §2.3，Task 9.3）；页面事件仍走模板主题 */
+  variantId?: string,
+): { state: FeedState; feed: AgentFeed | null } {
+  const feed = useMemo(
+    () => (templateId ? new AgentFeed(templateId, agentApi, variantId ?? null) : null),
+    [templateId, variantId],
+  );
   const state = useSyncExternalStore(feed?.subscribe ?? noopSubscribe, feed?.getState ?? idleState);
   const jobId = state.job?.id;
 
   useEffect(() => {
     if (!feed || !templateId) return;
-    const topics = [`template:${templateId}`, ...(jobId ? [`job:${jobId}`] : [])].join(",");
+    // 变体任务的 agent-job 事件推在 production:<id> 上（server agent-service notify），重跑出的新任务靠它换过去
+    const topics = [
+      `template:${templateId}`,
+      ...(variantId ? [`production:${variantId}`] : []),
+      ...(jobId ? [`job:${jobId}`] : []),
+    ].join(",");
     const source = new EventSource(`/api/events?topics=${encodeURIComponent(topics)}`);
 
     const onOpen = (): void => void feed.connected();
@@ -50,7 +63,7 @@ export function useAgentFeed(templateId: string | undefined): { state: FeedState
     source.addEventListener("agent-message", onMessage as EventListener);
     for (const name of TEMPLATE_EVENTS) source.addEventListener(name, onTemplateEvent as EventListener);
     return () => source.close();
-  }, [feed, templateId, jobId]);
+  }, [feed, templateId, variantId, jobId]);
 
   return { state, feed };
 }

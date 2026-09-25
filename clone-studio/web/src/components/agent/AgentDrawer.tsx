@@ -21,7 +21,7 @@ import { useNow } from "../../lib/useNow.js";
  * 在模板页之外没有任务可看，只留外壳。开合：用户动过就听用户的；没动过时有任务就展开。
  */
 export function AgentDrawer() {
-  const { templateId, state, feed } = useTemplateAgent();
+  const { templateId, variantId, state, feed } = useTemplateAgent();
   const [pinned, setPinned] = useState<boolean | null>(null);
   const job = state.job;
   // 取数失败也展开：收着的话「读不到」这件事没人看得见，在跑的任务就这么隐形了
@@ -76,7 +76,15 @@ export function AgentDrawer() {
       ) : !state.loaded ? (
         <Skeleton />
       ) : !job ? (
-        <Empty text="这个模板还没有 Agent 任务。" />
+        <Empty
+          text={
+            variantId
+              ? state.missing
+                ? "这个模板下没有这条变体。"
+                : "这条变体还没有 Agent 任务。"
+              : "这个模板还没有 Agent 任务。"
+          }
+        />
       ) : (
         <>
           <MessageStream
@@ -89,7 +97,7 @@ export function AgentDrawer() {
             loadingOlder={state.loadingOlder}
             onLoadOlder={() => void feed?.loadOlder()}
           />
-          {isEnded(job) ? <EndCard job={job} now={now} /> : null}
+          {isEnded(job) ? <EndCard job={job} now={now} gate={state.gate ?? null} /> : null}
         </>
       )}
     </DrawerFrame>

@@ -19,6 +19,8 @@ export interface AssetView {
 }
 
 export interface VariantReviewState {
+  /** 变体属于哪个模板：`?variant=` 是别的模板的，按不存在处理 */
+  templateId: string;
   variant: VariantView;
   assets: AssetView[];
   script: string | null;

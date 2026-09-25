@@ -12,6 +12,7 @@ import {
   variant,
   variantsBackend,
 } from "../../test/variants-kit.js";
+import { TPL } from "../../test/agent-drawer-kit.js";
 
 /** SCREEN-007 面板里的停因、闸门前后的卡片与批次条（8.4 第四轮审查 S1-M-1、S2-M-1） */
 
@@ -20,6 +21,7 @@ beforeEach(() => {
 });
 
 const state = (v: VariantView, over: Partial<VariantReviewState> = {}): VariantReviewState => ({
+  templateId: TPL,
   variant: v,
   assets: [],
   script: "台词",
@@ -95,11 +97,12 @@ describe("停下原因（8.4 第四轮审查 S1-M-1）", () => {
     expect(screen.getAllByText("有请求没有价目")).toHaveLength(1);
   });
 
-  it("Agent 写稿熔断：写明 Agent 写稿停下与原因", async () => {
+  it("Agent 写稿熔断：面板不重复写停因（交给跟着变体的 CMP-009 横条，Task 9.3）", async () => {
     const agent = agentJob({ ownerKind: "production", ownerId: "v2", status: "tripped", stopReason: "超出预算" });
     stub(state(variant(2, { status: "tripped", name: "手机排行", agent })));
     await open();
-    expect(await screen.findByLabelText("停下原因")).toHaveTextContent("Agent 写稿停下：超出预算");
+    await screen.findByRole("region", { name: "素材审核：手机排行" });
+    expect(screen.queryByLabelText("停下原因")).toBeNull();
   });
 });
 

@@ -3,7 +3,14 @@ import { useMutation } from "@tanstack/react-query";
 import { OctagonX, Pause } from "lucide-react";
 import { agentApi } from "../lib/agent.js";
 import type { AgentFeed } from "../lib/agent-feed.js";
-import { describeStop, END_TITLE, isEnded, nextActions, type EndedJob } from "../lib/agent-status.js";
+import {
+  allowedActions,
+  describeStop,
+  END_TITLE,
+  isEnded,
+  type ActionGate,
+  type EndedJob,
+} from "../lib/agent-status.js";
 import { useTemplateAgent } from "../lib/agent-feed-context.js";
 import { formatUsd } from "../lib/format.js";
 import { formatRunElapsed } from "../lib/run-elapsed.js";
@@ -24,14 +31,16 @@ const ENDED = 0;
 export function BreakerBar() {
   const { state, feed } = useTemplateAgent();
   const job = state.job;
-  if (!job || !isEnded(job) || nextActions(job.status).length === 0) return null;
+  // 跟着变体时还要看这条变体此刻允许什么：作废的、交给出片的不给注定被拒的继续 / 重跑（9.3 审查 S1-M2）
+  const gate = state.gate ?? null;
+  if (!job || !isEnded(job) || allowedActions(job.status, gate).length === 0) return null;
   // 请求状态（进行中、失败原文）与确认框只属于「这一个任务的这一次停下」：换了模板、换了任务、
   // 任务状态变了，都整个重来。不然 A 模板「继续失败」的原文会挂到 B 模板的横条上（复审 S2-M1），
   // 开着的确认框也会在任务再次停下时自己弹出来（S2-L1）
-  return <BarBody key={`${job.id}:${job.status}:${job.endedAt ?? ""}`} job={job} feed={feed} />;
+  return <BarBody key={`${job.id}:${job.status}:${job.endedAt ?? ""}`} job={job} feed={feed} gate={gate} />;
 }
 
-function BarBody({ job, feed }: { job: EndedJob; feed: AgentFeed | null }) {
+function BarBody({ job, feed, gate }: { job: EndedJob; feed: AgentFeed | null; gate: ActionGate }) {
   const [confirming, setConfirming] = useState(false);
   const cont = useMutation({
     mutationFn: (jobId: string) => agentApi.continue(jobId),
@@ -48,7 +57,7 @@ function BarBody({ job, feed }: { job: EndedJob; feed: AgentFeed | null }) {
     onError: () => setConfirming(false),
   });
 
-  const actions = nextActions(job.status);
+  const actions = allowedActions(job.status, gate);
   const red = job.status === "tripped" || job.status === "failed";
   const reason = describeStop(job);
   const busy = cont.isPending || rerun.isPending;
@@ -115,12 +124,20 @@ function BarBody({ job, feed }: { job: EndedJob; feed: AgentFeed | null }) {
       <ConfirmDialog
         open={confirming}
         title="重跑这个任务？"
-        consequences={[
-          // 与 server/src/hypit/workspace.ts resetAgentProducts 一致：只清顶层，三个目录整个留着
-          "会删掉 Agent 在工作目录顶层写出的文件（ANALYSIS.md、TIMELINE.md、reference.svml 等）",
-          "references、assets、productions 三个目录（证据、素材、变体数据）整个保留",
-          "按原来的任务提示开一个新会话从头做，之前的会话不再接着用",
-        ]}
+        consequences={
+          job.ownerKind === "production"
+            ? [
+                // 变体的重跑（服务端转到 rerunVariant，同 ④ 队列的重跑）：只清 Agent 的产物，你换过的图留着
+                "清掉这条变体 Agent 写的稿子、清单与抓来的图（你替换过的图留着），素材要重新审",
+                "按原来的 brief 与模型开一个新会话从头写，之前的会话不再接着用",
+              ]
+            : [
+                // 与 server/src/hypit/workspace.ts resetAgentProducts 一致：只清顶层，三个目录整个留着
+                "会删掉 Agent 在工作目录顶层写出的文件（ANALYSIS.md、TIMELINE.md、reference.svml 等）",
+                "references、assets、productions 三个目录（证据、素材、变体数据）整个保留",
+                "按原来的任务提示开一个新会话从头做，之前的会话不再接着用",
+              ]
+        }
         confirmLabel="清掉产物并重跑"
         busy={rerun.isPending}
         onConfirm={() => rerun.mutate(job.id)}

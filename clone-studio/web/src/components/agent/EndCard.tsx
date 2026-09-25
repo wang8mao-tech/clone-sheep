@@ -1,4 +1,10 @@
-import { describeNextActions, describeStop, END_TITLE, type EndedJob } from "../../lib/agent-status.js";
+import {
+  describeNextActions,
+  describeStop,
+  END_TITLE,
+  type ActionGate,
+  type EndedJob,
+} from "../../lib/agent-status.js";
 import { formatUsd } from "../../lib/format.js";
 import { formatRunElapsed } from "../../lib/run-elapsed.js";
 import type { Tone } from "../../lib/agent-timeline.js";
@@ -8,9 +14,10 @@ import { ToneBlock } from "./ToneBlock.js";
  * 会话流末尾的结束卡（Design-Brief §A.3）：原因 + 用时 + 花费。
  * 动作按钮（继续 / 重跑）在工作区 CMP-009（Task 5.5），这里只说明还能做什么。
  */
-export function EndCard({ job, now }: { job: EndedJob; now: number }) {
+export function EndCard({ job, now, gate = null }: { job: EndedJob; now: number; gate?: ActionGate }) {
   const reason = describeStop(job);
-  const next = describeNextActions(job.status);
+  // 变体的任务：只说这条变体此刻真能做的（作废的什么都不说）
+  const next = describeNextActions(job.status, gate);
   const tone: Tone = job.status === "tripped" || job.status === "failed" ? "danger" : null;
   return (
     <div

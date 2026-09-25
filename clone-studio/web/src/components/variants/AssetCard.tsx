@@ -90,11 +90,13 @@ export function AssetCard({ asset, editable, busy, error, onReplace, onZoom }: P
                 />
                 <label
                   htmlFor={inputId}
+                  // 同 Button：禁用时不吞指针事件，悬停看得到原因（输入框已 disabled，点了也不会选文件）
+                  title={busy ? "正在替换这张图，换完再操作" : undefined}
                   className={[
-                    "inline-flex h-7 cursor-pointer items-center gap-1 rounded px-2 text-caption hover:bg-surface-raised",
+                    "inline-flex h-7 items-center gap-1 rounded px-2 text-caption",
                     "peer-focus-visible:ring-2 peer-focus-visible:ring-primary",
                     asset.gap ? "text-danger" : "text-text",
-                    busy ? "pointer-events-none opacity-40" : "",
+                    busy ? "cursor-not-allowed opacity-40" : "cursor-pointer hover:bg-surface-raised",
                   ].join(" ")}
                 >
                   <Upload aria-hidden className="size-3.5" />

@@ -92,6 +92,8 @@ export function VariantQueue({ batches, now, hrefFor, busy, onAction, error }: P
               aria-hidden
               className="flex h-8 items-center gap-3 border-b border-border px-3 pl-[14px] text-caption text-text-tertiary"
             >
+              {/* 行首展开箭头的位（没有错误的行也留着，TaskRow reserveExpander） */}
+              <span className="size-3.5 shrink-0" />
               <span className="w-[112px] shrink-0">状态</span>
               <span className="min-w-0 flex-1">变体</span>
               <span className="w-[128px] shrink-0">模型</span>

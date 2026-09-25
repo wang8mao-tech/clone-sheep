@@ -62,7 +62,7 @@ export const IDLE = evidence("idle", PENDING);
 export function stub(
   templateStatus: TemplateStatus,
   state: EvidenceState,
-  extra: Record<string, RouteStub | ((init?: RequestInit) => RouteStub)> = {},
+  extra: Record<string, RouteStub | ((init?: RequestInit, url?: string) => RouteStub)> = {},
   tplOver: Record<string, unknown> = {},
 ) {
   stubFetch({

@@ -22,6 +22,10 @@ export interface FeedState {
   error: string | null;
   /** seq 大于它的消息是打开抽屉之后才到的：只有这些逐字流式，历史消息直接整段显示 */
   liveAfterSeq: number;
+  /** 跟着变体时：这条变体此刻允许的动作（作废的、交给出片的不给继续 / 重跑，Task 9.3）；跟模板时是 null */
+  gate?: { continue: boolean; rerun: boolean } | null;
+  /** 跟着的变体不存在或属于别的模板（手改地址）：抽屉说它不在，不说「还没有任务」（9.3 第三轮审查 LOW-3） */
+  missing?: boolean;
 }
 
 const EMPTY: FeedState = {
@@ -34,7 +38,7 @@ const EMPTY: FeedState = {
   liveAfterSeq: 0,
 };
 
-type Api = Pick<AgentApi, "templateJob" | "job" | "after" | "before">;
+type Api = Pick<AgentApi, "templateJob" | "job" | "after" | "before"> & Partial<Pick<AgentApi, "productionJob">>;
 
 export class AgentFeed {
   private state: FeedState = EMPTY;
@@ -48,10 +52,20 @@ export class AgentFeed {
   private syncing: Promise<void> | null = null;
   private again = false;
 
+  /**
+   * 抽屉跟着谁：默认是模板的复刻任务；在 007 素材审核里给了变体 id 就跟那条变体的任务（Design-Brief §2.3，Task 9.3）。
+   * 模板主题上的页面事件（clone / build / variants …）照旧走模板
+   */
   constructor(
     private readonly templateId: string,
     private readonly api: Api,
+    private readonly variantId: string | null = null,
   ) {}
+
+  /** 任务的主人：变体或模板 */
+  private get ownerId(): string {
+    return this.variantId ?? this.templateId;
+  }
 
   getState = (): FeedState => this.state;
 
@@ -77,6 +91,8 @@ export class AgentFeed {
 
   templateEvent(event: string, data: unknown): void {
     for (const listener of this.eventListeners.get(event) ?? []) listener(data);
+    // 跟着变体时：变体的状态会在任务之外变（取消、交给出片），它能做什么（gate）要跟着重拉（9.3 第二轮审查 S1-M1）
+    if (this.variantId && event === "variants") void this.sync();
   }
 
   get jobId(): string | null {
@@ -99,11 +115,14 @@ export class AgentFeed {
    * 比当前任务还旧的那种事件（迟到的旧任务状态）不理：为它清空抽屉等于把看着的会话扔了。
    */
   jobChanged(view: AgentJobView): Promise<void> {
-    if (view.ownerId !== this.templateId) return Promise.resolve();
+    if (view.ownerId !== this.ownerId) return Promise.resolve();
     const current = this.state.job;
     if (view.id === current?.id) {
+      // 同一次状态变化会从 job: 与 production: 两个主题各到一帧：状态没变的第二帧不再重拉（9.3 第三轮审查 LOW-2）
+      const moved = view.status !== current.status || view.endedAt !== current.endedAt;
       this.set({ job: view });
-      return Promise.resolve();
+      // 变体的任务停下时不一定有消息（判据没过、会话崩了）：重拉任务头，gate 跟着更新（9.3 第二轮审查 S1-M2）
+      return this.variantId && moved ? this.sync() : Promise.resolve();
     }
     if (current && view.createdAt < current.createdAt) return Promise.resolve();
     this.reset();
@@ -169,17 +188,31 @@ export class AgentFeed {
       }
       const head = await this.api.job(this.state.job.id);
       if (gen !== this.generation) return;
-      this.set({ job: head.job, error: null });
+      this.set({ job: head.job, error: null, ...(head.owner !== undefined ? { gate: gateOf(head.owner) } : {}) });
       if (head.jobLastSeq > this.cursor) await this.catchUp(gen);
     } catch (error) {
+      if (gen !== this.generation) return;
+      // 跟着的变体不存在（手改地址）：就是没有任务，面板自己会说不存在，抽屉不再报红（9.3 审查 S2-L5）
+      if (this.variantId && isNotFound(error)) {
+        this.set({ job: null, messages: [], loaded: true, error: null, gate: null, missing: true });
+        return;
+      }
       // 不标 loaded：快照没拿到时说不清「有没有任务」，界面给错误与重试，不给「还没有任务」
-      if (gen === this.generation) this.set({ error: messageOf(error) });
+      this.set({ error: messageOf(error) });
     }
   }
 
   private async loadSnapshot(gen: number): Promise<void> {
-    const snap = await this.api.templateJob(this.templateId);
+    const snap =
+      this.variantId && this.api.productionJob
+        ? await this.api.productionJob(this.variantId)
+        : await this.api.templateJob(this.templateId);
     if (gen !== this.generation) return;
+    // 变体属于别的模板（手改 ?variant=）：当没有任务，抽屉与 CMP-009 都不跟它（9.3 审查 S1-M1）
+    if (this.variantId && snap.owner && snap.owner.templateId !== this.templateId) {
+      this.set({ job: null, messages: [], loaded: true, error: null, gate: null, missing: true });
+      return;
+    }
     this.cursor = snap.nextSeq;
     this.firstSeq = snap.firstSeq;
     this.set({
@@ -190,6 +223,8 @@ export class AgentFeed {
       error: null,
       // 快照里的都是历史；之后到的才流式
       liveAfterSeq: snap.nextSeq,
+      gate: this.variantId ? gateOf(snap.owner) : null,
+      missing: false,
     });
     if (snap.job && snap.hasNewer) await this.catchUp(gen);
   }
@@ -233,4 +268,16 @@ export function merge(a: readonly AgentMessageView[], b: readonly AgentMessageVi
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** 服务端 ownerGate → 动作闸门；拿不到（出片单位没了）就什么都不给 */
+function gateOf(owner: { continue: boolean; rerun: boolean } | null | undefined): {
+  continue: boolean;
+  rerun: boolean;
+} {
+  return owner ? { continue: owner.continue, rerun: owner.rerun } : { continue: false, rerun: false };
+}
+
+function isNotFound(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { status?: unknown }).status === 404;
 }

@@ -4,6 +4,11 @@ import { agentScheduler, present } from "../agent/agent-service.js";
 import { latestJobOf, requireJob } from "../agent/job-store.js";
 import { lastSeq, listMessages, listMessagesBefore, listRecentMessages, PAGE_LIMIT } from "../agent/message-store.js";
 import { requireTemplate } from "../services/archive.js";
+import { readProduction } from "../services/build-store.js";
+import { EvidenceError } from "../services/evidence-types.js";
+import { ownerGate } from "../services/owner-gate.js";
+import { rerunVariant } from "../services/variant-review.js";
+import { assertLatest } from "../agent/job-guards.js";
 import { continuePromptFor } from "../services/clone.js";
 import { pendingRework } from "../services/review.js";
 import { archiveErrorHandler } from "./errors.js";
@@ -58,12 +63,10 @@ const MessagesQuery = z.object({
 export async function agentJobRoutes(app: FastifyInstance): Promise<void> {
   app.setErrorHandler(archiveErrorHandler);
 
-  /** 模板当前的 Agent 任务（没有就 null），带最近一屏消息 */
-  app.get("/api/templates/:id/agent-job", (request) => {
-    const { id } = request.params as { id: string };
-    requireTemplate(id);
-    const job = latestJobOf("template", id);
-    const { limit } = SnapshotQuery.parse(request.query);
+  /** 某个对象当前的 Agent 任务（没有就 null），带最近一屏消息 */
+  function snapshot(ownerKind: "template" | "production", ownerId: string, query: unknown) {
+    const job = latestJobOf(ownerKind, ownerId);
+    const { limit } = SnapshotQuery.parse(query);
     if (!job) {
       return {
         job: null,
@@ -77,12 +80,28 @@ export async function agentJobRoutes(app: FastifyInstance): Promise<void> {
       };
     }
     return { job: present(job), ...listRecentMessages(job.id, limit) };
+  }
+
+  app.get("/api/templates/:id/agent-job", (request) => {
+    const { id } = request.params as { id: string };
+    requireTemplate(id);
+    return snapshot("template", id, request.query);
+  });
+
+  /** 出片单位（变体）当前的 Agent 任务：抽屉跟随所选变体（Design-Brief §2.3「在 007 显示该变体的任务」，Task 9.3） */
+  app.get("/api/productions/:id/agent-job", (request) => {
+    const { id } = request.params as { id: string };
+    if (!readProduction(id)) throw new EvidenceError("PRODUCTION_NOT_FOUND", "出片单位不存在。", 404);
+    return { ...snapshot("production", id, request.query), owner: ownerGate(id) };
   });
 
   app.get("/api/agent-jobs/:jobId", (request) => {
     const { jobId } = request.params as { jobId: string };
     // 名字和分页里的 jobLastSeq 一致：游标推进只认这一个含义（复审 S1-M4）
-    return { job: present(requireJob(jobId)), jobLastSeq: lastSeq(jobId) };
+    const job = requireJob(jobId);
+    // 出片单位的任务带上这条出片单位此刻能做什么（它的状态会在任务之外变：作废、交给出片）
+    const owner = job.owner_kind === "production" ? { owner: ownerGate(job.owner_id) } : {};
+    return { job: present(job), jobLastSeq: lastSeq(jobId), ...owner };
   });
 
   /**
@@ -115,9 +134,22 @@ export async function agentJobRoutes(app: FastifyInstance): Promise<void> {
     return { job: present(agentScheduler().continueJob(jobId, note ?? continuePromptFor(jobId))) };
   });
 
-  /** 重跑：清掉 Agent 产物，按原任务提示重开一个任务 */
+  /**
+   * 重跑：清掉 Agent 产物，按原任务提示重开一个任务。
+   * 变体的任务走 ④ 的重跑（rerunVariant）：除了清文件还要清素材行、运行文件、把变体放回排队，
+   * 只走调度器的重跑会留下旧素材与旧运行文件（Task 9.3：007 上的 CMP-009 横条也用这个接口）
+   */
   app.post("/api/agent-jobs/:jobId/rerun", (request) => {
     const { jobId } = request.params as { jobId: string };
+    const job = requireJob(jobId);
+    if (job.owner_kind === "production") {
+      // 同调度器的重跑：只认最新的那个任务（别的标签页里看着的旧任务不能拿来重跑）
+      assertLatest(job);
+      rerunVariant(job.owner_id);
+      const next = latestJobOf("production", job.owner_id);
+      if (!next) throw new EvidenceError("JOB_NOT_FOUND", "重跑之后没有找到新任务", 500);
+      return { job: present(next) };
+    }
     return { job: present(agentScheduler().rerun(jobId)) };
   });
 }

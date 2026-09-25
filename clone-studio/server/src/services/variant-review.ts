@@ -45,6 +45,8 @@ export interface AssetView {
 }
 
 export interface VariantReviewState {
+  /** 变体属于哪个模板：④ 的 `?variant=` 是别的模板的，前端按不存在处理（9.3） */
+  templateId: string;
   variant: VariantView;
   assets: AssetView[];
   script: string | null;
@@ -98,6 +100,7 @@ export function reviewState(id: string): VariantReviewState {
   const gaps = assets.filter((a) => a.gap).length;
   const reviewing = variant.status === "asset_review";
   return {
+    templateId: variant.template_id,
     variant: presentVariant(variant),
     assets,
     script: raw === null ? null : raw.slice(0, SCRIPT_VIEW_MAX),
@@ -248,7 +251,7 @@ export function reworkVariant(id: string, rawNote: string): VariantReviewState {
 }
 
 /** 能重跑的变体：Agent 这一段停下了，或出片失败了（重跑 = 重新写稿、重新找图） */
-const RERUNNABLE = ["failed", "tripped", "interrupted", "asset_review"];
+export const RERUNNABLE = ["failed", "tripped", "interrupted", "asset_review"];
 
 /**
  * 重跑（FLOW-003 分支）：清掉 Agent 的稿子、清单与抓来的图，留下模板原稿与用户替换过的图（Task 5.2 复审 S1-M4），

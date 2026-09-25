@@ -1,31 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { AgentFeed, merge } from "./agent-feed.js";
-import type { AgentJobView, AgentMessageView, MessagePage, TemplateJobSnapshot } from "./agent.js";
-
-const TPL = "tpl-1";
-
-function job(id = "job-1", over: Partial<AgentJobView> = {}): AgentJobView {
-  return {
-    id,
-    ownerKind: "template",
-    ownerId: TPL,
-    status: "running",
-    sessionId: "s",
-    startedAt: "2026-09-23T10:00:00.000Z",
-    runStartedAt: "2026-09-23T10:00:00.000Z",
-    runElapsedMs: 0,
-    endedAt: null,
-    costUsd: 0,
-    costIsEstimate: true,
-    stopReason: null,
-    profileName: null,
-    modelId: null,
-    resumeAt: null,
-    createdAt: "2026-09-23T10:00:00.000Z",
-    updatedAt: null,
-    ...over,
-  };
-}
+import type { AgentMessageView, MessagePage, TemplateJobSnapshot } from "./agent.js";
+import { job, TPL } from "../test/agent-feed-kit.js";
 
 function msg(seq: number): AgentMessageView {
   return { seq, role: "assistant", type: "assistant", payload: { n: seq }, createdAt: "2026-09-23T10:00:00.000Z" };

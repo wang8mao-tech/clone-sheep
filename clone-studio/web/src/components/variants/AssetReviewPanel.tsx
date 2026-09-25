@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 import { useTemplateAgent } from "../../lib/agent-feed-context.js";
 import { estimateKeys } from "../../lib/estimate.js";
+import { outputKeys } from "../../lib/outputs.js";
 import { scriptParagraphs, variantReviewApi, variantReviewKeys, type AssetView } from "../../lib/variant-review.js";
 import { CANCELLABLE, stopReason, variantApi, variantKeys, type VariantView } from "../../lib/variants.js";
 import { ReworkPanel } from "../../pages/steps/ReworkPanel.js";
@@ -15,6 +16,8 @@ import { CloneCard } from "../clone/CloneCard.js";
 import { StatusMark } from "../ui/StatusMark.js";
 import { AssetCard } from "./AssetCard.js";
 import { AssetLightbox } from "./AssetLightbox.js";
+import { AssetReviewSkeleton } from "./AssetReviewSkeleton.js";
+import { CostBreakdown } from "../outputs/CostBreakdown.js";
 
 interface Props {
   templateId: string;
@@ -46,7 +49,12 @@ function showsBuild(v: VariantView): boolean {
  */
 export function AssetReviewPanel({ templateId, variantId, onClose }: Props) {
   const qc = useQueryClient();
-  const { feed } = useTemplateAgent();
+  const { feed, state: agent } = useTemplateAgent();
+  // 右栏的花费明细跟着这条变体的任务走：状态、花费变了（继续 / 重跑 / 出片）就重拉（9.3 审查 S1-M3）
+  const jobKey = agent.job ? `${agent.job.id}:${agent.job.status}:${agent.job.costUsd}` : "";
+  useEffect(() => {
+    void qc.invalidateQueries({ queryKey: outputKeys.costs(variantId) });
+  }, [qc, variantId, jobKey]);
   const state = useQuery({
     queryKey: variantReviewKeys.state(variantId),
     queryFn: () => variantReviewApi.state(variantId),
@@ -63,11 +71,15 @@ export function AssetReviewPanel({ templateId, variantId, onClose }: Props) {
     void qc.invalidateQueries({ queryKey: variantReviewKeys.state(variantId) });
     void qc.invalidateQueries({ queryKey: variantKeys.list(templateId) });
     void qc.invalidateQueries({ queryKey: estimateKeys.production(variantId) });
+    void qc.invalidateQueries({ queryKey: outputKeys.costs(variantId) });
   };
   useEffect(() => {
     if (!feed) return;
     const offs = (["variants", "estimate", "build"] as const).map((name) =>
-      feed.onTemplateEvent(name, () => void qc.invalidateQueries({ queryKey: variantReviewKeys.state(variantId) })),
+      feed.onTemplateEvent(name, () => {
+        void qc.invalidateQueries({ queryKey: variantReviewKeys.state(variantId) });
+        void qc.invalidateQueries({ queryKey: outputKeys.costs(variantId) });
+      }),
     );
     return () => offs.forEach((off) => off());
   }, [feed, qc, variantId]);
@@ -120,7 +132,7 @@ export function AssetReviewPanel({ templateId, variantId, onClose }: Props) {
     }
   };
 
-  if (state.isPending) return <p className="text-caption text-text-secondary">读取素材…</p>;
+  if (state.isPending) return <AssetReviewSkeleton />;
   if (state.error) {
     return (
       <QueryErrorState
@@ -133,13 +145,25 @@ export function AssetReviewPanel({ templateId, variantId, onClose }: Props) {
     );
   }
   const data = state.data;
+  // 手改地址把别的模板的变体 id 挂到这个模板的 ④ 上：当不存在（8.4 审查 LOW / Task 9.3）
+  if (data.templateId !== templateId) {
+    return (
+      <div className="flex flex-col items-start gap-2">
+        <p className="text-[13px] text-text-secondary">这条变体不在这个模板下。</p>
+        <Button variant="ghost" icon={<ArrowLeft aria-hidden className="size-4" />} onClick={onClose}>
+          返回队列
+        </Button>
+      </div>
+    );
+  }
   const v = data.variant;
   const name = v.name ?? v.id;
   const reviewing = v.status === "asset_review";
   const busyReason = replacing.size > 0 ? "正在替换图片，换完再提交" : undefined;
-  // 出片卡自己会写出片的错；估价卡挂着时它自己写估价没过的原因。别的停因（估价比出片新、Agent 写稿停下）在这里说（8.4 第四轮审查 S1-M-1）
+  // 出片卡自己会写出片的错；估价卡挂着时它自己写估价没过的原因。估价比出片新而没过的在这里说（8.4 第四轮审查 S1-M-1）
   const stop = stopReason(v);
-  const stopText = stop && stop.step !== "build" && !(stop.step === "estimate" && showsEstimate(v)) ? stop.text : null;
+  // Agent 那一段停下的原因与「继续 / 重跑」由工作区上方的 CMP-009 横条给（它跟着所选变体，Task 9.3），这里不重复
+  const stopText = stop && stop.step === "estimate" && !showsEstimate(v) ? stop.text : null;
   const actionError = approve.error
     ? `素材没通过：${approve.error.message}`
     : rework.error
@@ -217,6 +241,10 @@ export function AssetReviewPanel({ templateId, variantId, onClose }: Props) {
             </p>
           ) : null}
           {showsBuild(v) ? <BuildCard productionId={v.id} /> : null}
+          {/* CMP-008 花费明细在 007（Design-Brief 组件表「007、008」，Task 9.3） */}
+          <CloneCard title="花费明细">
+            <CostBreakdown productionId={v.id} />
+          </CloneCard>
 
           {actionError ? (
             <p role="alert" className="text-caption text-danger">

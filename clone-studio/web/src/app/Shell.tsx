@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Outlet, useMatch } from "react-router";
+import { Outlet, useMatch, useSearchParams } from "react-router";
 import { Sidebar } from "./Sidebar.js";
 import { DesktopOnlyGate } from "./DesktopOnlyGate.js";
 import { AgentDrawer } from "../components/agent/AgentDrawer.js";
@@ -15,6 +15,10 @@ export function Shell() {
   const invalidateArchive = useInvalidateArchive();
   // 抽屉挂在外壳上、在路由出口之外，拿不到子路由的 params，只好自己匹配一次
   const templateId = useMatch("/clients/:clientId/templates/:templateId/*")?.params.templateId;
+  // 在 ④ 打开了某条变体的素材审核（?variant=<id>）：抽屉跟那条变体的任务（Design-Brief §2.3，Task 9.3）
+  const step = useMatch("/clients/:clientId/templates/:templateId/:step")?.params.step;
+  const [params] = useSearchParams();
+  const variantId = step === "variants" ? (params.get("variant") ?? undefined) : undefined;
 
   const health = useQuery({
     queryKey: ["health"],
@@ -51,7 +55,7 @@ export function Shell() {
   return (
     <DesktopOnlyGate>
       {/* 模板的 Agent 任务全页一份：抽屉与工作区的熔断 / 中断横条（CMP-009）共用 */}
-      <AgentFeedProvider templateId={templateId}>
+      <AgentFeedProvider templateId={templateId} variantId={variantId}>
         <div className="flex h-full w-full overflow-hidden bg-bg">
           <Sidebar
             clients={clients.data?.clients ?? []}

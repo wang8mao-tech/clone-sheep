@@ -36,6 +36,11 @@ interface Props {
    * （透明竖线，列还对得齐）；不传就没有竖线——客户页这类没有竖线的表不受影响（8.3 审查 S2-M1）
    */
   accent?: "primary" | "warning" | "none";
+  /**
+   * 同一张表里有的行带展开箭头、有的不带：没箭头的行也留出箭头的宽度，列才和列头对得齐（8.3 审查 LOW / Task 9.3）。
+   * 不传就不留——客户页没有展开箭头，不受影响
+   */
+  reserveExpander?: boolean;
 }
 
 /**
@@ -50,7 +55,17 @@ interface Props {
  * 嵌套，读屏在浏览模式下会把菜单整个吞掉。行尾动作靠 z-10 浮在链接之上。
  * 侧栏的模板行也是用 NavLink 做的，两处同一套先例。
  */
-export function TaskRow({ lead, title, columns, actions, href, openLabel, errorDetail, accent }: Props) {
+export function TaskRow({
+  lead,
+  title,
+  columns,
+  actions,
+  href,
+  openLabel,
+  errorDetail,
+  accent,
+  reserveExpander,
+}: Props) {
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -83,6 +98,8 @@ export function TaskRow({ lead, title, columns, actions, href, openLabel, errorD
               <ChevronRight aria-hidden className="size-3.5" />
             )}
           </button>
+        ) : reserveExpander ? (
+          <span aria-hidden data-expander-slot className="size-3.5 shrink-0" />
         ) : null}
 
         {lead ? <div className="flex shrink-0 items-center">{lead}</div> : null}

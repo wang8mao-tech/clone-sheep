@@ -51,13 +51,24 @@ export interface MessagePage {
   jobLastSeq: number;
 }
 
+/** 出片单位（变体）的任务：这条出片单位此刻能做什么、属于哪个模板（server variant-review.ts ownerGate） */
+export interface OwnerGate {
+  templateId: string;
+  continue: boolean;
+  rerun: boolean;
+}
+
 export interface TemplateJobSnapshot extends MessagePage {
   job: AgentJobView | null;
+  /** 只有变体的快照带 */
+  owner?: OwnerGate | null;
 }
 
 export interface JobHead {
   job: AgentJobView;
   jobLastSeq: number;
+  /** 只有出片单位的任务带 */
+  owner?: OwnerGate | null;
 }
 
 /** 还没结束的状态：顶栏给「中止」、用时往前走的只有其中的 running */
@@ -75,6 +86,9 @@ const RERUN_TIMEOUT_MS = 30_000;
 
 export const agentApi = {
   templateJob: (templateId: string) => api.get<TemplateJobSnapshot>(`/api/templates/${templateId}/agent-job`),
+  /** 变体（出片单位）当前的任务：007 里抽屉跟随所选变体（Design-Brief §2.3，Task 9.3） */
+  productionJob: (productionId: string) =>
+    api.get<TemplateJobSnapshot>(`/api/productions/${encodeURIComponent(productionId)}/agent-job`),
   job: (jobId: string) => api.get<JobHead>(`/api/agent-jobs/${jobId}`),
   after: (jobId: string, afterSeq: number) =>
     api.get<MessagePage>(`/api/agent-jobs/${jobId}/messages?afterSeq=${afterSeq}`),

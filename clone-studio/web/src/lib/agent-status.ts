@@ -57,9 +57,17 @@ export function nextActions(status: AgentJobStatus): Array<"continue" | "rerun">
   return [];
 }
 
-export function describeNextActions(status: AgentJobStatus): string | null {
-  const actions = nextActions(status);
+/** 出片单位上还允许的动作（任务本身能做、且这条变体此刻允许）；模板的任务没有 gate，照任务本身 */
+export type ActionGate = { continue: boolean; rerun: boolean } | null;
+
+export function allowedActions(status: AgentJobStatus, gate: ActionGate): Array<"continue" | "rerun"> {
+  return nextActions(status).filter((a) => !gate || gate[a]);
+}
+
+export function describeNextActions(status: AgentJobStatus, gate: ActionGate = null): string | null {
+  const actions = allowedActions(status, gate);
   if (actions.length === 2) return "可以继续（接着同一会话）或重跑";
-  if (actions[0] === "rerun") return "没有会话可继续，只能重跑";
+  if (actions[0] === "rerun") return nextActions(status).length === 2 ? "可以重跑" : "没有会话可继续，只能重跑";
+  if (actions[0] === "continue") return "可以继续（接着同一会话）";
   return null;
 }

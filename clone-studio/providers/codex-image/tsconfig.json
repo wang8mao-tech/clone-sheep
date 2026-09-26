@@ -1,0 +1,23 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // 与 hypit 自己的编译选项一致：paths 把它的源码拉进这个程序一起检查，选项不一致会在它的源码里报错
+    "exactOptionalPropertyTypes": true,
+    "lib": ["ES2023", "DOM"],
+    "types": ["node"],
+    "baseUrl": ".",
+    /*
+     * hypit 发行版没有独立发布的类型包：公开 SDK 子路径直接指到 hypit-main 的源码（只读）。
+     * 运行时由发行版在加载项目包时提供这些 import（README「The active Distribution resolves public SDK imports」）
+     */
+    "paths": {
+      "@hypit/hypit/endpoint-kit": ["../../../hypit-main/packages/endpoint-kit/src/index.ts"],
+      "@hypit/hypit/generation": ["../../../hypit-main/packages/generation/src/index.ts"],
+      "@hypit/hypit/runtime-kit": ["../../../hypit-main/packages/runtime-kit/src/index.ts"],
+      "@hypit/driver-node": ["../../../hypit-main/packages/driver-node/src/index.ts"],
+      "@hypit/gpt-image": ["../../../hypit-main/packages/gpt-image/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts", "vitest.config.ts"]
+}

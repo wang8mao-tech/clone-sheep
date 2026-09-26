@@ -1,0 +1,225 @@
+/*
+ * Clone Studio 设计 token（Design-Brief §5，值取自设计稿实测）
+ * 深色单主题：不做浅色，不做主题切换。
+ */
+@import "tailwindcss";
+
+@theme {
+  /* ── 色彩（Design-Brief 5.1） ───────────────────────────── */
+  --color-bg: #0e0f11;
+  --color-surface: #16181b;
+  --color-surface-raised: #1d2024;
+  --color-border: #2a2e33;
+  /* Agent 抽屉底色：比 surface 再暗半级，与工作区区分（Design-Brief §A.5） */
+  --color-drawer: #121417;
+
+  --color-primary: #19e3b1;
+  --color-primary-soft: #7cf2d4;
+  /* 主色上的文字用近黑，保证对比度 */
+  --color-on-primary: #08211b;
+
+  --color-warning: #f5a524;
+  --color-danger: #f0495a;
+  --color-success: #3fcf6b;
+  --color-info: #7c8aa5;
+
+  --color-text: #eceef1;
+  --color-text-secondary: #9ba1aa;
+  --color-text-tertiary: #8a909a;
+
+  /* ── 字体（Design-Brief 5.2） ───────────────────────────── */
+  --font-sans: "Geist", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+
+  --text-heading-lg: 18px;
+  --text-heading-lg--line-height: 1.3;
+  --text-heading-lg--font-weight: 600;
+  --text-heading-md: 14px;
+  --text-heading-md--line-height: 1.4;
+  --text-heading-md--font-weight: 600;
+  --text-body: 13px;
+  --text-body--line-height: 1.5;
+  --text-caption: 12px;
+  --text-caption--line-height: 1.4;
+
+  /* ── 间距（Design-Brief 5.3，4px 步进） ─────────────────── */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+  --spacing-xl: 24px;
+
+  /* ── 形状（Design-Brief 5.4，不用 pill） ───────────────── */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+}
+
+:root {
+  /* 布局常量：侧栏 240px、抽屉默认 420px 可拖到 640px（SCREEN-001） */
+  --shell-sidebar-width: 240px;
+  --shell-drawer-width: 420px;
+  --shell-drawer-min-width: 320px;
+  --shell-drawer-max-width: 640px;
+  --shell-topbar-height: 56px;
+  --row-height: 36px;
+  --control-height: 32px;
+
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * 以下自定义规则全部分层。无层规则永远压过任何 @layer，也就压过 Tailwind 的
+ * 全部工具类——侧栏链接颜色那次事故就是这么来的。下面这几条当前没有调用点撞上，
+ * 但形状完全一样：谁哪天写个 focus-visible:outline-none 或 shadow-none 就会再踩。
+ */
+@layer base {
+  /* 数字、金额、时间码、模型 id、命令一律等宽并开启 tabular-nums（Design-Brief 5.2） */
+  .font-mono,
+  code,
+  kbd,
+  pre,
+  samp {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 焦点环 2px 强调色（Design-Brief 8.2） */
+  :focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+}
+
+/*
+ * 链接的缺省色。必须在 @layer base 里：不分层的话任何 <a> 上的 text-* 类全部失效，
+ * 侧栏的 text-text-secondary 会被渲染成主色绿，选中态在文字颜色上等于没做。
+ *
+ * 分层之后反过来了：带 text-* 类的链接不再吃这条，连 a:hover 也一起被工具类压掉。
+ * 所以 hover 不在这里定——要 hover 变色的链接自己写 hover:text-*，
+ * 留一条管不着大多数链接的规则只会让人以为有统一行为。
+ */
+@layer base {
+  a {
+    color: var(--color-primary);
+    text-decoration: none;
+  }
+}
+
+@layer components {
+  /* 侧栏选中行的状态点光环（设计稿实测 box-shadow 0 0 0 3px #19E3B133） */
+  .dot-ring {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 20%, transparent);
+  }
+
+  /* 层级靠边框和表面亮度，不靠阴影；仅弹窗与下拉用一层柔和阴影（5.4） */
+  .elevation-overlay {
+    box-shadow: 0 8px 24px rgb(0 0 0 / 45%);
+  }
+}
+
+/*
+ * Agent 抽屉里的 markdown（Design-Brief §A.2 / §A.5）：Tailwind 的 preflight 把列表符号、标题字号都抹平了，
+ * 这里按抽屉的等宽排版补回来。只作用在 .agent-md 里，不影响别处。
+ */
+@layer components {
+  .agent-md > * + * {
+    margin-top: var(--spacing-sm);
+  }
+  .agent-md h1,
+  .agent-md h2,
+  .agent-md h3,
+  .agent-md h4 {
+    font-weight: 600;
+    color: var(--color-text);
+  }
+  .agent-md h1,
+  .agent-md h2 {
+    font-size: var(--text-heading-md);
+  }
+  .agent-md ul {
+    list-style: disc;
+    padding-left: 1.5em;
+  }
+  .agent-md ol {
+    list-style: decimal;
+    padding-left: 1.75em;
+  }
+  .agent-md blockquote {
+    border-left: 2px solid var(--color-border);
+    padding-left: var(--spacing-sm);
+    color: var(--color-text-secondary);
+  }
+  .agent-md :not(pre) > code {
+    border-radius: var(--radius-sm);
+    background: var(--color-surface-raised);
+    padding: 0 0.3em;
+  }
+  .agent-md table {
+    border-collapse: collapse;
+    /* 窄栏里表格只横向滚自己，不把卡片撑破、也不把每格挤成一个字 */
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+  .agent-md th,
+  .agent-md td {
+    /* 表格太宽时横向滚，不把每格挤成一个字一行 */
+    white-space: nowrap;
+  }
+  .agent-md th,
+  .agent-md td {
+    border: 1px solid var(--color-border);
+    padding: 2px 6px;
+  }
+
+  /* 代码高亮（rehype-highlight 出的 hljs-* 类）：只用语义色，不引第三方主题 */
+  .agent-md .hljs-keyword,
+  .agent-md .hljs-built_in,
+  .agent-md .hljs-selector-tag {
+    color: var(--color-primary);
+  }
+  .agent-md .hljs-string,
+  .agent-md .hljs-attr,
+  .agent-md .hljs-template-string {
+    color: var(--color-warning);
+  }
+  .agent-md .hljs-number,
+  .agent-md .hljs-literal {
+    color: var(--color-info);
+  }
+  .agent-md .hljs-comment {
+    color: var(--color-text-tertiary);
+    font-style: italic;
+  }
+  .agent-md .hljs-title,
+  .agent-md .hljs-function {
+    color: var(--color-primary-soft);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

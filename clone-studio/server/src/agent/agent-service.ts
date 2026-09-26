@@ -1,0 +1,221 @@
+import { setAgentStopper } from "../services/agent-stopper.js";
+import { requireTemplate } from "../services/archive.js";
+import { sseHub } from "../lib/sse.js";
+import { resetAgentProducts } from "../hypit/workspace.js";
+import { resetVariantProducts, variantDir } from "../services/variant-files.js";
+import { productionTemplateId, userReplacedFiles } from "../services/variant-store.js";
+import { settingsFromDb } from "./agent-settings.js";
+import { latestJobOf, requireJob, updateJob, type AgentJobRow } from "./job-store.js";
+import { appendIntercept, appendMessage, appendPrompt, appendStop } from "./message-store.js";
+import { runAgent } from "./runner.js";
+import { Scheduler, type SchedulerDeps } from "./scheduler.js";
+import type { CostBasis } from "./profile-env.js";
+
+/**
+ * 把调度器接进应用（Spec REQ-003）：消息落库 + 推 SSE，工作目录按 owner 现查，
+ * 重跑清 Agent 产物。这里是 Agent 这一块唯一的对外入口，路由与删除流程都走它。
+ *
+ * 单例：队列和在跑的会话都在内存里，全进程只能有一份（多一份就会超并发上限）。
+ */
+let instance: Scheduler | undefined;
+
+export interface AgentServiceOptions {
+  /** 生产传 app.log；测试可换掉 run / settings 之类 */
+  overrides?: Partial<SchedulerDeps>;
+}
+
+export function agentScheduler(options: AgentServiceOptions = {}): Scheduler {
+  if (instance && options.overrides) {
+    throw new Error("调度器已经建好了：overrides 只在第一次调用时生效，晚传等于没传");
+  }
+  instance ??= new Scheduler({
+    run: runAgent,
+    settings: settingsFromDb,
+    workspaceOf: (job) => workspaceOf(job),
+    // 变体重跑只清 Agent 的产物：模板原稿与用户替换过的图留着（Task 5.2 复审 S1-M4）
+    resetWorkspace: (job) =>
+      job.owner_kind === "production"
+        ? resetVariantProducts(workspaceOf(job), userReplacedFiles(job.owner_id), templateDirOf(job.owner_id))
+        : resetAgentProducts(workspaceOf(job)),
+    onMessage: (jobId, message) => {
+      const stored = appendMessage(jobId, message);
+      announce(jobId, stored);
+    },
+    onIntercept: (jobId, denial) => {
+      const stored = appendIntercept(jobId, denial);
+      announce(jobId, stored);
+    },
+    onRunStart: (jobId, run) => {
+      const stored = appendPrompt(jobId, run);
+      announce(jobId, stored);
+    },
+    onRunStop: (jobId, stop) => {
+      const stored = appendStop(jobId, stop);
+      announce(jobId, stored);
+    },
+    onChange: broadcast,
+    ...options.overrides,
+  });
+  serviceLog = options.overrides?.log ?? serviceLog;
+  return instance;
+}
+
+/** 任务状态变了：推给抽屉 / 模板页，再交给宿主里关心它的模块（复刻编排验完成判据） */
+function broadcast(job: AgentJobRow): void {
+  const view = present(job);
+  notify(`job:${job.id}`, "agent-job", view);
+  // 模板页不知道 job id：状态变化也往对象的主题推一份
+  notify(`${job.owner_kind}:${job.owner_id}`, "agent-job", view);
+  for (const listener of listeners) {
+    try {
+      listener(job);
+    } catch (error) {
+      // 一个监听方出错不能拖垮调度器的状态更新，但要留痕
+      serviceLog?.error({ jobId: job.id, error }, "任务状态监听方出错");
+    }
+  }
+}
+
+let serviceLog: { error(detail: unknown, message: string): void } | undefined;
+
+const listeners = new Set<(job: AgentJobRow) => void>();
+
+/** 订阅任务状态变化（同步回调，里面要做慢事自己丢到异步里）。返回取消订阅 */
+export function onJobChange(listener: (job: AgentJobRow) => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+/**
+ * Agent 说做完了、宿主核完成判据没过（REQ-004）：把这个任务改判为「失败」并写明原因。
+ * 改判之后横条就给「继续 / 重跑」——停在一个假的「完成」上，人什么也做不了。
+ * 只改仍是「完成」、仍是对象最新、且仍是核的那一次运行（endedAt 对得上）的任务：核的过程中
+ * 人可能已经继续或重跑了，继续后再次完成的那一次不能被上一次的结论改判。
+ */
+export function failFinishedJob(jobId: string, reason: string, endedAt?: string | null): AgentJobRow | undefined {
+  const job = requireJob(jobId);
+  const latest = latestJobOf(job.owner_kind, job.owner_id);
+  if (job.status !== "done" || latest?.id !== job.id) return undefined;
+  if (endedAt !== undefined && job.ended_at !== endedAt) return undefined;
+  const failed = updateJob(jobId, { status: "failed", stop_reason: reason });
+  broadcast(failed);
+  return failed;
+}
+
+/**
+ * 推的是「第几条」而不是消息本身：抽屉按 seq 去拉，刷新、断线重连、正常流式三条路
+ * 收敛到同一个来源（AC-009）。这类事件不进 SSE 的重放缓冲——它本来就能按 seq 补回来，
+ * 占着缓冲反而会把别的主题的事件挤掉。
+ */
+function announce(jobId: string, stored: { seq: number; type: string }): void {
+  notify(`job:${jobId}`, "agent-message", { jobId, seq: stored.seq, type: stored.type }, { buffer: false });
+}
+
+/**
+ * 推送失败不能把一次会话判失败：这些回调跑在 runner 的 onMessage 里，往上抛会被记成
+ * 「消息落库失败」，于是浏览器那边断一下就赔掉一次付费运行。落库失败才该让任务失败。
+ */
+export function notify(topic: string, event: string, data: unknown, options?: { buffer?: boolean }): void {
+  try {
+    sseHub.publish(topic, event, data, options);
+  } catch {
+    // 推不出去就算了：真相在库里，前端下次拉就补上
+  }
+}
+
+/**
+ * 启动时接上删除流程：删对象前先停它上面的 Agent 任务（AC-002）。
+ * 放在这里而不是让 deletion 直接 import，是为了不把 Agent SDK 拉进删除流程的依赖图。
+ */
+export function registerAgentStopper(): void {
+  setAgentStopper(async (owners) => {
+    // 并发停：串着停的话，删一个客户下的 10 个模板最坏要等 10 × 停止超时
+    const counts = await Promise.all(owners.map((owner) => agentScheduler().stopOwner(owner.kind, owner.id)));
+    return counts.reduce((sum, n) => sum + n, 0);
+  });
+}
+
+/** 测试用：换一份新的调度器（生产里一个进程只建一次） */
+export function resetAgentScheduler(): void {
+  instance = undefined;
+  listeners.clear();
+  serviceLog = undefined;
+  setAgentStopper(undefined);
+}
+
+/**
+ * 任务的工作目录。模板就是它自己的工程目录；变体（production）是模板目录下的 `productions/<id>/`
+ * （REQ-005）：Agent 只能写这里，hypit 在这里跑时按最近的 package.json 认模板目录为项目根。
+ */
+/** 变体所属模板的工作目录（重跑时从这里重新复制原稿） */
+function templateDirOf(productionId: string): string | undefined {
+  const templateId = productionTemplateId(productionId);
+  return templateId ? (requireTemplate(templateId).workspace_path ?? undefined) : undefined;
+}
+
+export function workspaceOf(job: Pick<AgentJobRow, "owner_kind" | "owner_id">): string {
+  const templateId = job.owner_kind === "template" ? job.owner_id : productionTemplateId(job.owner_id);
+  if (!templateId) throw new Error(`出片单位不存在：${job.owner_id}`);
+  const template = requireTemplate(templateId);
+  // 以库里记的路径为准，和上传、播放那几处同一个来源：目录迁移过之后按 id 拼出来的是旧路径
+  if (!template.workspace_path) throw new Error(`模板还没有工作目录：${template.id}`);
+  return job.owner_kind === "template" ? template.workspace_path : variantDir(template.workspace_path, job.owner_id);
+}
+
+/** 给界面的任务形状。前端直接按它写类型，别各自再抄一份 */
+export interface AgentJobView {
+  id: string;
+  ownerKind: AgentJobRow["owner_kind"];
+  ownerId: string;
+  status: AgentJobRow["status"];
+  sessionId: string | null;
+  /** 任务第一次开始的时间 */
+  startedAt: string | null;
+  /**
+   * 本次运行**当前这一段**的起点，只在 status 为 running 时有意义。
+   * 「用时」用一条公式算，所有状态都成立：
+   * `runElapsedMs + (status === "running" ? now - runStartedAt : 0)`。
+   * 等额度、排队时它自然冻住，既不会虚高，也不会出现负数。
+   */
+  runStartedAt: string | null;
+  /** 本次运行在此之前已经跑掉的毫秒数；继续 / 重跑是新的一次运行，从 0 起算 */
+  runElapsedMs: number;
+  endedAt: string | null;
+  costUsd: number;
+  costIsEstimate: boolean;
+  stopReason: string | null;
+  /** 所用模型档案名（Spec REQ-010：抽屉页头要显示档案名与模型 id）；没选档案时为 null */
+  profileId: string | null;
+  profileName: string | null;
+  modelId: string | null;
+  /** 花费口径（REQ-010）：none = 兼容端点没填单价，花费算不出，界面写「未知」 */
+  costBasis: CostBasis | null;
+  resumeAt: string | null;
+  createdAt: string;
+  updatedAt: string | null;
+}
+
+/** 库里的列名是 snake_case，界面统一用 camelCase；任务提示不给界面（它可能很长） */
+export function present(job: AgentJobRow): AgentJobView {
+  return {
+    id: job.id,
+    ownerKind: job.owner_kind,
+    ownerId: job.owner_id,
+    status: job.status,
+    sessionId: job.session_id,
+    startedAt: job.started_at,
+    runStartedAt: job.run_started_at,
+    runElapsedMs: job.run_elapsed_ms,
+    endedAt: job.ended_at,
+    costUsd: job.cost_usd,
+    costIsEstimate: job.cost_is_estimate === 1,
+    stopReason: job.stop_reason,
+    profileId: job.profile_id,
+    profileName: job.profile_name,
+    modelId: job.model_id,
+    costBasis: job.cost_basis,
+    resumeAt: job.resume_at,
+    createdAt: job.created_at,
+    updatedAt: job.updated_at,
+  };
+}

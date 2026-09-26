@@ -1,0 +1,10 @@
+{
+  "name": "clone-studio-spikes",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Phase 0 先行验证脚本，独立于主 workspace，不参与构建",
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.278"
+  }
+}

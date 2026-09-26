@@ -1,0 +1,7 @@
+node_modules
+dist
+pnpm-lock.yaml
+# tokens.css 交给 prettier 格式化会把 @theme / @layer 里的自定义属性重排，
+# 而这个文件的分层顺序本身带语义（无层规则会压过 Tailwind 的所有工具类，
+# 出过一次事故）。宁可手工保持格式，也不让工具动它的结构。
+web/src/styles/tokens.css

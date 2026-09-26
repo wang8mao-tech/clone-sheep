@@ -1,6 +1,7 @@
 # 产品需求规范：Clone Studio（暂定名）
 
-> 版本 v1.2 · 2026-09-19 · 内核：Hypit 0.2.6（本地副本 `hypit-main/`）· 技术调研见 `Hypit-Research.md`
+> 版本 v1.10.6 · 2026-09-25 · 内核：Hypit 0.2.6（本地副本 `hypit-main/`）· 技术调研见 `Hypit-Research.md`
+> Phase 0 先行验证结论见 `clone-studio/docs/spike-notes.md`，本版据其回写。
 
 ## 0. AI 使用说明
 
@@ -54,7 +55,7 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 | SCOPE-001 | 客户 → 模板 → 成片 三级归档，含创建、重命名、删除 | P0 | 删除级联 |
 | SCOPE-002 | 参考视频导入：上传本地文件或粘贴链接 | P0 | 链接走 `hypit media fetch` |
 | SCOPE-003 | 复刻：无头 Claude Agent + hypit skill 产出 SVML 模板及分析文档 | P0 | |
-| SCOPE-004 | 模板验货：按原样出一条复刻片，与原片并排对比，通过/打回 | P0 | 通过才解锁变体 |
+| SCOPE-004 | 模板验货：按原样出一条复刻片，与原片并排对比，通过/打回 | P0 | 通过才解锁变体与成片 |
 | SCOPE-005 | 批量变体：多行 brief 一次提交，排队由 Agent 逐条写变体 SVML | P0 | |
 | SCOPE-006 | 素材审核闸门：Agent 联网搜来的条目图出片前人工过目，可替换单张 | P0 | |
 | SCOPE-007 | 花钱闸门：出片前 plan/pricing 估价，单条与批次限额内自动放行，超限等人确认 | P0 | 默认单条 $1.5、批次 $15 |
@@ -63,6 +64,7 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 | SCOPE-010 | 设置页：环境体检、生成服务凭据（TokenDance 为主，HypiHub 可选）、限额、并发 | P0 | |
 | SCOPE-011 | 花费台账：每条成片与每个 Agent 任务的花费记录 | P0 | 嵌在成片/任务详情里，不做独立报表页 |
 | SCOPE-012 | 对话式精修：和 Agent 对话改某条成片的 SVML 并重出 | P1 | 二期；v1 只留"打回意见"这种单向输入 |
+| SCOPE-015 | 生视频通道切换：TokenDance、MiniMax H3 云端直连、MiniMax H3 本地 ComfyUI、即梦会员 CLI（Seedance）四个通道可选；模板验货时可换通道重出复刻片对比版本，选定为模板默认，变体沿用，单条可换通道重出 | 机制 + TokenDance + MiniMax 云端为 P0；ComfyUI 与即梦 CLI 为 P1 | 不做并排多模型同出；见 REQ-012 |
 | SCOPE-014 | Codex 订阅生图 Provider：自写一个 Hypit Provider 包，经本机 Codex CLI 的 `$imagegen`（gpt-image-2）用订阅额度出图，替代按量付费的生图接口 | P1 | 见 REQ-011 |
 | SCOPE-013 | Agent 模型切换：设置页维护"模型档案"，默认本机 Claude Code 订阅，可切到 DeepSeek / 豆包 / Gemini / ChatGPT 等经 Anthropic 兼容端点接入的模型 | P0 | 只认 API key，不认这几家的聊天订阅；见 REQ-010 |
 
@@ -74,7 +76,8 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 | OUT-002 | 部署到服务器、远程访问、Electron 打包 | v1 只跑 localhost |
 | OUT-003 | 网页内时间轴/SVML 可视化编辑器 | Hypit Studio 写接口限 localhost 同源，重写一层 UI 工期过大 |
 | OUT-004 | 客户门户、成片分享链接、审片批注 | 客户只拿成片文件 |
-| OUT-005 | TokenDance、HypiHub 之外的生成 Provider（HiAPI / Pollo / Monid）配置界面 | 用户已订阅 TokenDance；HypiHub 作可选补充 |
+| OUT-005 | HiAPI / Pollo / Monid 等未列入 REQ-011、REQ-012 的生成 Provider 配置界面 | 用户实际在用的通道已覆盖 |
+| OUT-008 | 同一镜头多模型同时出片并排对比、逐镜头选优 | 用户明确只要能切换；对比靠验货页的复刻片版本切换 |
 | OUT-006 | 自动发布到抖音/TikTok/YouTube 等平台 | 与复刻出片无关 |
 | OUT-007 | 独立的花费统计报表、导出账单 | 台账够用，报表是运营需求 |
 
@@ -139,7 +142,7 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 **边界情况：**
 - 链接下载失败、视频无音轨、时长超过 180 秒：在①给出明确错误，不进入②。
 - 订阅限流：Agent 任务进"等待额度"态，按 SDK 返回的重置时间自动续跑，不算熔断。
-- check 反复不过：计入卡死检测。
+- check 反复不过：会话内同一条 `hypit check` 反复失败计入卡死检测（REQ-003）；宿主核判据未过是任务结束后的结论，要人点「继续」才会再跑，每轮有人把关，不计入卡死检测。
 
 **完成状态：** 模板标记"已验货"，复刻片作为该模板下第一条成片入库。
 
@@ -193,6 +196,9 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 - MUST 删除级联：客户→其全部模板→其全部成片与工作目录。
 - MUST 删除前中止关联的运行中任务。
 - SHOULD 侧栏每个模板显示状态点：复刻中/待验货/已验货/有失败。
+- MUST 进入模板页时默认落在**需要人动手的那一步**，优先级：需处理（如待验货）＞ 进行中 ＞ 失败 ＞ 能进入的最后一步。目的是打开就知道该干什么，而不是从 ①参考 一路点过去找。
+- MUST 当前步骤写进地址，刷新停在原处；地址里指定的步骤只要已解锁就照它走，不被默认规则覆盖。
+- MUST 地址里指定了未解锁或不存在的步骤时，送回按上面规则算出的那一步，不给空白页。
 
 **输入：**
 
@@ -250,22 +256,32 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 
 **用途：** 复刻和写变体是同一种东西：在某个工作目录里无头跑一个带 hypit skill 的 Claude Agent 会话。
 
-**行为：** 后端用 Claude Agent SDK（TypeScript）`query()` 启动会话，cwd = 工作目录，工作目录的 `.claude/skills/hypit` 指向 `hypit-main/skills/hypit` 的副本。流式消息落库并经 SSE 推到前端抽屉。保存 session id 供 resume。
+**行为：** 后端用 Claude Agent SDK（TypeScript）`query()` 启动会话，cwd = 工作目录，hypit skill 以插件形式预置（宿主在数据根下维护一个插件目录，内含 `hypit-main/skills/hypit` 的副本，经 `plugins` 选项加载，skill 名 `clone-studio:hypit`；`settingSources: []` 下 SDK 不读 `.claude/skills`，实测插件照常加载）。流式消息落库并经 SSE 推到前端抽屉；会话走流式输入、SDK 不回显交给它的那句话，所以宿主在每段运行开跑时把它（任务提示 / 继续 / 打回意见）也记进同一条消息流，抽屉的「用户消息」靠它显示；宿主停下某段运行（中止、取消、熔断、限流）时同样记一条，抽屉据此把被停下与会话出错分开。保存 session id 供 resume。
 
 **规则：**
+- MUST 传 `settingSources: []` 做会话隔离。实测不传会连用户本机 `~/.claude` 的权限规则与 hooks 一起继承（消息流里出现 `system:hook_started`），行为不可复现。
 - MUST 给 Agent 完整能力：Bash、文件读写、联网搜索与抓取，等同终端里的 Claude Code。
-- MUST 拦截花钱动作：经 `canUseTool` 拒绝任何 `hypit build` 与 `hypit result` 写操作，并在系统提示里说明"出片由宿主负责，你写到 check 通过为止"。
-- MUST 熔断：墙钟 45 分钟或等价花费 $5（SDK 报告的 total_cost_usd / `maxBudgetUsd`）先到先停；设置页可改。
+- MUST 拦截花钱动作与越界写：主拦截手段是 SDK 的 `PreToolUse` hook——它先于一切权限检查执行，`bypassPermissions` 下照样生效，子 Agent 里的工具调用同样经过它（实测 `agent_id` 有值）。宿主在 hook 里解析命令与写入路径，命中 `hypit build` 等写操作（含 `node …/hypit.mjs build` 等任何写法）或写入路径不在工作目录前缀内即拒绝。不用 `disallowedTools` 作主手段：禁掉 `Bash` 会连带拿走 Agent 的完整能力，而 `Bash(hypit build *)` 这类按命令写的规则只匹配字面写法，换个写法就绕过。子 Agent 工具（现名 `Agent`，旧名 `Task`）另列入 `disallowedTools` 作第二道。系统提示里说明"出片由宿主负责，你写到 check 通过为止"。
+- MUST 拦截记录由宿主在 hook 里自己写，不读 SDK 的 `permission_denials`。
+- MUST hook 出任何异常一律拒绝（fail closed）：SDK 对 hook 抛异常的处理是照常执行工具（实测）。
+- MUST 宿主把 `hypit` 启动器放在 Agent 进程 PATH 的最前面（数据根下的 `agent-bin/`，转调宿主同一个 node 与 hypit-main），系统提示写明直接运行 `hypit`；Agent 不许全局安装软件包（hypit skill 会建议 `npm install --global @hypit/hypit`）。否则 Agent 找不到 hypit，或装出一个与宿主版本不一致的 hypit。
+- MUST 工作目录里的 Runtime Profile（`hypit.runtime.json` 与 `.hypit/runtime`）由宿主生成，Agent 不许改（hook 拦 Write / Edit 与 Bash 的常见写法）；宿主每次出片前重新生成它（Phase 6），不信任工作目录里留下的版本。否则 Agent 能把宿主之后的 build 路由到别的端点或凭据源。
+- 拦截的边界（不过度承诺）：hook 拦的是模型的常规写法——hypit skill 教的 `hypit build` 及其常见变体（路径调用、引号拼接、嵌套 shell、重定向与命令替换夹在参数里、管道喂给解释器）。刻意混淆（变量拼接、编码后执行、自写脚本再跑）字符串层面拦不全，兜底是 Agent 环境里没有 key。专用读工具按真实路径保护密钥文件；Bash 只拦字面提到它的写法。Agent 与宿主同一个 Windows 用户运行，理论上读得到宿主能读的文件，v1 单机自用接受这一点；要彻底隔离需另开系统账户或沙箱，不在 v1 范围。
+- MUST Agent 进程环境按放行名单构造（只带系统变量（含 `LC_*`）、Claude Code 自身所需的变量与 hypit 的状态根 `HYPIT_STATE_HOME`，其余 `HYPIT_*` 不带），因此不带任何生成服务 key（TokenDance / HypiHub / MiniMax，以及用户 shell 里挂着的任何别家 key）与 `ANTHROPIC_API_KEY`。用放行名单而不是剔除名单：别家 key 列不全，Agent 有完整 Bash 与联网能力，拿到任何一家都能绕开 hypit 直接花钱。前者让漏过 hook 的 build 拿不到凭据、花不了钱（Bash 里变量拼接、自写脚本再执行等写法字符串层面拦不全）；后者避免会话悄悄走 API 计费而不是订阅，换档案（REQ-010）时由档案显式注入。
+- MUST 熔断：墙钟 45 分钟或等价花费 $5 先到先停；花费熔断用 SDK 的 `maxBudgetUsd` 选项 + `error_max_budget_usd` 结果子类型，不自己累加。设置页可改。
+- MUST 读 `total_cost_usd` 时只取最新一条 `result` 消息，不跨 result 累加——resume 的会话会续上转录里保存的累计值（实测 resume 组 0.0518 > 被 resume 组 0.0479）。
 - MUST 卡死检测：同一条命令连续失败 5 次，或 10 分钟无任何新消息 → 停并标"已熔断"。
 - MUST 订阅限流不算失败：进"等待额度"，到重置时间自动 resume。
 - MUST Agent 过程回显只进右侧抽屉，不进工作区主内容。
 - MUST 渲染等重处理只由"出片"动作触发，不由 Agent 对话触发。
 - SHOULD 抽屉按 Claude Code 习惯呈现：markdown 渲染、逐字流式、工具调用折叠显示、可"中止"。
 
-**状态：** 排队 / 运行中 / 等待额度 / 已熔断 / 中断 / 完成 / 已取消。
+**状态：** 排队 / 运行中 / 等待额度 / 已熔断 / 中断 / 完成 / 已取消 / 失败（进程起不来、SDK 出错、消息落库失败，或复刻任务完成后宿主核完成判据未通过，见 REQ-004）。
+
+- 停一个任务（取消 / 中止 / 删对象前）等不到它结束时，宿主放弃等待并把它标为失败，界面照实说明；不把操作永远挂在那里。
 
 **验收标准：**
-- [ ] AC-007: Given 运行中的 Agent 尝试执行 `hypit build`, when 工具调用到达宿主, then 被拒绝，日志里有一条"已拦截"记录，生成模型花费为 0。
+- [ ] AC-007: Given 运行中的 Agent（或它派出的子 Agent）尝试执行 `hypit build`（任何写法）, when 该工具调用被宿主的 `PreToolUse` hook 挡下, then 命令未执行，宿主自己的日志里有一条"已拦截"记录，生成模型花费为 0。
 - [ ] AC-008: Given 熔断预算设为 $0.2, when 复刻任务花费超过它, then 任务停在"已熔断"，中间文件保留，"继续"按钮可 resume 同一会话。
 - [ ] AC-009: Given Agent 运行中, when 刷新浏览器, then 抽屉恢复历史消息并继续流式接收。
 - [ ] AC-010: Given 后端进程被杀后重启, when 打开该模板, then 任务显示"中断"并可"继续"。
@@ -276,8 +292,16 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 
 **行为：** 复刻 Agent 完成判据：`reference.svrun` 存在且 `hypit check --json` 通过，`ANALYSIS.md`、`TIMELINE.md` 存在。之后走 REQ-006 估价闸门出复刻片，进并排对比。
 
+- 判据由宿主在 Agent 报告完成后自己核，不采信 Agent 自述；每一次完成都核一次，结论落库并绑定到那一次完成。未通过（含核的过程本身出错）时任务改判「失败」，停止原因写明缺哪个文件或 check 的报错首行，横条给「继续 / 重跑」；「继续」时把未通过的原因交给会话。进程在核的过程中退出的，重启后补核（不起新任务）。
+- 自动启动只对新发生的「证据准备完成」生效，已有模板不补跑；从没有过复刻任务的模板在 ②复刻 给「开始复刻」。复刻任务运行中不允许换参考视频或重试证据步骤（先中止）。换参考视频时即作废尚未出片的复刻片；新一轮复刻开始前清掉上一轮的 Agent 产物。
+- ③验货 列的是「这一轮」的复刻片版本：当前复刻任务建起来之后的 v1、v2 …（打回是 resume 同一个任务，版本都在这一轮里）；换参考视频或重跑会起新任务，之前的版本按旧稿子出，不再列出。
+- ③验货 只在复刻片出好（模板等验货）后可进；复刻片渲染中、出片失败的进度与重试在 ②复刻 的出片卡（CMP-007）里看，打回后出下一版期间同样如此。未解锁的 ④变体 / ⑤成片 点了要当场说明「先通过验货」。
+- 「通过」只对最新一版已出片的复刻片可用：④变体 从工作目录里当前的稿子出发，那正是最新一版；旧版本只供对比。通过时记下是哪一版，只有这一版作为成片入库、计入成片数。
+- 「打回」只在模板等验货、最新一版已出片、复刻会话还在时可用。意见去掉首尾空白后 1-2000 字，作为新一轮（抽屉分隔线「打回意见 #n」，第一次复刻是第 1 轮）resume 原会话；模板回到「复刻中」，之后照 ②复刻 的路子走：会话完成 → 宿主核判据 → 估价过闸门 → 出下一版复刻片 → 回到「等验货」。打回这一轮运行中同样不允许换参考视频（先中止）；已验货的模板不能打回。打回这一轮中止 / 熔断 / 失败照 REQ-003 给「继续 / 重跑」；打回意见在排队那一刻就记下，还没开跑就被中止或后端重启，「继续」仍按这条意见接着改、仍算这一轮打回。换参考视频清掉「通过的是哪一版」。
+
 **规则：**
-- MUST 未"通过"验货的模板，④变体 步骤锁定并说明原因。
+- MUST 未"通过"验货的模板，④变体 与 ⑤成片 两步均锁定并说明原因。验货是质量闸门，没过之前不产出可交付的东西——复刻片在 ③验货 的并排播放器里看得到，不需要靠 ⑤成片 去看。
+- MUST "通过"验货这一个动作同时解锁 ④变体 与 ⑤成片，复刻片此时作为该模板下第一条成片入库（与 FLOW-002 完成状态一致）。
 - MUST 并排播放器两路同步：播放、暂停、拖动、倍速一致；默认只开原片声音，可切换。
 - MUST 打回意见 1-2000 字，resume 原会话，保留历次复刻片版本供对比。
 - SHOULD 显示两片的时长差与分辨率差。
@@ -286,12 +310,29 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 - [ ] AC-011: Given 复刻片已出, when 拖动任一播放器进度条, then 另一路同步到同一时间点（误差 ≤0.2 秒）。
 - [ ] AC-012: Given 模板未验货, when 点 ④变体, then 显示"先通过验货"且不可输入。
 - [ ] AC-013: Given 用户打回并写意见, when Agent 再次完成并出片, then ③验货 出现版本切换，v1、v2 均可播放。
+- [ ] AC-040: Given 模板未验货且复刻片已出, when 查看步骤条, then ④变体 与 ⑤成片 均为未解锁且不可点；when 点"通过", then 两步同时变为可进入。
 
 ### REQ-005: 批量变体与素材审核
 
 **优先级：** P0　**关联任务：** TASK-003　**关联流程：** FLOW-003
 
 **行为：** 每条 brief 复制模板源文件到 `productions/<variant-id>/`，启动变体 Agent（REQ-003）。Agent 改台词、榜单条目、配图提示词，联网搜真实可识别的条目图并裁切统一。完成后进素材审核。
+- 变体 Agent 的工作目录就是 `productions/<variant-id>/`，只能写这里；hypit 按最近的 `package.json` 认模板目录为项目根，Runtime 用模板的，源文件里的相对引用按声明它的文件解析。
+- 交付：`variant.svml / .svs / .svrun`、`assets/`、`SOURCES.json`、`SCRIPT.md`（台词与屏幕文字全文，审核界面展示）。
+  `SOURCES.json` 格式 `{"assets":[{"file","label","sourceUrl","width","height","gap"}]}`：图都放在 `assets/` 下；`sourceUrl` 只认 http / https，其余与空的一样标「无来源」；找不到图的条目写 `"gap": true` 并放同尺寸占位图，审核界面显示为缺口等人上传。
+- 变体的默认名称取 brief 前 20 字（同 REQ-007）。重跑时从模板目录重新复制原稿。
+- 素材审核（SCREEN-007）：
+  - 替换单张：收 jpg / png / webp、≤20 MB，按原图的尺寸居中裁切缩放、写回原文件名，标「已替换」、清缺口，不起任何 Agent 任务（AC-015）。原图不在就不知道该多大，报错不猜。
+  - 素材通过：有缺口不行；通过后写上运行文件、回到排队，交给 REQ-006 的估价闸门与出片执行器（限额内自动出片、超限待确认、批次限额用尽之后的都停）。
+  - 打回：意见 1-2000 字（去首尾空白），resume 该变体的会话，变体回到 Agent 写稿，再次完成时重新核判据。
+  - 重跑：Agent 停下（失败 / 熔断 / 中断）、素材待审、或出片失败的变体可以重跑；清掉 Agent 的稿子、清单与抓来的图（用户替换过的留下），运行文件清掉、素材要重新审，按原 brief 与模型开新会话；旧稿的估价随运行文件一起不再占批次已花（没提交给 hypit 的；已提交的出片照上条仍计入）。
+- 完成判据由宿主核：`variant.svrun` 的 `hypit check` 通过、`SOURCES.json` 能解析且列的图都在变体目录里、`SCRIPT.md` 存在。不过就把任务改判失败写明原因，「继续」时把原因交给会话。
+- 任务状态同步到变体：排队 / Agent 写稿 / 等待额度 / 熔断 / 中断 / 失败 / 已取消；核过进「素材待审」。
+- 取消：Agent 在跑就停会话，渲染中就让 hypit 取消那条 build，变体记「已取消」（作废：之后不再估价、不再出片、不能再起 Agent 任务，它的估价不再占批次已花；已经提交给 hypit 的那次出片照 REQ-006 仍计入批次已花，钱可能已经花了）。
+  只有 ④ 的「取消」作废变体；抽屉里中止一个还没开跑的任务、停任务超时，变体记「中断」或「失败」，照 REQ-003 继续或重跑。
+- 在 ④ 选中一条变体（素材审核面板）时，Agent 抽屉与熔断 / 中断横条跟随这条变体的任务（没有任务就说这条变体还没有）；只给这条变体此刻真能做的动作：继续限 Agent 停下且还没交给出片，重跑同上条，已取消的都不给。地址里的变体属于别的模板按不存在处理。拿已被新任务取代的旧任务重跑，拒绝（同模板任务）。面板右栏显示这条变体的花费明细（CMP-008），任务或出片有变化就刷新。
+- 模板的继续 / 重跑 / 打回、换参考视频，都要等该模板下的变体任务结束。
+- 提交时按 REQ-010 选 Agent 模型档案（CMP-010，默认默认档案）；没 key 的档案列出但不可选，不支持看图的能选但就地提示（变体只警告）。Phase 8 的「本机订阅下选模型 id」过渡清单已撤掉，要在订阅下指定模型用「本机订阅 · 指定模型」档案。
 
 **规则：**
 - MUST 每张联网获取的图在 `SOURCES.json` 记录来源页 URL；无来源的图在审核界面标黄。
@@ -322,17 +363,27 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 
 **优先级：** P0　**关联任务：** TASK-004、TASK-005　**关联流程：** FLOW-002、FLOW-003
 
-**行为：** 出片前 spawn `hypit plan --json` 与 `hypit pricing --json` 得到外部请求数与估价。通过闸门后 spawn `hypit build <run> --follow --json`，并行 `hypit activity --watch --jsonl` 取结构化进度。完成后 `hypit get <build-id> --output final.video --to output/<name>.mp4 --json`。
+**行为：** 出片前 spawn `hypit plan --json` 与 `hypit pricing --json` 得到外部请求数与执行参数。通过闸门后 spawn `hypit build <run> --json` 提交、立刻拿到 build-id，再 spawn `hypit status <build-id> --watch --json --verbose` 跟到结束，并行 `hypit activity --watch --jsonl` 取结构化进度（不用 `build --follow`：JSON 模式下它到结束才给 build-id，中途取消就没法告诉 hypit；hypit 自己也说明 Ctrl-C 只是不看了、Build 照跑）。完成后 `hypit get <build-id> --output final.video --to output/<name>.mp4 --json`。
+
+**估价来源（Q-003 已解答，hypit 不出数）：** hypit 的 `pricing.kind` 只有 `"page"`（一个价格页 URL）和 `"local"`（零价）两种，不含任何结构化费率，官方文档明言 "Hypit itself calculates no total"。因此：
+- MUST Clone Studio 自己维护一张"能力/模型 → 单价"费率表（随设置页可编辑），用 `plan --json` 的 `needs[].summary.fields`（宽高、`startFrame`/`endFrameExclusive`、帧率、采样率）与 `providerRequestCount` 自行计算估价。
+- MUST 闸门界面同时展示 `providers[].pricing.url` 价格页链接，供人工核对费率表是否过期。
+- MUST 费率表缺该能力的单价 → 按"估价拿不到"处理。
+- 费率表一行 = 能力（可再限定 Endpoint）+ 计价单位（每次请求 / 每秒）+ 单价 USD。按秒计价的时长取 `needs[].summary.fields` 的帧数 ÷ 帧率（或 `duration`），拿不到时长也按"估价拿不到"。`pricing.kind = local` 的能力默认 $0；费率表里写了就按写的算（把本机渲染也记成本）。
+- 估价在出片单位排上队时自动跑（plan / pricing 不花钱），结论落库并绑到出片单位；改费率表后可对未出片的重新估价。`pricing --json` 只读联网、失败不影响估价。
 
 **规则：**
 - MUST 估价 ≤ 单条限额 且 批次已花+估价 ≤ 批次限额 → 自动放行；否则停在"待确认花费"显示明细，人点确认才 build。
-- MUST 估价拿不到（pricing 失败或 Provider 无价目）→ 一律按超限处理，等人确认。
+- MUST 估价拿不到（plan 失败、Provider 无价目、或费率表缺项）→ 一律按超限处理，等人确认。
 - MUST plan 有未解析请求或 preflight 失败 → 不出片，标失败并展示原因。
 - MUST 凭据用 `@hypit/credential-store-env`，TokenDance / HypiHub key 由后端注入 hypit 子进程环境变量，不写进工作目录任何文件。
 - MUST 后端生成的 `hypit.runtime.json` 按已验证的生成服务写 endpoints：TokenDance（`@hypit/provider-tokendance`，覆盖 Seedance 2.0/2.5 视频、Seedream 5.0 lite 生图、MiniMax H3 视频）为主；HypiHub 已连接时一并写入，覆盖 TokenDance 没有的能力（配音 TTS、GPT Image 等）。
 - MUST 把当前可用的能力清单（哪些模型能用、哪些不能）写进 Agent 系统提示，要求 Agent 只用可用能力写 SVML；plan 出现无 Provider 可解析的请求时标失败并指明缺哪种能力。
-- MUST 渲染并发受 `hyperframes.local` 的 `workers` 与全局渲染任务数限制，默认 workers=4。
-- MUST 记录实际花费到台账；实际值拿不到时记估价并标"估"。
+- MUST 渲染并发受 `hyperframes.local` 的 `workers` 与全局渲染任务数限制，默认 workers=1、全局同时 1 个 build（本机实测 workers=2 起渲染进程崩溃、1 稳定；设置页可调）。
+- MUST 出片执行器：`build --json` 提交后 build-id 立刻落台账；`status --watch --json --verbose` 的进度行与 `activity --watch --jsonl` 给结构化进度；判成败只看 `result.outcome`，不看 `work.state`；成功后 `get` 导出到工作目录 `output/`；出片前重新生成 Runtime Profile；失败时完整展示 `failure` 原文、记下当时可用内存，可「重试出片」；出片进行中不允许换参考视频。
+- MUST 「重试出片」重新估价过闸门：一次放行只管一次出片（估价要严格晚于这条的上一次 build 才能放行；重启时排队里的估价不晚于上一次 build 的补估一次），限额内自动起片，超限停在「待确认花费」。批次「已花」= 批次里其它出片单位已放行的估价 + 批次里已经提交给 hypit 却没出成（失败 / 取消）的 build 的估价，含这条自己之前的尝试。
+- MUST 任何时候停下（人取消、跟进度的进程超时或出错、后端重启后发现上次还在跑的 build）都让 hypit 取消那条 build，不让 Worker 继续渲染、继续花钱。人取消的那次 build 记「已取消」，出片单位回到「失败」可重试（出片单位的「已取消」只表示作废）。
+- MUST 记录花费到台账。**build 的实际花费拿不到**：hypit 的 Result 只有不含金额的 `receipt: { id, url? }`，全仓库无任何金额字段。故生成侧花费一律按"请求数 × 自维护单价"记账并标"估"，不谎称账单。
 
 **输入（设置）：**
 
@@ -353,6 +404,13 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 
 **行为：** ⑤成片 网格：封面帧、名称（默认取 brief 前 20 字，可改）、时长、花费、状态。点开播放器。单条下载与多选打包 zip。
 
+**规则：**
+- 网格列出该模板出过片或还在流水线里的出片单位（复刻片过了判据就列，写稿阶段还没有出片单位；变体素材通过之后才列）：复刻片每一版（没通过验货的旧版标「已被 vN 取代」，只有通过验货的那一版算成片数）与变体。
+- 名称去掉首尾空白后 1-60 字；复刻片的默认名称是「复刻片 vN」。
+- 下载与打包只收完成且文件还在的；zip 内每个 mp4 以成片名命名，文件名里 Windows 不允许的字符换成「_」，重名依次加「 (2)」「 (3)」。
+- 删除成片：二次确认后删掉该条的成片文件与封面，成片从网格里消失，也不再算进成片数；它的花费照 REQ-009 仍计入模板与客户的累计（钱已经花了）。变体里还能重来的（失败、中断、熔断）删了就一并作废，之后不能再重试出片或重跑；失败 / 中断的复刻片是模板流水线的头，不能在 ⑤ 删，去 ② 重试出片或在 ③ 打回；③ 不能通过一版已经删掉成片的复刻片。流水线里的（排队、写稿、待审、待确认、渲染中）不能删。只删这一条自己的文件，路径必须真实落在数据根的 clients 目录下，不顺着链接删。
+- 封面帧与时长由 ffmpeg / ffprobe 取；取不到时封面给占位、时长显示「—」，不影响播放和下载。
+
 **验收标准：**
 - [ ] AC-021: Given 勾选 3 条完成的成片, when 点批量下载, then 得到含 3 个 mp4 的 zip，文件名为成片名。
 
@@ -364,20 +422,30 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 
 **规则：**
 - MUST key 只存本机应用数据目录的配置文件，文件权限限当前用户；界面回显打码。
-- MUST 体检每项给出"是什么、现状、怎么修"。
+- MUST 体检每项给出"是什么、现状、怎么修"，修复命令可复制。
+- MUST 凭据类体检项判定的是"验证过没有"，不是"配置了没有"。只填了一个没验证过的 key 一律算未通过，出片闸门照挡。key 一改，之前的验证结果立刻作废。
+- MUST 凭据验证由 Clone Studio 直接问服务方，不经 hypit：hypit 没有校验远端凭据的命令，`doctor --endpoint` 对错误 key 也返回 ok，`auth status` 只报凭据在不在。验证必须零花费——不得为了验证而产生任何计费请求。
+- MUST 验证失败时把**服务方返回的原文**（状态码 + 响应体）原样展示，不改写、不归纳。
+- MUST 命令类体检项先把命令名解析成真实可执行文件再探测，不能直接按名字 spawn；否则 Windows 上以 `.cmd` 垫片分发的命令（npm 全局安装的那些）会被误报成"不在 PATH"。
 
 **验收标准：**
-- [ ] AC-022: Given ffmpeg 不在 PATH, when 打开设置页, then 该项红色并给出 `winget install --id Gyan.FFmpeg.Shared -e`。
-- [ ] AC-023: Given 填入错误的 TokenDance key, when 点验证, then 显示验证失败及 Hypit 返回的原因，出片按钮保持禁用。
+- [ ] AC-022: Given ffmpeg 不在 PATH, when 打开设置页, then 该项红色并给出 `winget install --id Gyan.FFmpeg.Shared -e`；恢复后变绿。
+- [ ] AC-023: Given 填入错误的 TokenDance key, when 点验证, then 显示验证失败及**服务方返回的原文**（如 HTTP 401 与 `{"error":{"message":"API 密钥不存在","code":"unauthorized"}}`），该体检项保持未通过，出片按钮保持禁用。
+- [ ] AC-039: Given 一个以 `.cmd` 垫片分发的命令行工具已安装, when 打开设置页, then 该体检项显示它的真实版本，而不是"不在 PATH"。
 
 ### REQ-009: 花费台账
 
 **优先级：** P0　**关联任务：** TASK-004
 
-**行为：** 每个 Agent 任务记：时长、等价 token 花费。每次 build 记：估价、实际、build-id。成片卡片显示合计；模板页头显示模板累计。
+**行为：** 每个 Agent 任务记：所用档案名与模型 id（快照）、时长、等价 token 花费（订阅与 Anthropic key 档案取最新一条 `result` 的 `total_cost_usd`，SDK 自称 "An estimate, not a billing statement"；兼容端点按 REQ-010 单价折算，没填单价的花费明细写「未知」而不是 $0）。每次 build 记：估价、build-id、`receipt.id`/`url`（若有；一次 build 有多条远程操作时记第一条带 url 的，都没有 url 记第一条，其余用 `hypit inspect <build-id>` 看）。成片卡片显示合计；模板页头显示模板累计。
+
+**规则：**
+- MUST 两类花费都标注为"估算"，界面不出现"实际账单"字样。build 侧没有实际金额可取（见 REQ-006 估价来源）。
+- MUST 有 `receipt.url` 时在花费明细里给出链接，让人能去 Provider 侧查真实账单。
+- 成片卡片与花费明细的合计只算这一条自己的：变体 = 它的 Agent 任务 + 每次出片（有实际金额用实际，否则用估价）。复刻片的 Agent 会话挂在模板上、各版本共用，花费明细里列出并标「共用」，不计入某一版的合计；模板累计照常全算。
 
 **验收标准：**
-- [ ] AC-024: Given 一条变体经历 1 次 Agent 任务与 1 次 build, when 查看成片详情, then 分别列出两笔花费及合计。
+- [ ] AC-024: Given 一条变体经历 1 次 Agent 任务与 1 次 build, when 查看成片详情, then 分别列出两笔花费及合计，且两笔均标"估"。
 
 ### REQ-010: Agent 模型切换
 
@@ -393,14 +461,24 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 |---|---|---|
 | 本机 Claude Code 订阅（默认，不可删） | 不注入任何变量，走本机登录态 | |
 | Anthropic API key | 仅注入 key | |
-| DeepSeek（预设） | 官方 Anthropic 兼容端点 `https://api.deepseek.com/anthropic` | 用户只填 key 与模型 id；"支持看图"默认开（用户确认 DeepSeek 已支持图片输入），测试连接时带图验证 |
-| 豆包 / 火山方舟（预设） | 方舟的 Anthropic 兼容端点 | 端点地址见 Q-004 |
+| DeepSeek（预设） | 官方 Anthropic 兼容端点 `https://api.deepseek.com/anthropic` | 用户只填 key 与模型 id（预填 `deepseek-flash`）；"支持看图"默认开（用户确认、官方文档写明支持图片块），测试连接时带图验证；"支持联网搜索"默认开（官方文档写明 web_search 工具可用） |
+| 豆包 / 火山方舟（预设） | 方舟 Coding Plan 的 Anthropic 兼容端点 `https://ark.cn-beijing.volces.com/api/coding` | 需要 Coding Plan 的 key；模型预填 `ark-code-latest`；看图、联网搜索默认关（随所选模型，用户自行打开） |
 | Gemini、ChatGPT/OpenAI（预设） | 这两家没有原生 Anthropic 兼容端点，须经用户本机自起的 LiteLLM 代理转换；base_url 预填 `http://127.0.0.1:4000` | 本应用不内置、不托管代理，设置页给出起代理的说明 |
 | 自定义 | 任意 Anthropic 兼容端点 | |
 
 **规则：**
+- 档案管理：内置订阅档案不可改、不可删，只能设为默认（它不指定模型，用订阅的默认模型）；另可添加「本机订阅 · 指定模型」档案：同样走本机登录态、不注入任何变量，只指定主模型 id（如 Sonnet），供按任务选订阅下的模型；删除默认档案后默认回到内置订阅；还有未结束任务（排队、运行、等待额度）在用的档案不能删；改 base_url、token、模型 id，或把「支持看图」打开后，「已验证」清掉，要重新测试（看图要带图测过才算）；token 只回打码值，编辑时不填就沿用原 token；token 只收可见 ASCII 字符（不含空白），报错信息里也不回显 token。
+- 测试连接：订阅档案跑一次最小 SDK 会话；其余档案直接向 `{base_url}/v1/messages`（Anthropic key 档案是官方地址）发一条 16 token 以内的请求，兼容端点用 Bearer、官方 key 用 x-api-key。上游回 2xx 且响应是一条 Messages API 消息才算成功，失败时回上游 HTTP 状态与响应原文，档案标「未验证」；成功标「已验证 + 时间」。测试途中档案被改过的，结论不落到新配置上。
+- 运行（Task 10.2）：
+  - 注入：内置订阅与「本机订阅 · 指定模型」不注入任何变量（后者只把模型交给 SDK）；Anthropic key 档案注入 `ANTHROPIC_API_KEY`（填了快速模型再把 haiku 档映到它）；兼容端点注入 `ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_MODEL` 与 opus / sonnet 两档映射到主模型、haiku 档与子 Agent 模型映射到快速模型（空则主模型），并关掉 Claude Code 的非必要外联。非订阅档案一律不带本机订阅令牌，免得订阅凭据被发到第三方端点。每个会话单独算环境，不改宿主进程的环境变量。
+  - 任务建立时记下档案 id、档案名与模型 id（快照）；继续、打回、等额度续跑都按这份快照与原档案跑。原档案已删或 key 没了：继续与打回拒绝并说明「只能重跑（可重选档案）」，等额度到点续跑的任务改判失败写明原因。
+  - 重跑可带档案（模板与变体都行），不带就用原档案，原档案没了用默认档案。
+  - ①参考 导入时选的档案（没选就是当时的默认档案，同样要支持看图）记在模板上，证据做完自动起复刻时用它；到那时它被删了、或被改成不支持看图，就用内置订阅（快照照实记下）。
+  - 不支持联网搜索的档案：会话里禁用 WebSearch 工具，并在系统提示里说明改用 Bash（curl 等）与 WebFetch 找图。
+  - 凭据不外泄：Agent 点名读凭据变量或整份导出环境变量的命令（printenv、env、set、`dir env:`、按通配列的 `gci env:ANTH*`（数组、管道（路径在哪一行、哪个块里都算）、括号、续行里与 `Environment::` 写法同样算，先 `cd env:` 再列也算；grep / echo / heredoc 正文里的「env:」字样不算；变量间接、编码命令、字符串拼接这类刻意混淆按 REQ-003 的边界不保证拦住）、process.env 整体之类，含 sudo / sh -c / cmd /c 等包一层的写法）一律拦下，读单个普通变量照常；Claude Code 自己的登录凭据文件（`~/.claude/.credentials.json` 与 CLAUDE_CONFIG_DIR 下的）与 Codex 的 `$CODEX_HOME/auth.json` 同宿主密钥文件一样不许碰，Git Bash 的 `/c/Users/...` 写法同样认，`~/.codex` 与 `~/.claude` 一样按家目录的各种写法（`~`、`$HOME`、`$USERPROFILE`、`${env:USERPROFILE}`、HOMEDRIVE / HOMEPATH）认通配与整目录操作，先进家目录再用相对路径（`cd ~; cat .codex/auth*`、`tar -C ~ .codex`）、路径后面直接跟分隔符（`cd ~/.codex; …`）同样算；对整个家目录递归搜索（`grep -r … ~`）按 REQ-003 边界不保证拦住。以上都是按命令文本匹配的尽力拦截（与 REQ-003「拦截的边界」同一口径）：常规写法拦住，同一类的其它拼写以后发现了按低优先级补、不阻塞交付；要彻底隔离得靠系统账户或沙箱，放到后续 Phase 评估；万一消息、停因或拦截记录里出现了注入的 key，落库、推界面前换成打码。不用 Claude Code 的 `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`：它会把权限模式强制改回 default，无头会话里每个工具调用都会卡住等批准。
+  - 花费：订阅与 Anthropic key 档案用 SDK 的估算；兼容端点填了单价的，按每次调用的 token 用量 × 单价折算并以此熔断（运行中读流式事件里每次调用的输入与输出用量，收尾再和这一段的合计用量比，取大的；SDK 自动 / 手动压缩上下文的那次调用不出消息，按压缩时读入的上下文 token 记输入、压缩后的摘要 token 记输出，另外加上；压缩失败时 SDK 不给 token 数，按这一段见过的最大读入上下文记一笔输入）；没填单价的不做 $ 熔断、花费记「未知（没填单价）」——抽屉顶栏、熔断横条、④ 队列行与花费明细都写「未知」，不写 $0，也不摆熔断上限；⑤ 成片卡片、模板页头与客户页的累计里有这种任务时，金额后面标「含未知」（那部分算不出、没进合计）。口径按每一段开跑时档案的单价定（中途补填或清掉单价，从下一段起换口径，已记下的花费不动）。
 - MUST 只支持 API key 接入。ChatGPT Plus、Gemini Advanced、豆包 App 这类聊天订阅不提供 API，界面在预设旁明说"需要 API key，聊天订阅不可用"。
-- MUST 每个档案带"支持看图"开关。复刻任务必须看帧，选中不支持看图的档案启动复刻时拦截并说明；变体任务仅警告。
+- MUST 每个档案带"支持看图"开关。复刻任务必须看帧，选中不支持看图的档案启动复刻时拦截并说明（①参考 提交与模板重跑时拒绝，不建 AgentJob）；变体任务仅警告。
 - MUST 每个档案带"支持联网搜索"开关。Anthropic 的 WebSearch 是服务端工具，第三方端点下不可用；该开关为关时，运行器在系统提示里告知 Agent 改用 Bash（curl / yt-dlp 等）与 WebFetch 找图，并在素材审核界面提示"该模型无原生搜索，素材缺口可能偏多"。
 - MUST "测试连接"按钮：用该档案发一次最小会话，回显成功/失败与错误原文；若档案声明支持看图，附一张测试图验证。
 - MUST key 的存储与回显规则同 REQ-008；key 只注入 Agent SDK 子进程，不落工作目录。
@@ -415,8 +493,8 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 |---|---|---:|---|
 | 档案名 | string | Yes | 1-30 字，不重名 |
 | base_url | url | 除订阅/Anthropic 外必填 | http/https |
-| auth token | secret | 除订阅外必填 | 非空 |
-| 主模型 id | string | 除订阅外必填 | 非空 |
+| auth token | secret | 除订阅外必填 | 至少 8 个可见 ASCII 字符（不含空白） |
+| 主模型 id | string | 除内置订阅档案外必填（「本机订阅 · 指定模型」也要填） | 非空 |
 | 快速模型 id | string | No | 映射 haiku 档，空则同主模型 |
 | 支持看图 / 支持联网搜索 | bool | Yes | 预设给默认值，可改 |
 | 输入/输出单价 | number | No | ≥0 |
@@ -440,7 +518,7 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 
 **用途：** 用户有 ChatGPT/Codex 订阅，让生图走订阅额度而不是按量付费。依据：用户提供的《Codex 生图配置说明》（已在用户的其它项目中实跑，不随仓库分发）。
 
-**行为：** 在本项目代码目录（不在 `hypit-main/` 内）写一个 Hypit Provider 包，参照 `hypit-main/examples/provider-package` 与 `@hypit/endpoint-kit`，承接 `@hypit/gpt-image@1` 的生图能力。每个生图请求 spawn 一次 Codex CLI，由提示词里的 `$imagegen`（底层 gpt-image-2）出图，PNG 交回 Build。设置里启用后，后端生成的 `hypit.runtime.json` 把 gpt-image 能力绑定到它。
+**行为：** 在本项目代码目录（不在 `hypit-main/` 内）写一个 Hypit Provider 包，参照 `hypit-main/examples/provider-package` 与 `@hypit/endpoint-kit`，承接 `@hypit/gpt-image@1` 的生图能力。每个生图请求 spawn 一次 Codex CLI，由提示词里的 `$imagegen` 出图（走 Codex 内置 `image_gen` 工具，**底层模型不详【未验证】**——`gpt-image-2` 是 CLI fallback 路径的默认模型，内置路径的输出里没有任何字段暴露实际模型），PNG 交回 Build。设置里启用后，后端生成的 `hypit.runtime.json` 把 gpt-image 能力绑定到它。包由后端同步到 `<数据根>/node_modules/@clone-studio/codex-image`（启动时、启用时、试出一张图时），hypit 从工作目录往上找 `node_modules` 找到它——不用 `--package-root`：它只有 check / plan / pricing / build 认，doctor、programs、runtime 不认且会因解析不到包报错，在跑的 Worker 也不看新值（Phase 11 实测）。npm 装的 codex 是 `.cmd` 垫片，后端解析出它指向的 `codex.js` 用 node 起。这条找包路径「离工作目录最近的优先」：工作目录里的 `node_modules` 能盖掉宿主同步的包，所以 Agent 不许往工作目录与模板目录（变体会话往上到模板根）的任何 `node_modules` 里写、也不许在那里装包（npm / pnpm / yarn / bun 的 install / add / ci），后端每次调 hypit 前也查一遍（从工作目录到数据根之间有 `node_modules/@clone-studio` 就拒绝调用）。包没同步上时不绑定 gpt-image（否则所有模板的估价都因解析不到包而失败），体检行写出原因。`$CODEX_HOME/auth.json` 与 Claude Code 的登录凭据一样，Agent 不许读。
 
 **规则：**
 - MUST 一图一进程，绝不批量。参数数组：`codex exec --ignore-user-config --json --ephemeral -c windows.sandbox="elevated" --sandbox workspace-write --skip-git-repo-check -C <临时工作目录> [--image <参考图绝对路径> …最多 4 张] -- "<提示词>"`。
@@ -448,18 +526,61 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 - MUST Windows 上带 `-c windows.sandbox="elevated"`；不得用 `unelevated` 或 `danger-full-access`。
 - MUST 提示词里 `$imagegen` 出现且只出现一次；末尾写明"仅生成图片；不要写入、复制或修改任何其它文件"；要求把成品复制到 `./images/<name>.png`。
 - MUST 成败判定：exit code 0 且产物文件存在且大小 > 0 才算成功。找图两条路互为兜底：`<cwd>/images/<name>.png`；`~/.codex/generated_images/<thread_id>/` 下修改时间落在本次运行区间内的最新 PNG（thread_id 取自 JSONL 首条 `thread.started`）。
-- MUST JSONL 出现 `error` 事件，或 stderr 含 `rate limit` / `quota` → 失败，原文进 Build 错误，由"重试出片"接续。
-- MUST 单张超时 10 分钟，超时 kill 子进程。JSONL 按行切分的单行上限 4 MB。
-- MUST 该 Provider 的请求在 plan/pricing 里计为零价，台账记录张数。
-- MUST 设置页体检增加：Codex CLI ≥ 0.128 且 `~/.codex/auth.json` 存在；提供"试出一张图"按钮。
-- MUST 不支持透明背景：请求带透明背景参数时以"不支持"失败，不静默忽略。
+- MUST JSONL 出现 `error` 事件（Codex 断流重连时发的「Reconnecting... n/m」是进度提示，不算）或 `turn.failed`，或 stderr 含 `rate limit` / `quota` / `usage limit`（订阅额度用完的原话是「You've hit your usage limit…」）→ 失败，原文进 Build 错误，由"重试出片"接续。带回的原文有上限：JSONL 末段每行、每条错误原文截断并标明，避免一条 Build 错误有几 MB。
+- MUST 单张超时 10 分钟，超时 kill 子进程（杀了仍不退出的，宽限期后不再等，照样判超时）。JSONL 按行切分的单行上限 4 MB。比例与分辨率写进提示词，Codex 不保证产出尺寸与之一致。
+- MUST 该 Provider 的请求在 plan/pricing 里计为零价，台账记录张数（出片记录上记本次走 Codex 的请求数，花费明细 CMP-008 显示）。
+- MUST 设置页体检增加：Codex CLI ≥ 0.128 且 `$CODEX_HOME/auth.json`（默认 `~/.codex`）存在，只看在不在、不读内容；未过写原因并提示修法（未登录提示 `codex login`），启用开关由后端按体检把关，不过不让开。提供"试出一张图"按钮：在数据根下的临时 hypit 工程里 build 一个只含一个 gpt:Image 的 run（走真实绑定与 Provider），回图、耗时或原文错误；一次只跑一个，只留最近一次。
+- MUST 不支持透明背景：请求带透明背景参数时以"不支持"失败，不静默忽略。参考图超过 4 张同样以"不支持"失败。两者都在 plan 阶段由 Provider 的 supports 拒掉，不起 Codex。
 - MUST NOT 直连 `chatgpt.com/backend-api`。
-- SHOULD 并发默认 1（订阅额度约 40-50 张 / 3 小时滚动窗口）。
+- MUST NOT 把 `--sandbox workspace-write` 收紧到禁止执行命令。内置 `image_gen` 不接受目标路径参数，Codex 是先生成到 `$CODEX_HOME/generated_images/` 再执行一条复制命令把图搬到 `./images/`，禁命令就拿不到图。
+- SHOULD 并发默认 1（订阅额度约 40-50 张 / 3 小时滚动窗口）。单张固定带约 87K input tokens 开销（Codex 每次先读一遍 `imagegen/SKILL.md`，其中约 71K 命中缓存），美元计价仍为 $0，但影响单张耗时。
 
 **验收标准：**
 - [ ] AC-031: Given Codex 已登录且启用该 Provider, when 出一条含 1 个 gpt-image 请求的片子, then 该请求由 Codex 子进程完成，产物 PNG 进入 Build，台账该请求花费 $0、张数 1。
 - [ ] AC-032: Given Codex 正常退出但未产出图片, when Provider 检查产物, then 该请求判失败并带 JSONL 末段原文，不产生空图。
 - [ ] AC-033: Given Codex 未登录, when 打开设置页, then 体检该项未通过并提示执行 `codex login`，Provider 开关不可启用。
+
+### REQ-012: 生视频通道切换
+
+**优先级：** 机制、TokenDance、MiniMax 云端为 P0；ComfyUI 本地、即梦 CLI 为 P1　**关联任务：** TASK-002、TASK-003、TASK-004　**关联流程：** FLOW-002、FLOW-003
+
+**用途：** 用户手上有多条生视频的路，成本和效果各不相同，要能按模板选定、按单条更换，并在验货时比出哪条路适合这个模板。
+
+**通道：**
+
+| 通道 | 模型 | 接法 | 计费 | 优先级 |
+|---|---|---|---|---|
+| TokenDance | Seedance 2.0/2.5、MiniMax H3 | Hypit 自带 Provider | 按量 | P0 |
+| MiniMax 云端直连 | MiniMax H3 | 自写 Provider，调 MiniMax 官方视频生成 API（提交任务 → 轮询 → 取文件），key 走 env 注入 | 按量 | P0 |
+| MiniMax 本地 ComfyUI | MiniMax H3 | 自写 Provider，调本机 ComfyUI HTTP 接口提交工作流、轮询、取产物 | 零价，记次数、步数与耗时 | P1，依据 `docs-inbox/minimax-h3-comfyui.md` |
+| 即梦会员 CLI | Seedance | 自写 Provider，一请求 spawn 一次 CLI，同 REQ-011 的做法 | 消耗即梦积分，美元计价为 $0，台账记次数与积分消耗 | P1，依据 `docs-inbox/即梦CLI-dreamina使用文档.md`，CLI 名为 `dreamina` |
+
+**行为：**
+- 设置页"生视频通道"分区：每个通道一行，启用开关、凭据或地址、"测试"按钮、已验证时间；可设全局默认通道。
+- 模板有"默认生视频通道"，新模板取全局默认。③验货 的"重出复刻片"可选通道，产生新的复刻片版本；版本切换控件上标出该版本所用通道与花费，用已有的并排播放器逐版与原片比。点"通过验货"时把当前版本的通道存为模板默认。
+- ④变体 提交区显示并可改本批次通道，默认取模板默认。单条成片的"重试出片"可换通道。
+- 换通道的两种情形：同一模型换通道（如 MiniMax H3 在 TokenDance、云端直连、本地之间换）只改后端生成的 runtime `bindings`，不动 SVML、不烧 Agent；跨模型换通道（Seedance ↔ MiniMax H3）需要改 SVML 的生视频节点，由后端 resume 该条的 Agent 会话执行一次"改用某模型"的短任务，check 通过后再过花钱闸门。界面在用户选择跨模型通道时明说"需要 Agent 改稿，约数分钟"。
+
+**规则：**
+- MUST 每次 build 记录所用通道与模型；台账、成片卡片、版本切换控件可见。
+- MUST 估价闸门按所选通道计价；零价通道照常走闸门但估价为 $0，仍记次数。
+- MUST 通道未启用或未验证时不可选，并给出原因。
+- MUST 自写 Provider 放 `clone-studio/providers/`，不动 `hypit-main/`；各自带不发真实请求的生命周期测试。
+- MUST 本地 ComfyUI 通道并发固定 1（全机一把 GPU 锁），且与本地 WhisperX 转写互斥排队。
+- MUST 本地 ComfyUI 的超时按片长算：`max(30 分钟, 请求秒数 × 6 分钟)`，上限 120 分钟，可配（实测 RTX 5060 Ti、20 步：6.6 秒段约 23 分钟，9.4 秒段 41-44 分钟，10.1 秒段约 47 分钟）。超时后只停止轮询并标"超时待查"，不得重新提交；界面提供"继续等待"与"取消本地任务"。
+- MUST 本地 ComfyUI 提交前把工作流图落盘；没拿到 prompt_id 时不重发，按指纹（提示词、seed、filename_prefix、全部 LoadImage 文件名）到 `/queue` 与 `/history` 找回，命中多条则报错交人；ComfyUI 重启导致历史丢失时明确提示"本地服务断开，需要重新生成"，由用户决定。取消时 `POST /queue` 删除与 `POST /interrupt` 两个都调。
+- MUST 本地 ComfyUI 的输入校验：仅 768p（短边 768、长边对齐 32、面积 ≤ 768×1344），不支持 2K；时长 4-15 秒，帧数按 24fps 吸附到 17k+5；提示词 ≤ 7000 字符，超了拒绝不截断；R2V 接 1-9 张参考图，FL2VA 恰好首尾两张。下载后必须验真（可被 ffprobe 读取、时长与帧格相符）。
+- MUST 即梦通道按文档走异步：提交得 `submit_id` → `query_result` 轮询 `gen_status` → `--download_dir` 取片；参数在提交前本地严格校验；`AigcComplianceConfirmationRequired` 判为"需先在网页端授权该模型"并原样提示，不重试；`ExceedConcurrencyLimit` / `ret=1310` 判为限流，退避重试；解析输出取第一个 `{` 到最后一个 `}`。登录只能由用户手动完成设备码确认，应用不代登；体检用 `dreamina user_credit` 显示账号、会员等级与剩余积分；Seedance 2.5 仅 VIP 可选。
+- MUST 把当前已启用通道及各自支持的模型与限制（时长、分辨率、是否接受真人脸参考、是否带声音）写进 Agent 系统提示。
+- MUST 即梦 CLI 与 ComfyUI 两个通道只按 `docs-inbox/` 里的使用文档实现；文档标注【未验证】的能力（真人照片参考、15 秒段、Turbo 提速）在界面与 Agent 系统提示里同样标"未验证"，不当作已支持。
+- MUST 删除路径：通道凭据可清除；停用通道不影响历史记录的显示。
+
+**验收标准：**
+- [ ] AC-034: Given TokenDance 与 MiniMax 云端均已验证, when 在 ③验货 选 MiniMax 云端重出复刻片, then 产生新版本，版本控件显示其通道与花费，未启动任何 Agent 任务（同为 MiniMax H3 时）。
+- [ ] AC-035: Given 模板 SVML 用的是 MiniMax H3, when 重出时选 Seedance 通道, then 界面提示需要 Agent 改稿，确认后 resume 原会话改节点、check 通过、过闸门后出片。
+- [ ] AC-036: Given 验货通过时当前版本通道为 X, when 进入 ④变体, then 批次通道默认是 X，可改。
+- [ ] AC-037: Given 某通道未验证, when 打开任一通道下拉, then 该项置灰并显示原因。
+- [ ] AC-038: Given 一条成片先后用两个通道各出过一次, when 查看花费明细, then 两次 build 分别列出通道、模型、估价与实际。
 
 ### AI 能力规格
 
@@ -467,12 +588,12 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 |---|---|---|---|---|---|
 | 复刻（视频→SVML） | agent（多模态理解+代码生成） | 产物 100% 通过 `hypit check`；人工验货一次通过率目标 ≥60%，低于 40% 需回头改系统提示 | 导入完成后自动启动；结果须人工验货 | 写进 ANALYSIS.md 的"不确定项"，验货时展示 | 订阅限流→等待额度自动续跑；SDK 不可用→任务失败可重试 |
 | 写变体（模板+brief→变体 SVML+素材） | agent | 100% 通过 check；批量无干预成片率 ≥80% | 提交批量后自动；素材须人工审 | 找不到可识别图时在 SOURCES.json 标注缺口，审核界面标红 | 同上 |
-| 转写对齐 | 语音转文字（本地 WhisperX） | 词级时间戳可用 | 自动 | 无人声则跳过并告知 Agent | 本地服务未起→体检拦截 |
+| 转写对齐 | 语音转文字（本地 WhisperX） | 词级时间戳可用 | 自动 | 无人声则跳过并告知 Agent | 本地服务未起→转写前自动拉起（体检提示，不拦截）；未安装→首次转写时自动安装（体检提示，可能超出单步 10 分钟，建议先手动安装）；端口被别的程序占用或服务卡死/自报不健康、缺 NLTK punkt_tab→体检拦截 |
 | 图/视频生成（TokenDance 为主，HypiHub 可选补 TTS 等） | 生成 | 由人工验货与素材审核把关 | 过花钱闸门后自动 | — | Provider 报错→build 失败可重试 |
 
 **AI 护栏（绝不能做）：**
-- Agent 绝不能自己触发花钱的 build；最贵的错是失控循环出片，靠 `canUseTool` 拦截 + 后端独占 build + 双层限额防。
-- Agent 绝不能写工作目录与其 assets 之外的路径，绝不能改 `hypit-main/`。系统提示声明 + `canUseTool` 对写路径做前缀校验。
+- Agent 绝不能自己触发花钱的 build；最贵的错是失控循环出片，靠 `PreToolUse` hook 拦截 + Agent 进程环境不带生成服务 key（漏过的 build 拿不到凭据）+ 后端独占 build + 双层限额防。
+- Agent 绝不能写工作目录与其 assets 之外的路径，绝不能改 `hypit-main/`。系统提示声明 + `PreToolUse` hook 对写路径做前缀校验（见 REQ-003）。
 - Agent 绝不能读取或输出 TokenDance / HypiHub 等生成服务 key；key 不进 Agent 进程环境。
 - 未经人工素材审核的联网图片绝不进入成片。
 
@@ -485,14 +606,17 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 | 实体 | 描述 | 关键字段 |
 |---|---|---|
 | Client | 客户 | id, name, created_at |
-| Template | 一条参考视频及其复刻模板 | id, client_id, name, language, source_kind(file/url), source_url, workspace_path, status(importing/cloning/awaiting_review/approved/failed), note |
+| Template | 一条参考视频及其复刻模板 | id, client_id, name, language, default_video_channel, source_kind(file/url), source_url, workspace_path, status(importing/cloning/awaiting_review/approved/failed), note, approved_replica_id（通过验货的那一版复刻片） |
 | Production | 一条要出的片：复刻片或变体 | id, template_id, kind(replica/variant), batch_id, brief, name, status, run_path, version |
 | Batch | 一次批量提交 | id, template_id, note, target_language, budget_usd, spent_usd |
 | AgentJob | 一次 Agent 会话 | id, owner(template/production), session_id, status, started_at, ended_at, cost_usd, cost_is_estimate, stop_reason, profile_name, model_id（后两项为快照，不随档案删除而变） |
 | ModelProfile | Agent 模型档案 | id, name, kind(subscription/anthropic/compatible), base_url, token(加密存配置文件，不入库明文), model_id, fast_model_id, supports_vision, supports_web_search, price_in, price_out, verified_at, is_default, builtin |
 | AgentMessage | Agent 流式消息 | id, job_id, seq, role, type, payload |
-| Build | 一次 hypit build | id, production_id, hypit_build_id, estimate_usd, actual_usd, status, error_code, error_message, output_path |
+| VideoChannel | 生视频通道配置 | id, kind(tokendance/minimax_cloud/minimax_comfyui/jimeng_cli), enabled, config(地址等，凭据存 secrets.json), verified_at, is_default |
+| Build | 一次 hypit build | id, production_id, video_channel, video_model, hypit_build_id, estimate_usd, actual_usd, status, error_code, error_message, output_path, context_json（失败时的可用内存与最后一条进度） |
 | Asset | 变体条目素材 | id, production_id, file_path, source_url, replaced_by_user |
+| PricingRate | 费率表一行（REQ-006） | id, capability, endpoint(可空), unit(request/second), usd, note |
+| Estimate | 一次估价与闸门结论 | id, production_id, kind(ok/blocked), total_usd(可空=拿不到), lines, reason, decision(auto/confirm/blocked), reasons, confirmed_at |
 | Settings | 单例配置 | 见 REQ-008 |
 
 ### 6.2 实体关系
@@ -519,13 +643,16 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 |---|---|---|---:|---|
 | DEP-001 | Hypit 0.2.6（`hypit-main/`，源码分发，tsx 直跑） | 内核：证据工具、check/plan/pricing/build/get | Yes | 需 `pnpm install --frozen-lockfile`；当前未安装 |
 | DEP-002 | Node.js ≥22.15、pnpm 10.33 | 运行 Hypit 与本应用后端 | Yes | |
-| DEP-003 | `@anthropic-ai/claude-agent-sdk`（TypeScript） | 无头驱动复刻/变体 Agent | Yes | 自带 Claude Code 二进制；用 query、canUseTool、maxBudgetUsd、resume、skills |
+| DEP-003 | `@anthropic-ai/claude-agent-sdk`（TypeScript） | 无头驱动复刻/变体 Agent | Yes | 自带 Claude Code 二进制；用 query、PreToolUse hooks、plugins、skills、maxBudgetUsd、resume |
 | DEP-004 | 本机 Claude Code 订阅登录 | Agent 默认认证 | Yes | 2026-06-15 起无头用量走独立周额度池；订阅凭据仅限个人本机使用 |
 | DEP-010 | DeepSeek Anthropic 兼容端点 `https://api.deepseek.com/anthropic` | 可选 Agent 模型 | No | 官方支持 Claude Code 接入；对 metadata.user_id 字符集有限制，测试连接时验证 |
-| DEP-011 | 火山方舟（豆包）Anthropic 兼容端点 | 可选 Agent 模型 | No | 见 Q-004 |
+| DEP-011 | 火山方舟（豆包）Anthropic 兼容端点 | 可选 Agent 模型 | No | `https://ark.cn-beijing.volces.com/api/coding`（Coding Plan，Q-004 已解答） |
 | DEP-012 | LiteLLM 代理（用户自起） | 把 Gemini / OpenAI 转成 Anthropic Messages 格式 | No | 本应用不内置；经代理时 WebSearch 工具不可用 |
 | DEP-005 | TokenDance API key（`https://tokendance.space`，用户已订阅） | Seedance 视频、Seedream 生图、MiniMax H3 视频 | 出片必需 | 不含配音 TTS 与 GPT Image；Seedance 2.0/2.5 拒绝含真人脸的参考图/视频 |
 | DEP-013 | HypiHub（`https://hypit.ai`） | 补 TokenDance 没有的能力：TTS、GPT Image 等 | No | 无需找 key 页面：`hypit auth login hypihub.default` 走浏览器 OAuth 授权；也可 `--from <key 文件>` 导入静态 key |
+| DEP-015 | MiniMax 官方视频生成 API + 用户已开通的 API key | REQ-012 云端直连通道 | No | 开发前联网核对当前接口与 H3 模型名 |
+| DEP-016 | 本机 ComfyUI（已安装，含 MiniMax H3 工作流） | REQ-012 本地通道 | No | P1，接口以用户另一项目出的使用文档为准 |
+| DEP-017 | 即梦 / Dreamina 会员 + 命令行工具 | REQ-012 即梦通道 | No | P1，CLI 名称与用法待用户提供 |
 | DEP-014 | 本机 Codex CLI ≥0.128（本机 0.153.4）+ ChatGPT 订阅登录 | REQ-011 订阅生图 | No | P1；无需 API key |
 | DEP-006 | ffmpeg + ffprobe | 媒体处理与编码 | Yes | |
 | DEP-007 | uv | Hypit 的 Python 服务环境 | Yes | |
@@ -538,7 +665,7 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 
 | 类别 | 要求 | 优先级 |
 |---|---|---|
-| 性能 | 界面操作响应 ≤300ms；Agent 消息从产生到抽屉显示 ≤1 秒；默认并发 2 Agent + 1 渲染，渲染 workers 默认 4 | P0 |
+| 性能 | 界面操作响应 ≤300ms；Agent 消息从产生到抽屉显示 ≤1 秒；默认并发 2 Agent + 1 渲染，渲染 workers 默认 1 | P0 |
 | 安全 | 后端只绑 127.0.0.1；Agent 写路径限工作目录；build 拦截；key 不进 Agent 环境、不落工作目录 | P0 |
 | 隐私 | 数据全在本机；除所选 Agent 模型服务、TokenDance / HypiHub、Agent 联网搜图外无外发；不做遥测 | P0 |
 | 兼容性 | Windows 11，Chrome/Edge 最新版，视口 ≥1280px；不做移动端 | P0 |
@@ -565,7 +692,8 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 | 编号 | 假设 | 假设依据 | 错误风险 |
 |---|---|---|---|
 | ASM-001 | 变体由 Agent 重写 SVML，而非程序化改字段 | Hypit 排行榜示例 swap-topic 是整份 33KB 重写的 SVML | 若多数变体其实只换几个字段，则白烧 token；可二期加"快速变体"通道 |
-| ASM-002 | 订阅登录下 SDK 仍返回可用的 total_cost_usd 供 $5 熔断使用 | SDK 结果消息含成本字段 | 若为 0 或不准，熔断退化为仅靠 45 分钟与卡死检测；开发第一阶段须实测 |
+| ASM-002 | ~~订阅登录下 SDK 仍返回可用的 total_cost_usd 供 $5 熔断使用~~ **已验证成立**（Phase 0） | 五组实跑均返回 number 型真实数值（0.0143-0.0518），`modelUsage` 另给分模型用量 | 已消解。改用 SDK 原生 `maxBudgetUsd` 熔断，见 REQ-003 |
+| ASM-012 | ~~`canUseTool` 可作为拦截花钱动作的主手段~~ **已验证不成立**（Phase 0） | 默认沙箱自动放行、只禁 Bash 会被 Task 绕开，实测四组中三组命令照样执行 | 已消解。v1.9 起主拦截为 `PreToolUse` hook，子 Agent 工具（`Agent` / `Task`）列入 `disallowedTools` 作第二道，见 REQ-003 |
 | ASM-003 | 订阅无头周额度够跑日常批量 | 2026-06 起无头独立额度池 | 不够则批量经常停在"等待额度"；此时切到 REQ-010 的其它模型档案 |
 | ASM-011 | 生成服务以 TokenDance 为主即可跑通 P0 验收样本 | 用户已订阅；Hypit 内置其 Provider | 参考片依赖 TTS 或 GPT Image 时 plan 会缺能力，需连 HypiHub 或等 REQ-011 |
 | ASM-009 | 切模型靠给 Agent SDK 子进程注入 `ANTHROPIC_BASE_URL` 等环境变量实现，不换 Agent 框架 | DeepSeek 官方文档与 LiteLLM 教程均以此方式接 Claude Code | 某家端点与 SDK 新版本不兼容时该档案不可用；靠"测试连接"提前暴露 |
@@ -582,10 +710,10 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 |---|---|---:|---|
 | Q-001 | 排行榜类片子的旁白/主持人声音怎么来：TokenDance 无独立 TTS | 阻塞含配音片子的出片验收，不阻塞开发 | 三条路：Seedance 直出带声音的口播镜头；连 HypiHub 用其 TTS；用户自供音频。默认先走第一条，不够再连 HypiHub |
 | Q-002 | 联网搜图的版权风险由用户自担，是否需要在审核界面加免责提示 | No | 默认加一行小字 |
-| Q-004 | 火山方舟当前的 Anthropic 兼容端点地址、模型 id 与是否支持图片输入 | No | 开发到 REQ-010 时联网核实后写进预设；核实不到则豆包预设降为"自定义"并由用户自填 |
 | Q-005 | 用户的 Gemini / ChatGPT 是聊天订阅还是 API key | No | 聊天订阅无法接入；只有 API key 能用，且需自起 LiteLLM |
-| Q-007 | Hypit 能否从 `hypit-main/` 之外加载自写 Provider 包（`--package-root` 或项目 `packages/`），以及 gpt-image 能力的请求/响应契约 | No | 已基本解答：`hypit-main/examples/provider-package` 证明项目自有 Provider 放在包目录、经 runtime profile 的 `bindings` 绑到 `@hypit/gpt-image@1#gpt-image-2` 即可；剩 `--package-root` 指向 hypit-main 之外目录的实测，排在 DEV-PLAN Phase 11 |
-| Q-003 | `hypit pricing` 对 TokenDance 是否能给出可用估价、build 后能否拿到实际花费 | 阻塞 REQ-006 细节 | 开发第一阶段实测；拿不到则全部走人工确认 |
+| Q-007 | Hypit 能否从 `hypit-main/` 之外加载自写 Provider 包（`--package-root` 或项目 `packages/`），以及 gpt-image 能力的请求/响应契约 | No | 已基本解答：`hypit-main/examples/provider-package` 证明项目自有 Provider 放在包目录、经 runtime profile 的 `bindings` 绑到 `@hypit/gpt-image@1#gpt-image-2` 即可；Phase 11 实测：`--package-root` 只有 check / plan / pricing / build 认，改为把包同步到数据根 `node_modules`、从工作目录往上找到（见 REQ-011） |
+| ~~Q-004~~ | **已解答（Phase 10，2026-09-25 联网核实）**：火山方舟 Anthropic 兼容端点 | 不再阻塞 | 官方文档「Coding Plan 个人版」给 `https://ark.cn-beijing.volces.com/api/coding`（只消耗 Coding Plan 额度，`/api/v3` 另行计费、不是 Anthropic 协议），模型可填 `ark-code-latest`；是否看图随所选模型，预设默认关，用户自行打开。写进 REQ-010 豆包预设 |
+| ~~Q-003~~ | **已解答（Phase 0）**：`hypit pricing` 给不出可用估价，build 后也拿不到实际花费 | 不再阻塞 | `pricing.kind` 仅 `page`/`local`，Result 无金额字段。兜底方案转为正式决定：Clone Studio 自维护费率表算估价、全部花费标"估"，见 REQ-006 估价来源与 REQ-009。证据见 `clone-studio/docs/spike-notes.md` 验证一 |
 
 ---
 
@@ -598,14 +726,14 @@ Hypit 只能在 Coding Agent 终端会话里用：一次一条、全程盯着终
 | 读参考证据、写分析与 SVML、跑 check/vocabulary/snapshot/media 工具 | 自动 | 产物在工作目录，重跑即覆盖 |
 | 联网搜索与下载素材 | 自动 | 出片前人工素材审核 |
 | 花钱的 build | Agent 禁止；宿主在限额内自动、超限人工确认 | 不可回滚，故设双层限额 |
-| 写工作目录之外、改 hypit-main、读 key | 禁止 | canUseTool 拦截 |
+| 写工作目录之外、改 hypit-main、读 key | 禁止 | `PreToolUse` hook 拦截；文件写工具按真实路径校验；Read / Grep / Glob 按真实路径护住密钥文件（含祖先目录搜索、8.3 短名、NTFS 数据流）；Bash 里字面提到密钥文件即拒；写入目标（含 cd 之后的相对路径、Git Bash 的 `/c/…` 写法）落在 Agent 插件目录、hypit 启动器目录、hypit-main 或 Runtime Profile 上即拒，读放行。Bash 的任意写路径不逐一解析，同用户下的文件读取不能彻底封死，由「Agent 环境不带 key」兜底（边界见 REQ-003） |
 | 模板放行 | 人工验货 | 可打回重做 |
 
 ### 11.2 工具与能力集
 
 | 工具 / 能力 | 用途 | 权限级别 | 扩展机制 |
 |---|---|---|---|
-| Claude Code 全工具集（Bash、Read/Write/Edit、Glob/Grep、WebSearch、WebFetch） | 复刻与写变体 | 执行，受 canUseTool 两条硬拦截约束 | 无（v1 不开放用户加 MCP） |
+| Claude Code 全工具集（Bash、Read/Write/Edit、Glob/Grep、WebSearch、WebFetch） | 复刻与写变体 | 执行，受 `PreToolUse` hook 硬拦截约束 | 无（v1 不开放用户加 MCP） |
 | hypit skill（`skills/hypit`，SKILL.md + references） | 领域知识 | 只读 | 随 hypit-main 版本更新 |
 
 ### 11.3 上下文与记忆
